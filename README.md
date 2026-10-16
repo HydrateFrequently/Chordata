@@ -55,14 +55,14 @@ folder, so you can download it from Mainsail. `CHORDATA_RECORD SECONDS=10 NAME=t
 
 ## How it was tested
 
-- The pluck analysis was checked on real recordings from a CoreXY printer, with both a Beacon and an ADXL345,
-  against a Zoom H5 recorder with the XYH-5 microphone as reference: the averages agreed within 0.0 to 0.13 Hz.
-  Interesting detail: the accelerometer mostly hears the belt at twice its frequency, so Chordata looks for
+- The pluck analysis was checked on real recordings from a CoreXY printer, with both a Beacon and an NH36 toolhead board equipped with an ADXL345 mounted to the extruder. A Zoom H5 recorder with the XYH-5 microphone provided a reference: the averages agreed within 0.0 to 0.13 Hz. Bad plucks should be rejected and not counted. A good pluck needs to be at least 12db SINAD.
+
+Interesting detail: the accelerometer mostly hears the belt at twice its frequency, so Chordata looks for
   the tone and twice the tone together.
 - The same module ran on that real printer as part of Printune (Kalico), measuring both belts.
-- As a standalone plugin, Chordata was installed with install.sh on virtual printers (real Kalico and real
+- As a standalone plugin forked from Printunes belt tension module, Chordata was installed with install.sh on virtual printers (real Kalico and real
   mainline Klipper with a simulated MCU and a simulated accelerometer) and run end to end, with bad plucks
-  mixed in on purpose. **It has not yet been run on a physical printer as a standalone plugin.**
+  mixed in on purpose. **It has not yet been run on a physical printer as a standalone plugin.** However, printunes belt tension module has been tested on my own printer.
 - `tests/test_belts.py` checks the pluck judge on synthetic recordings (and on real ones, if you have them).
 
 ## Origin
