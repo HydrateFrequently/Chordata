@@ -295,7 +295,7 @@ summary:focus-visible { outline:3px solid var(--primary); outline-offset:2px; }
   </section>
 <section class="card" id="measurePanel" hidden><h2>Pluck measurements</h2>
 <p class="help">Frequency is measured in Hz. Force requires belt mass and span length. Use your printer manufacturer's target and measurement position.</p>
-<div id="trend"></div><p class="small muted">Circles: counted · Green: within the tolerance of the target · Star: within 0.1 Hz · Crosses: rejected · Dashed line: target. Updates after each detected pluck; not a raw accelerometer waveform.</p>
+<div id="trend"></div><p class="small muted">Circles: counted · Green: belt A and B within the tolerance (0.25 Hz by default) of each other at the same pluck · Star: within 0.1 Hz · Crosses: rejected · Dashed line: target. Updates after each detected pluck; not a raw accelerometer waveform.</p>
 <details><summary>Measurement data</summary><div class="measurements"><table><thead><tr><th scope="col">Belt</th><th scope="col">Pluck</th><th scope="col">Hz</th><th scope="col">Result</th><th scope="col">Reason</th></tr></thead><tbody id="measureRows"></tbody></table></div></details>
 <button type="button" id="exportBtn">Export CSV</button></section>
 <details class="card" id="authPanel"><summary>Printer connection</summary><form id="authForm"><div class="field"><label for="moonrakerKey">Moonraker API key</label><input id="moonrakerKey" type="password" autocomplete="off"></div><p class="help">Held in memory for this page only. Reload to forget it.</p><button type="submit">Authenticate</button></form></details>
@@ -919,8 +919,9 @@ function renderMeasurements() {
   const y=f=>200-(f-low)/(high-low)*170, x=i=>90+(i-1)/(maxN-1)*530;
   for(let n=0;n<3;n++) { const f=low+(high-low)*n/2; add('line',{x1:90,y1:y(f),x2:620,y2:y(f),stroke:'var(--line)'}); add('text',{x:0,y:y(f)+5},f.toFixed(0)+' Hz'); }
   if(target>0)add('line',{x1:90,y1:y(target),x2:620,y2:y(target),stroke:'var(--muted)','stroke-dasharray':'6 5'});
-  for(const r of rows) { if(r.freq==null || !Number.isFinite(Number(r.freq)))continue; const px=x(r.index),py=y(Number(r.freq)),color=r.belt==='A'?'var(--primary)':'var(--warn)',attrs={stroke:color,'stroke-width':2}; const off=target>0?Math.abs(Number(r.freq)-target):Infinity;
-    // on target: within 0.1 Hz a green star, within the tolerance a green dot (ringed in the belt's colour)
+  for(const r of rows) { if(r.freq==null || !Number.isFinite(Number(r.freq)))continue; const px=x(r.index),py=y(Number(r.freq)),color=r.belt==='A'?'var(--primary)':'var(--warn)',attrs={stroke:color,'stroke-width':2}; const mate=rows.find(m=>m.belt!==r.belt && m.index===r.index && m.ok && m.freq!=null && Number.isFinite(Number(m.freq))), off=mate?Math.abs(Number(r.freq)-Number(mate.freq)):Infinity;
+    // belt A and B matched at the same pluck number: within 0.1 Hz a green star, within the
+    // tolerance a green dot (ringed in the belt's colour)
     if(r.ok && off<STAR_HZ) add('polygon',{...attrs,points:star(px,py,11),fill:'var(--ok)','stroke-width':1.5});
     else if(r.ok && off<=tol) add('circle',{...attrs,cx:px,cy:py,r:6,fill:'var(--ok)'});
     else if(r.ok)add('circle',{...attrs,cx:px,cy:py,r:5,fill:color}); else add('path',{...attrs,d:`M${px-5},${py-5}l10,10m0,-10l-10,10`,fill:'none'}); }
@@ -941,7 +942,7 @@ function init() {
   $("startBtn").onclick = () => runGcode("CHORDATA").catch(() => {});
   render();
   if (demo) {
-    S.chordata={state:"idle",belts:{target:110,plucks:3,A:{freq:109.9,used:3,heard:4,plucks:[{freq:109.5,ok:true},{freq:110.2,ok:true},{freq:145,ok:false,why:"Off target"},{freq:110,ok:true}]},B:{freq:106.8,used:3,heard:3,plucks:[{freq:107,ok:true},{freq:106.5,ok:true},{freq:107.1,ok:true}]}},tools:{}};
+    S.chordata={state:"idle",belts:{target:110,plucks:3,A:{freq:109.9,used:3,heard:4,plucks:[{freq:109.5,ok:true},{freq:110.2,ok:true},{freq:145,ok:false,why:"Off target"},{freq:110,ok:true}]},B:{freq:108.9,used:3,heard:3,plucks:[{freq:109.55,ok:true},{freq:110,ok:true},{freq:107.1,ok:true}]}},tools:{}};
     prompt={title:"Chordata - belt results",items:[],footer:[]}; promptSeq++; render();
     $("connBanner").textContent="Demo · illustrative data · printer commands disabled";
     $("authForm").hidden=true;
