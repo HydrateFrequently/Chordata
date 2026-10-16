@@ -2,7 +2,7 @@
 
 This guide covers [Chordata](https://github.com/HydrateFrequently/Chordata).
 It works as a Klipper/Kalico measurement module, a Moonraker companion page, and a
-Mainsail sidebar link. You can use the entire measurement workflow with AI disabled.
+Mainsail sidebar link.
 
 All screenshots below come from the shipped offline demo. Their readings are
 illustrative; the toolhead position, belt span and target must come from your own
@@ -20,7 +20,7 @@ python3 -m http.server 8765 --bind 127.0.0.1 --directory web
 
 Open **http://127.0.0.1:8765/?demo** on that computer. Keep `?demo` in the URL:
 without it, the page tries to connect to Moonraker on the same host. Demo mode
-opens no printer or AI connection and disables printer commands. Stop this preview
+opens no printer connection and disables printer commands. Stop this preview
 server with Ctrl+C when finished. A static preview server does not measure belts.
 
 ![Desktop demo showing both belts and their plucks](images/desktop-demo.png)
@@ -121,12 +121,12 @@ http://<printer-host>/server/chordata
 ```
 
 Use your normal printer hostname and HTTPS URL if configured. Fluidd users can use
-this direct URL. The same host must proxy `/server/`, `/access/` and `/websocket`
+this direct URL. The same host must proxy `/server/` and `/websocket`
 to Moonraker. See [troubleshooting](TROUBLESHOOTING.md) for page or connection errors.
 
 If Moonraker requires authentication, expand **Printer connection**, enter its API
 key and select **Authenticate**. This key stays in page memory; reloading forgets
-it. It is separate from the provider key used by Laya or Jev.
+it.
 
 ## 4. Set the target and position
 
@@ -243,74 +243,7 @@ CHORDATA_RECORD CHIP=hotend SECONDS=10 NAME=reference
 Here `hotend` is an example sensor name, not a required name. Supported recording
 duration is 0.5–30 seconds. The CSV contains time and X/Y/Z acceleration samples.
 
-## 7. Enable optional Laya or Jev review
-
-You can leave this section untouched. Measurement, prompts, charts and exports work
-with review disabled.
-
-![Optional review settings with an illustrative Laya endpoint and no key](images/ai-settings.png)
-
-1. Expand **Optional Laya / Jev review**.
-2. Check **Enable review** and choose the provider.
-3. Enter the full inference URL reachable **from the Moonraker host**.
-4. Choose a model supported by the provider; `auto` is the default.
-5. Enter a provider API key if required and select **Save review settings**.
-6. Finish a measurement, then select **Review measurements**.
-
-| Provider | Example URL | Model behavior |
-| --- | --- | --- |
-| Laya `laya-serve` | `http://laya-host:8000/v1/systemone` | `auto` lets Laya route, or enter an installed checkpoint name |
-| Jev / TypeSafe | `https://api.typesafe.ai/v1/systemone` | `auto` maps to `jev-latest`, or choose a supported model |
-
-These are endpoint examples. Chordata does not provision Laya, download checkpoints,
-create a TypeSafe account or supply provider credentials. A proxy is supported if it
-implements the same System One contract. An OpenAI-style `/chat/completions` endpoint
-is not compatible with this request shape.
-
-For a Laya service on another computer, `localhost` in the endpoint would refer to
-the printer host, not that other computer. Use a hostname or IP reachable from the
-printer. Use HTTPS when sending credentials across an untrusted network.
-
-### What review does
-
-Moonraker sends a compact allowlisted summary: target, tolerance, counts, frequency,
-spread, timestamps and standardized rejection reasons. It sends no raw accelerometer
-recording, printer configuration or local path. Requests are manual; enabling the
-feature does not send every live pluck to the service.
-
-The provider chooses a bounded next check: repeat the pair, inspect the setup,
-compare the measurements, or report insufficient evidence. The result never runs
-G-code, changes a target, accepts a rejected pluck or sets the completion state.
-Provider calls have a 10-second deadline; redirects are refused and HTTPS
-certificates are verified.
-
-Confidence describes the provider's uncertainty. The default threshold is 0.7.
-Low-confidence or invalid responses are withheld, as is comparison advice on an
-incomplete pair. Measurements or settings changed during a review invalidate it.
-A new measurement also clears displayed old advice.
-
-**AI review is experimental.** The live Laya trials recorded in
-[VALIDATION.md](VALIDATION.md) abstained, including on a clean synthetic pair. They
-do not establish reliable belt-quality classification. A normal frequency result
-and an uncertain AI review can coexist. Do not lower the threshold just to obtain
-an answer.
-
-### Credentials and disabling
-
-The Moonraker API key authenticates this page to your printer; the provider API key
-authenticates Moonraker to Laya/Jev. They are different credentials.
-
-The provider key is stored on the printer host in Moonraker's data directory as
-`chordata-ai.json`, with mode `0600`. It is reserved from Moonraker's file manager
-and is never returned through the settings API. A blank provider key field retains
-the stored key only when the endpoint and provider stay the same. Changing either
-clears the old key unless you enter a new one.
-
-To remove the stored key, check **Clear saved provider key when saving**, then save.
-To stop future provider calls, uncheck **Enable review** and save. Disabling does
-not remove the stored key unless you also select the clear option.
-
-## 8. Updates and migration
+## 7. Updates and migration
 
 Before updating, finish maintenance and preserve any local code changes. For a clean
 checkout of this repository:
@@ -364,16 +297,13 @@ entry from `moonraker.conf`, and the Chordata item from `.theme/navi.json`. Remo
 only the Chordata symlinks installed in Klipper/Kalico, Moonraker and the config
 directory after confirming their targets. Restart the affected services. Preserve
 `chordata_settings.cfg` and `chordata/` if you want the saved settings and recordings.
-You may separately remove the private AI settings file from Moonraker's data
-directory. Do not restore an old whole-file backup over unrelated newer settings.
+Do not restore an old whole-file backup over unrelated newer settings.
 
 ## Further reference
 
 - [Troubleshooting](TROUBLESHOOTING.md)
-- [Recorded validation and hardware limitations](VALIDATION.md)
 - [Klipper measuring resonances](https://www.klipper3d.org/Measuring_Resonances.html)
 - [Moonraker API documentation](https://moonraker.readthedocs.io/en/latest/external_api/introduction/)
-- [TypeSafe System One API](https://docs.typesafe.ai/api)
 
 To reproduce the screenshots after changing the interface:
 

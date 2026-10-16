@@ -12,16 +12,8 @@ const fs = require('node:fs');
     await page.setViewportSize({width:390,height:844});
     await page.screenshot({path:path.resolve(__dirname,'../docs/images/mobile-demo.png'),fullPage:true});
     await page.setViewportSize({width:1000,height:1000});
-    await page.evaluate(()=>{
-      document.getElementById('aiPanel').open=true;
-      document.getElementById('aiForm').hidden=false;
-      document.getElementById('aiEnabled').checked=true;
-      document.getElementById('aiEndpoint').value='http://laya-host:8000/v1/systemone';
-      document.getElementById('aiStatus').textContent='Illustration only · example endpoint · no review requested';
-    });
-    await page.locator('#aiPanel').screenshot({path:path.resolve(__dirname,'../docs/images/ai-settings.png')});
     await page.locator('#measurePanel details').evaluate(e=>e.open=true);
     await page.locator('#measurePanel').screenshot({path:path.resolve(__dirname,'../docs/images/measurement-data.png')});
-    console.log('Captured four documentation screenshots from the offline demo.');
+    console.log('Captured three documentation screenshots from the offline demo.');
   } finally { await browser.close(); }
 })().catch(e=>{console.error(e);process.exit(1);});

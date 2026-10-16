@@ -29,8 +29,7 @@ forwarding and use the normal printer URL, not the standalone static demo server
 The static server only supports `?demo`; it is not a Moonraker replacement.
 
 If a request returns 401/403, expand **Printer connection** and authenticate with a
-Moonraker API key. The page forgets this key on reload. A Laya/Jev provider key cannot
-authenticate the page to Moonraker. On an HTTPS page the connection uses `wss://`.
+Moonraker API key. The page forgets this key on reload. On an HTTPS page the connection uses `wss://`.
 
 ## “Chordata plugin not loaded” or an unknown command
 
@@ -88,40 +87,6 @@ are in G-code coordinates; re-save after changing offsets or your measurement se
 Klipper still enforces its movement limits. Inspect the error and actual coordinates
 rather than editing saved JSON to bypass an invalid movement.
 
-## AI settings cannot be saved
-
-Check Moonraker authentication and the `/access/` proxy route. The full endpoint
-must use HTTP or HTTPS, with no URL-embedded credentials, query string or fragment.
-A provider API key belongs in the password field. The model name must be valid and
-minimum confidence must be between 0 and 1. Moonraker also needs permission to write
-its own data directory.
-
-If you changed endpoint or provider, re-enter the new provider key: Chordata clears
-the old destination's credential deliberately. A blank field retains a key only
-for the same endpoint/provider.
-
-## AI review is unavailable or uncertain
-
-| Result | Check |
-| --- | --- |
-| Disabled | Enable review and save if you want a provider request |
-| No measurements | Record a belt first |
-| Unavailable | Verify service reachability from the Moonraker host, full URL, credentials, model and TLS certificate |
-| Just requested / running | Wait for the current request; repeated requests are rate-limited |
-| Uncertain / abstained | Use the measurement data or repeat the series; confidence is below the threshold or evidence is incomplete |
-| Measurements changed | Finish the new recording and request a fresh review |
-
-The request deadline is 10 seconds; a model cold-start longer than that can fail.
-A healthy provider should answer the System One contract at your exact URL. No path
-is appended automatically, redirects are not followed, and chat-completions APIs do
-not satisfy this contract. A container hostname must be reachable from the printer
-host, not merely from another container. `localhost` refers to the Moonraker host.
-
-Laya/Jev review is optional and experimental. The recorded live Laya trials
-abstained even on a clean synthetic pair. Do not treat an uncertain answer as a
-printer fault or lower the threshold simply to force advice. Measurement continues
-working when review is off or the service is unavailable.
-
 ## Recordings or exports are missing
 
 **Export CSV** contains the current displayed frequency series only. Raw samples
@@ -151,6 +116,4 @@ Include:
 - If measurement is the issue, the raw belt/background CSV pair and target/span
   details you are comfortable sharing.
 
-Review files before attaching them. Do not share `chordata-ai.json`, provider keys
-or the Moonraker API key. The [validation record](VALIDATION.md) lists which hardware
-and provider behavior has not yet been verified.
+Review files before attaching them. Do not share the Moonraker API key.

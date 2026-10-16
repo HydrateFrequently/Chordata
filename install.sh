@@ -153,6 +153,6 @@ EOF
   say "added [update_manager chordata] to moonraker.conf"
 fi
 
-say "AI review is off by default. Optional Laya/Jev setup is on the Chordata page; it asks for your endpoint."
+say "Chordata comes without any warranty: you use it at your own risk."
 say "done. Restart Moonraker and Klipper: sudo systemctl restart moonraker klipper"
 say "then open Chordata in the Mainsail sidebar (http://<printer>/server/chordata on a phone), or run the CHORDATA macro."

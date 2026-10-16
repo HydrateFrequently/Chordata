@@ -106,7 +106,7 @@ details.card[open] > summary::before { content: "\25BE"; }
 .field { margin: 18px 0; }
 .field > label, .field > .label { display: block; font-weight: 600; margin-bottom: 8px; font-size: 18px; }
 .stepnum { color: var(--primary); margin-right: 6px; }
-input[type=text], input[type=number], input[type=password], input[type=url], select {
+input[type=text], input[type=number], input[type=password] {
   font: inherit; font-size: 18px; width: 100%; min-height: 52px; padding: 10px 14px;
   border-radius: 10px; border: 1px solid var(--line); background: var(--card2); color: var(--text);
 }
@@ -239,7 +239,7 @@ table { border-collapse:collapse; width:100%; font-size:14px; font-variant-numer
 th,td { padding:8px; border-bottom:1px solid var(--line); text-align:left; }
 .trend { display:block; width:100%; height:auto; margin:12px 0; }
 .trend text { fill:var(--muted); font:22px system-ui; }
-summary:focus-visible,select:focus-visible { outline:3px solid var(--primary); outline-offset:2px; }
+summary:focus-visible { outline:3px solid var(--primary); outline-offset:2px; }
 @media(prefers-reduced-motion:reduce) { * { scroll-behavior:auto!important; transition:none!important; } }
 </style></head>
 <body>
@@ -298,18 +298,6 @@ summary:focus-visible,select:focus-visible { outline:3px solid var(--primary); o
 <div id="trend"></div><p class="small muted">Circles: counted · Crosses: rejected · Dashed line: target. Updates after each detected pluck; not a raw accelerometer waveform.</p>
 <details><summary>Measurement data</summary><div class="measurements"><table><thead><tr><th scope="col">Belt</th><th scope="col">Pluck</th><th scope="col">Hz</th><th scope="col">Result</th><th scope="col">Reason</th></tr></thead><tbody id="measureRows"></tbody></table></div></details>
 <button type="button" id="exportBtn">Export CSV</button></section>
-<details class="card" id="aiPanel"><summary>Optional Laya / Jev review</summary>
-<p class="help">Measurements work without AI. Reviews are advice; they never move the printer.</p>
-<form id="aiForm"><p><label><input id="aiEnabled" type="checkbox"> Enable review</label></p>
-<div class="field"><label for="aiProvider">Provider</label><select id="aiProvider"><option value="laya">Laya</option><option value="jev">Jev</option></select></div>
-<div class="field"><label for="aiEndpoint">Full inference endpoint URL</label><input id="aiEndpoint" type="url" placeholder="https://your-server/v1/systemone" autocomplete="off"></div>
-<div class="field"><label for="aiModel">Model</label><input id="aiModel" type="text" value="auto" autocomplete="off"></div>
-<div class="field"><label for="aiKey">Provider API key (optional)</label><input id="aiKey" type="password" autocomplete="new-password"><p class="help">Stored on your printer server. Leave blank to retain the key for the same provider and endpoint. Changing either clears it.</p></div>
-<p><label><input id="aiClearKey" type="checkbox"> Clear saved provider key when saving</label></p>
-<div class="field"><label for="aiConfidence">Minimum confidence</label><input id="aiConfidence" type="number" min="0" max="1" step="0.05" value="0.7"></div>
-<p class="help">Review measurements sends a numeric measurement summary to this endpoint.</p>
-<button type="submit" id="aiSave">Save review settings</button><button type="button" id="aiReview">Review measurements</button></form>
-<p id="aiStatus" role="status">Review disabled until configured.</p></details>
 <details class="card" id="authPanel"><summary>Printer connection</summary><form id="authForm"><div class="field"><label for="moonrakerKey">Moonraker API key</label><input id="moonrakerKey" type="password" autocomplete="off"></div><p class="help">Held in memory for this page only. Reload to forget it.</p><button type="submit">Authenticate</button></form></details>
   <p class="disclaimer">Chordata comes without any warranty. You use it at your own risk.</p>
 </main>
@@ -414,7 +402,6 @@ function connect() {
     render();
     checkKlippy();
     applyTheme();
-    loadAI();
   };
   ws.onmessage = (ev) => {
     let msg;
@@ -908,10 +895,7 @@ function measurementRows() {
   }
   return rows;
 }
-let reviewedSignature = null;
-function measurementSignature() { return JSON.stringify([pt().state, pt().belt_now, pt().belts, pt().belt_live]); }
 function renderMeasurements() {
-  if (reviewedSignature !== null && reviewedSignature !== measurementSignature()) { reviewedSignature=null; $("aiStatus").textContent="Measurements changed. Request a new review when measurement is complete."; }
   const rows=measurementRows(); show('measurePanel',rows.length>0);
   const body=$('measureRows'); body.replaceChildren();
   for(const r of rows) { const tr=el('tr'); for(const value of [r.belt,r.index,fmtHz(r.freq),r.ok?'Counted':'Rejected',r.why || '—']) tr.appendChild(el('td',{},value)); body.appendChild(tr); }
@@ -933,26 +917,20 @@ function csvMeasurements() {
   return ['belt,pluck,frequency_hz,accepted,reason',...measurementRows().map(r=>[r.belt,r.index,r.freq,r.ok,r.why].map(quote).join(','))].join('\r\n');
 }
 function identify() { return rpc('server.connection.identify',{client_name:'Chordata',version:'1',type:'web',url:location.origin,api_key:moonrakerKey}); }
-async function loadAI() {
-  try { const c=await rpc('access.chordata_ai',{action:'get'}); $('aiEnabled').checked=!!c.enabled; $('aiProvider').value=c.provider || 'laya'; $('aiEndpoint').value=c.endpoint || ''; $('aiModel').value=c.model || 'auto'; $('aiConfidence').value=c.min_confidence==null?.7:c.min_confidence; $('aiStatus').textContent=c.enabled?'Review enabled. Measurements are sent only when requested.':'Review disabled.'; }
-  catch(err) { $('aiStatus').textContent='Review settings unavailable: '+errText(err); }
-}
-function initReview() {
-  $('authForm').onsubmit=async e=>{ e.preventDefault(); moonrakerKey=$('moonrakerKey').value; $('moonrakerKey').value=''; try { await identify(); authRequired=false; $('authPanel').open=false; checkKlippy(); applyTheme(); loadAI(); } catch(err) { authBanner(); toast(errText(err)); } };
+function initPage() {
+  $('authForm').onsubmit=async e=>{ e.preventDefault(); moonrakerKey=$('moonrakerKey').value; $('moonrakerKey').value=''; try { await identify(); authRequired=false; $('authPanel').open=false; checkKlippy(); applyTheme(); } catch(err) { authBanner(); toast(errText(err)); } };
   $('exportBtn').onclick=()=>{ const url=URL.createObjectURL(new Blob([csvMeasurements()],{type:'text/csv;charset=utf-8'})); const link=el('a',{href:url,download:'chordata-measurements.csv'}); link.click(); setTimeout(()=>URL.revokeObjectURL(url),1000); };
-  $('aiForm').onsubmit=async e=>{ e.preventDefault(); $('aiSave').disabled=true; try { const config={action:'configure',enabled:$('aiEnabled').checked,provider:$('aiProvider').value,endpoint:$('aiEndpoint').value.trim(),model:$('aiModel').value.trim(),min_confidence:Number($('aiConfidence').value)}; if($('aiClearKey').checked)config.api_key=''; else if($('aiKey').value)config.api_key=$('aiKey').value; await rpc('access.chordata_ai',config); $('aiKey').value=''; $('aiClearKey').checked=false; reviewedSignature=null; $('aiStatus').textContent='Settings saved. '+(config.enabled?'Ready to review measurements.':'Review disabled.'); } catch(err) { $('aiStatus').textContent=errText(err); } finally { $('aiSave').disabled=false; } };
-  $('aiReview').onclick=async()=>{ $('aiReview').disabled=true; const signature=measurementSignature(); reviewedSignature=signature; $('aiStatus').textContent='Reviewing measurements…'; try { const r=await rpc('server.chordata.evaluate'); if(signature!==measurementSignature()) { $('aiStatus').textContent='Measurements changed during review. Request a new review.'; return; } $('aiStatus').textContent=r.status==='ok'?'Advice: '+String(r.decision).replace(/_/g,' ')+(Number.isFinite(r.confidence)?' (confidence '+Math.round(r.confidence*100)+'%). ':'. ')+(r.message || ''):r.message || 'No advice returned: '+r.status; } catch(err) { $('aiStatus').textContent='Review unavailable: '+errText(err); } finally { $('aiReview').disabled=false; } };
 }
 
 function init() {
-  initReview();
+  initPage();
   $("startBtn").onclick = () => runGcode("CHORDATA").catch(() => {});
   render();
   if (demo) {
     S.chordata={state:"idle",belts:{target:110,plucks:3,A:{freq:109.9,used:3,heard:4,plucks:[{freq:109.5,ok:true},{freq:110.2,ok:true},{freq:145,ok:false,why:"Off target"},{freq:110,ok:true}]},B:{freq:106.8,used:3,heard:3,plucks:[{freq:107,ok:true},{freq:106.5,ok:true},{freq:107.1,ok:true}]}},tools:{}};
     prompt={title:"Chordata - belt results",items:[],footer:[]}; promptSeq++; render();
     $("connBanner").textContent="Demo · illustrative data · printer commands disabled";
-    $("aiForm").hidden=true; $("authForm").hidden=true;
+    $("authForm").hidden=true;
     renderMeasurements();
   } else connect();
 }
