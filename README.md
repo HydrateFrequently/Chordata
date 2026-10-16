@@ -27,7 +27,7 @@ printer's own documentation. Chordata can save the toolhead position for next ti
 
 ## Requirements
 
-- Kalico or mainline Klipper, Moonraker, and Mainsail or Fluidd (the steps are shown as prompts)
+- Kalico or mainline Klipper, Moonraker, and Mainsail or Fluidd
 - An accelerometer on the toolhead (ADXL345, LIS2DW, a probe with one built in) and `[resonance_tester]`
 - `[respond]` in printer.cfg, and numpy in the Klipper Python environment (input shaper needs it too)
 - A CoreXY printer (two belts that must match)
@@ -42,7 +42,11 @@ sudo systemctl restart moonraker klipper
 
 The installer links the plugin into Klipper (`klippy/extras`, or Kalico's `klippy/plugins`), adds
 `[include chordata.cfg]` and `[include chordata_settings.cfg]` at the top of printer.cfg (with a backup), and
-an update entry for Mainsail's update manager. Then run the **CHORDATA** macro.
+an update entry for Mainsail's update manager. It also adds the **Chordata page**, served by Moonraker (a small
+component, `[chordata_web]`), with a link in Mainsail's sidebar. Open it on a phone at
+`http://<printer>/server/chordata`: it shows each pluck live in big numbers, both belts against the target, and a
+pad to move the toolhead to your belt tensioning position. The same steps also run as prompts from the
+**CHORDATA** macro in Mainsail or Fluidd.
 
 Settings (`chordata_settings.cfg`): `belt_target` (Hz, default 110; you can also change it on the first prompt)
 and `belt_tolerance` (Hz, default 0.25). Every recording is saved in `chordata/recordings/` in the config

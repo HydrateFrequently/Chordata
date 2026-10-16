@@ -5,15 +5,18 @@
 #   ~/Chordata/install.sh
 #
 # It links the files from this folder (so a git pull updates them), adds two includes
-# at the top of printer.cfg (with a backup) and an update entry to moonraker.conf.
+# at the top of printer.cfg (with a backup), the Chordata page and an update entry to
+# moonraker.conf, and a link in Mainsail's sidebar.
 # Run it again any time; it does nothing twice. Options (environment variables):
 #   KLIPPER_DIR   default: ~/kalico, else ~/klipper
 #   KLIPPY_ENV    default: ~/klippy-env
+#   MOONRAKER_DIR default: ~/moonraker
 #   CONFIG_DIR    default: ~/printer_data/config
 set -e
 HERE="$(cd "$(dirname "$(readlink -f "$0")")" && pwd)"
 KLIPPER_DIR=${KLIPPER_DIR:-$( [ -d ~/kalico/klippy ] && echo ~/kalico || echo ~/klipper )}
 KLIPPY_ENV=${KLIPPY_ENV:-~/klippy-env}
+MOONRAKER_DIR=${MOONRAKER_DIR:-~/moonraker}
 CONFIG_DIR=${CONFIG_DIR:-~/printer_data/config}
 
 say() { echo "Chordata: $*"; }
@@ -71,7 +74,35 @@ fi
 grep -rqs "^\[respond\]" "$CONFIG_DIR"/*.cfg || say "note: printer.cfg needs [respond] for the prompts"
 grep -rqs "^\[resonance_tester\]" "$CONFIG_DIR"/*.cfg || say "note: Chordata needs an accelerometer and [resonance_tester] in printer.cfg"
 
-# 3. updates from Mainsail's update manager
+# 3. the Chordata page: a Moonraker component serves it at /server/chordata
+if [ -d "$MOONRAKER_DIR/moonraker/components" ]; then
+  ln -sfn "$HERE/moonraker/chordata_web.py" "$MOONRAKER_DIR/moonraker/components/chordata_web.py"
+  exclude "$MOONRAKER_DIR" "moonraker/components/chordata_web.py"
+  if [ -f "$CONFIG_DIR/moonraker.conf" ] && ! grep -q '^\[chordata_web\]' "$CONFIG_DIR/moonraker.conf"; then
+    printf '\n[chordata_web]\n' >> "$CONFIG_DIR/moonraker.conf"
+    say "added [chordata_web] to moonraker.conf"
+  fi
+  # a link in Mainsail's sidebar
+  mkdir -p "$CONFIG_DIR/.theme"
+  python3 - "$CONFIG_DIR/.theme/navi.json" "$HERE/web/navi.json" <<'PY'
+import json, os, sys
+dst, src = sys.argv[1], sys.argv[2]
+links = []
+if os.path.exists(dst):
+    with open(dst) as f:
+        links = json.load(f)
+links = [l for l in links if l.get("title") != "Chordata"]
+with open(src) as f:
+    links += json.load(f)
+with open(dst, "w") as f:
+    json.dump(links, f, indent=2)
+PY
+  say "Chordata page added (Mainsail sidebar, or http://<printer>/server/chordata)"
+else
+  say "note: no Moonraker in $MOONRAKER_DIR (set MOONRAKER_DIR=...): the page is left out, the CHORDATA macro still works"
+fi
+
+# 4. updates from Mainsail's update manager
 if [ -f "$CONFIG_DIR/moonraker.conf" ] && ! grep -q '^\[update_manager chordata\]' "$CONFIG_DIR/moonraker.conf"; then
   cat >> "$CONFIG_DIR/moonraker.conf" <<EOF
 
@@ -80,11 +111,11 @@ type: git_repo
 path: $HERE
 origin: https://github.com/HydrateFrequently/Chordata.git
 primary_branch: main
-managed_services: klipper
+managed_services: klipper moonraker
 EOF
   say "added [update_manager chordata] to moonraker.conf"
 fi
 
 say "Chordata comes without any warranty: you use it at your own risk."
 say "done. Restart Moonraker and Klipper: sudo systemctl restart moonraker klipper"
-say "then run the CHORDATA macro in Mainsail or Fluidd."
+say "then open Chordata in the Mainsail sidebar (http://<printer>/server/chordata on a phone), or run the CHORDATA macro."
