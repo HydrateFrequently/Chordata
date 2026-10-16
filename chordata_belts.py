@@ -170,17 +170,16 @@ def _onsets_beside(axes, fs, lo, hi, mask, modes, quiet=None):
 
 
 def _merge_onsets(fine, extra, fs, env):
-    """Onsets from both ways; one found only beside the toolhead's lines is placed where
-    the band level rises steepest in the frame before it."""
+    """Onsets from both ways; one found only beside the toolhead's lines is where the
+    first short frame holding it ends (the whole band's steepest rise can be the
+    toolhead's ringing, ahead of the pluck: a window started early reads it)."""
     out = list(fine)
-    dead, n = int(DEAD * fs), int(LONG_FRAME * fs)
+    dead = int(DEAD * fs)
     for o in extra:
         if any(abs(o - x) < dead for x in out):
             continue
-        j0, j1 = max(0, o - n), min(len(env) - 1, o)
-        if j1 - j0 < 2:
-            continue
-        out.append(j0 + int(np.argmax(np.diff(env[j0:j1 + 1]))))
+        if o < len(env) - 2:
+            out.append(o)
     out.sort()
     keep = []
     for o in out:
@@ -288,6 +287,13 @@ def pluck_freq(f, p, noise, df, lo, hi, avoid=(), target=None, prev=None, halves
     if not len(sel):
         return None, None, None
     modes = _modes(avoid)
+    # at twice the tone a line keeps its full guard (see analyse: "pick_guard")
+    modes2 = [(float(m["freq"]), float(m.get("guard2", m.get("guard", TAP_GUARD))))
+              if isinstance(m, dict) else (float(m), TAP_GUARD) for m in (avoid or ())]
+    ringing2 = [(float(m["freq"]), float(m["guard2"])) for m in (avoid or ()) if isinstance(m, dict) and "guard2" in m]
+    bad2 = np.zeros(len(f), bool)
+    for fa, g in modes2:
+        bad2 |= np.abs(f - fa) <= g
     bad = np.zeros(len(f), bool)
     for fa, g in modes:               # the toolhead ringing by itself is not a belt
         bad |= np.abs(f - fa) <= g
@@ -301,7 +307,7 @@ def pluck_freq(f, p, noise, df, lo, hi, avoid=(), target=None, prev=None, halves
     s1 = np.where(bad[sel] & (s2 < strong), 0.0, snr[sel])
     # and where twice the tone is the toolhead's own ringing (or its skirt), that line
     # says nothing about a belt: it counts no more than the tone itself
-    s2 = np.where(bad[np.clip(k2, 0, len(f) - 1)], np.minimum(s2, s1), s2)
+    s2 = np.where(bad2[np.clip(k2, 0, len(f) - 1)], np.minimum(s2, s1), s2)
     score = np.log1p(s1) + np.log1p(s2)
     i = int(np.argmax(score))
     if s1[i] == 0.0 and s2[i] == 0.0:
@@ -326,12 +332,15 @@ def pluck_freq(f, p, noise, df, lo, hi, avoid=(), target=None, prev=None, halves
     def guarded(fc):
         return _on_mode(fc, modes)
 
+    def guarded2(fc):
+        return _on_mode(fc, modes2)
+
     def harmonic(fl):
         """fl and 2 fl ring like a belt's tone and twice it: the tone rings longer
         (True), shorter (False: not a belt's tone), or can't tell (None)."""
         if halves is None:
             return None
-        if guarded(2 * fl):
+        if guarded2(2 * fl):
             return None               # twice it is the toolhead ringing: its own time, not the belt's
         t1, t2 = _tau(halves, f, df, fl), _tau(halves, f, df, 2 * fl)
         if t1 == 0.0 or t2 == 0.0:
@@ -348,7 +357,8 @@ def pluck_freq(f, p, noise, df, lo, hi, avoid=(), target=None, prev=None, halves
     # or at half it (a frame mode near F/2)
     alt = None
     lh = fk / 2.0
-    if lh >= lo + 2 * df and line(fk) >= strong and line(lh) >= weak and not guarded(lh):
+    if (lh >= lo + 2 * df and line(fk) >= strong and line(lh) >= weak and not guarded(lh)
+            and own(_near(f, p, lh, df))):     # a line of its own, not a frame mode's skirt
         h = harmonic(lh)
         if h or (halves is None and target and lh >= flo):     # no timing: the target decides
             alt = lh
@@ -380,13 +390,98 @@ def pluck_freq(f, p, noise, df, lo, hi, avoid=(), target=None, prev=None, halves
     db2 = _db(snr[j]) if j is not None else -99.0
     if bad[k] and (j is None or snr[j] < strong or not own(j)):
         return None, None, None       # the toolhead ringing by itself
-    if guarded(2 * fk) and (snr[k] < strong or not own(k)):
+    if guarded2(2 * fk) and (snr[k] < strong or not own(k)):
         return None, None, None       # only the toolhead ringing at "twice the tone": no tone of its own
-    if j is not None and db2 > db1:
-        fk = _peak(f, p, j, df) / 2.0          # the sharper line: twice the tone
+    if j is not None and db2 > db1 and not _on_mode(2 * fk, ringing2):
+        fk = _peak(f, p, j, df) / 2.0          # the sharper line: twice the tone (unless a toolhead line pulls it)
     if fk < lo + 2 * df or fk > hi - 2 * df:
         return None, db1, db2         # at the edge of what is searched: not a belt reading
     return fk, db1, db2
+
+
+LONG_ON = 0.6             # Hz: a reading (with the lines fitted out) this close to a long-ringing line is that line
+REFINE_NEAR = 4.0         # Hz: a long-ringing mode this close to the tone (or twice it) pulls the reading
+
+
+_REFINED = {}
+
+
+def _refine(axes, fs, a0, a1, fr, long):
+    """The tone, with the long-ringing toolhead modes near it taken out: the ringing in
+    the window is fitted as a belt (a decaying tone at F and at 2F) plus each mode near
+    F or 2F (a decaying tone near the frequency and ring time the tap found; both are
+    let move a little, a mode drifts with temperature), and the F that leaves least is
+    the reading. A spectrum peak alone is pulled towards a mode that rings on next to it."""
+    near = [(m, tau) for m, tau in long
+            if min(abs(fr - m), abs(2 * fr - m)) <= REFINE_NEAR and abs(fr - m) > 0.3
+            and abs(2 * fr - m) > 0.6]       # (right on twice the tone the two can't be told apart)
+    if not near:
+        return fr
+    t = np.arange(a1 - a0) / fs
+    y = np.column_stack([a[a0:a1] - a[a0:a1].mean() for a in axes])
+
+    def tone(F, tau, k=1):
+        e = np.exp(-k * t / max(tau, 0.02))
+        return [e * np.cos(2 * math.pi * k * F * t), e * np.sin(2 * math.pi * k * F * t)]
+
+    def resid(F, tb, ms):
+        A = np.column_stack(tone(F, tb) + tone(F, tb, 2) + [c for m, tau in ms for c in tone(m, tau)])
+        r = y - A @ np.linalg.lstsq(A, y, rcond=None)[0]
+        return float(np.sum(r * r))
+
+    ms = list(near)
+    F, tb = fr, 0.2
+    span = REFINE_NEAR - 1.0          # the peak is pulled by up to about this much
+    # the belt is never right on a mode (that is read as the mode itself)
+    coarse = [fr + d for d in np.arange(-span, span + 1e-6, 0.1)
+              if all(abs(fr + d - m) > 0.5 for m, _ in near)]
+    # first the belt and the nearest mode together, coarse (one at a time can get stuck:
+    # a mode a little off pulls the belt, which then holds the mode there)
+    j0 = min(range(len(near)), key=lambda j: abs(fr - near[j][0]))
+    best = None
+    for dm in np.arange(-0.4, 0.4001, 0.1):
+        trial = ms[:j0] + [(near[j0][0] + dm, near[j0][1])] + ms[j0 + 1:]
+        for x in coarse:
+            for b in (0.1, 0.2, 0.4):
+                r = resid(x, b, trial)
+                if best is None or r < best[0]:
+                    best = (r, x, b, trial)
+    F, tb, ms = best[1], best[2], best[3]
+    for it in range(3):
+        # the belt, for the modes as they are now, then each mode for the belt
+        grid = [F + d for d in np.arange(-0.3, 0.3001, 0.02)]
+        best = min((resid(x, b, ms), x, b) for x in grid for b in (0.1, 0.2, 0.4))
+        F, tb = best[1], best[2]
+        # each mode, for the belt as it is now
+        for j, (m0, tau0) in enumerate(near):
+            cands = [(m0 + d, tau0 * k) for d in np.arange(-0.4, 0.4001, 0.02) for k in (0.6, 1.0, 1.6)]
+            cands.append(ms[j])
+            ms[j] = min(cands, key=lambda c: resid(F, tb, ms[:j] + [c] + ms[j + 1:]))[0:2]
+    if abs(F - fr) >= span - 0.05:
+        return fr                     # no clear minimum: keep the spectrum's reading
+    # the minimum to a fraction of a step
+    r = [resid(F + d, tb, ms) for d in (-0.02, 0.0, 0.02)]
+    den = r[0] - 2 * r[1] + r[2]
+    off = 0.5 * (r[0] - r[2]) / den if den > 0 else 0.0
+    return float(F + max(-0.5, min(0.5, off)) * 0.02)
+
+
+def _fresh(axes, fs, on, fr):
+    """The tone at fr comes in at this onset (a pluck), rather than ringing on from
+    before it (a knock while the last pluck still rings): its level just after the onset
+    against just before it."""
+    n = int(0.3 * fs)             # long enough that a loud toolhead line 10+ Hz away doesn't leak in
+    b0, a0 = on - n - int(0.01 * fs), on + int(SKIP * fs)
+    if b0 < 0 or a0 + n > len(axes[0]):
+        return True
+    t = np.arange(n) / fs
+    w = np.hanning(n)
+    c, s_ = w * np.cos(2 * math.pi * fr * t), w * np.sin(2 * math.pi * fr * t)
+
+    def level(i):
+        return sum(np.dot(a[i:i + n] - a[i:i + n].mean(), c) ** 2 + np.dot(a[i:i + n] - a[i:i + n].mean(), s_) ** 2
+                   for a in axes)
+    return level(a0) >= 2.0 * level(b0)
 
 
 def _knock(f, df, halves, fr, d1, d2, avoid):
@@ -507,6 +602,11 @@ def analyse(t, ax, ay, az, target=None, expect=None, quiet=None, avoid=(), other
     # a toolhead that rings long (stiff, all metal) may still ring from a knock when the
     # next pluck comes: look for plucks beside its own lines too
     longm = [(m, g) for m, g, tau in _modes(avoid, True) if tau >= KNOCK_TAU]
+    ringing = [(m, tau) for m, g, tau in _modes(avoid, True) if tau >= KNOCK_TAU]
+    # a line that rings on is sharp and is fitted out of each pluck (_refine), so it only
+    # needs a narrow guard while the tone is picked: a belt 1-2 Hz from it can be read
+    pick_avoid = [dict(m, guard=0.3, guard2=m.get("guard", TAP_GUARD)) if isinstance(m, dict) and (m.get("tau") or 0) >= KNOCK_TAU else m
+                  for m in (avoid or ())]
     if longm:
         extra, _ = _onsets_beside(axes, fs, lo, hi, mask, longm, q)
         onsets = _merge_onsets(onsets, extra, fs, env)
@@ -526,7 +626,24 @@ def analyse(t, ax, ay, az, target=None, expect=None, quiet=None, avoid=(), other
         if sp is None:
             continue
         p, nz, halves = sp
-        fr, d1, d2 = pluck_freq(f, p, nz, df, lo, hi, avoid, target, prev, halves)
+        fr, d1, d2 = pluck_freq(f, p, nz, df, lo, hi, pick_avoid, target, prev, halves)
+        tone_only = False
+        if fr is not None and ringing:
+            # a toolhead line that rings on next to the tone pulls the spectrum's peak:
+            # fit it out (the live count analyses the recording again every second, so a
+            # pluck heard to the end of its window is fitted once)
+            key = (a1 - a0, float(axes[0][a0]), float(axes[1][a0]), float(axes[2][a1 - 1]), round(fr, 2),
+                   tuple(ringing))
+            if key not in _REFINED:
+                if len(_REFINED) > 200:
+                    _REFINED.clear()
+                _REFINED[key] = _refine(axes, fs, a0, a1, fr, ringing)
+            fr = _REFINED[key]
+            if any(abs(fr - m) <= LONG_ON for m, _ in ringing):
+                fr = None                     # the toolhead's own line ringing on, not a belt
+            elif any(abs(2 * fr - m) <= TAP_GUARD for m, _ in ringing):
+                d2 = None                     # twice the tone is that line: the tone alone decides
+                tone_only = True
         pk = {"t": round(float(on / fs), 2), "freq": None if fr is None else round(fr, 2),
               "db": None if d1 is None else round(d1, 1), "db2": None if d2 is None else round(d2, 1),
               "ok": False, "why": ""}
@@ -540,6 +657,10 @@ def analyse(t, ax, ay, az, target=None, expect=None, quiet=None, avoid=(), other
         elif d2 is None:
             if d1 < STRONG_DB:
                 pk["why"] = "too weak"
+            elif _tau(halves, f, df, fr) == 0.0:
+                pk["why"] = "no belt tone"        # no line of its own there
+            elif tone_only and not _fresh(axes, fs, on, fr):
+                pk["why"] = "a knock, not a belt"  # the last pluck still ringing: the knock rang the toolhead
             elif _knock(f, df, halves, fr, d1, d1, avoid):
                 pk["why"] = "a knock, not a belt"
             else:

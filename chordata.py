@@ -307,6 +307,7 @@ class Chordata:
                                         [s[2] for s in samples], [s[3] for s in samples], **live)
                     if self.belt_now in ("A", "B") and self._live_gen == gen_now:
                         self.belt_live = res["plucks"]
+                        self._live_dur = samples[-1][0] - client.request_start_time
                 except Exception:
                     logging.exception("chordata: live belt analysis")
                 finally:
@@ -333,9 +334,13 @@ class Chordata:
                 # a little while, until the plucks needed are counted
                 toolhead.wait_moves()
                 end = self.reactor.monotonic() + 2.0 + 1.3 * n
+                self._live_dur = 0.0
                 while self.reactor.monotonic() < end:
                     heard = self.belt_live or []
-                    if not heard or sum(1 for p in heard if p.get("ok")) >= n:
+                    # only plucks heard to the end of their window: a pluck cut short can
+                    # still be judged differently once all of it is in
+                    full = getattr(self, "_live_dur", 0.0) - (belts.SKIP + belts.WINDOW + 0.05)
+                    if not heard or sum(1 for p in heard if p.get("ok") and p["t"] <= full) >= n:
                         break
                     self.message = "Pluck belt %s again" % self.belt_now
                     toolhead.dwell(1.0)
