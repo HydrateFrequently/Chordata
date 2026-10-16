@@ -14,7 +14,9 @@ const path = require('node:path');
     assert.equal(await page.locator('#measureRows tr').count(),7);
     assert.match(await page.locator('#connBanner').textContent(),/Demo/);
     assert.equal(await page.locator('#startBtn').isDisabled(),true);
-    assert.equal(await page.locator('#trend circle').count(),6);
+    // counted plucks: dots, and a star for one within 0.1 Hz of the target (A at 110.0 Hz)
+    assert.equal(await page.locator('#trend circle').count()+await page.locator('#trend polygon').count(),6);
+    assert.equal(await page.locator('#trend polygon').count(),1);
     assert.equal(await page.locator('#trend path').count(),1);
     assert.equal(await page.evaluate(()=>csvMeasurements().split('\r\n').length),8);
     for (const width of [390,1280]) {
