@@ -47,7 +47,7 @@ def plugin(objects=None):
     obj.belt_tol, obj.belt_target = .25, 110.
     obj._tool_info = {"corexy": True}
     obj.belts = {"target": 110., "tol": .25, "plucks": 5, "round": 0, "A": {"freq": 110.},
-                 "B": {"freq": 110.}, "done": True, "heard": ["A"], "good": {}, "tap": []}
+                 "B": {"freq": 110.}, "done": True, "heard": ["A"], "good": {}, "tap": [], "tap_done": True}
     return obj
 
 
@@ -88,6 +88,16 @@ class SafetyTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "finite"):
             obj.cmd_CHORDATA_START(Command(TARGET="nan"))
         self.assertIs(obj.belts, before)
+
+    def test_belts_need_a_tap_first(self):
+        obj = plugin({"resonance_tester": SimpleNamespace(accel_chips=[("xy", object())]),
+                      "toolhead": SimpleNamespace(wait_moves=lambda: None)})
+        obj.belts = dict(obj.belts, tap_done=False)
+        recorded = []
+        obj._record = lambda *args, **kwargs: recorded.append(args) or []
+        with self.assertRaisesRegex(ValueError, "tap the toolhead first"):
+            obj.cmd_CHORDATA_LISTEN(Command(BELT="A"))
+        self.assertEqual(recorded, [])
 
     def test_failed_capture_clears_old_result_and_completion(self):
         toolhead = SimpleNamespace(wait_moves=lambda: None)

@@ -134,7 +134,7 @@ class Chordata:
         self.belt_plucks = plucks
         self.belts = {"target": target, "plucks": plucks, "round": 0,
                       "A": None, "B": None, "heard": [], "advice": "Measure belt A", "done": False,
-                      "tol": self.belt_tol, "tap": [], "tap_ring": [], "tap_tau": None, "fails": {"A": 0, "B": 0}, "deaf": False,
+                      "tol": self.belt_tol, "tap": [], "tap_ring": [], "tap_tau": None, "tap_done": False, "fails": {"A": 0, "B": 0}, "deaf": False,
                       "possible": False, "good": {}, "prev": {}}
         self.belt_live = []
         self.measurement = {"phase": "idle", "belt": None}
@@ -161,6 +161,9 @@ class Chordata:
         belt = gcmd.get("BELT", "A").upper()
         if belt not in ("A", "B"):
             raise gcmd.error("Chordata: BELT is A or B")
+        if not self.belts.get("tap_done"):
+            # without it a stiff toolhead's ringing can be taken for a belt
+            raise gcmd.error("Chordata: tap the toolhead first (_CHORDATA_TAP)")
         rt = self.printer.lookup_object("resonance_tester")
         chips = getattr(rt, "accel_chips", None) or []
         if not chips:
@@ -367,6 +370,8 @@ class Chordata:
         b["tap_ring"] = res["ring"]          # per line: how long it rings and how wide it is
         b["tap_tau"] = res["tau"]
         b["tap_note"] = res["note"]
+        # a tap was heard (a stiff toolhead may ring nothing near the belts: that counts too)
+        b["tap_done"] = bool(res["modes"]) or res["note"] == "the tap rang nothing clearly"
         self.belts = b
         self._end_measurement(result=res)
         if res["modes"]:
