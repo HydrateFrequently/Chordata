@@ -42,7 +42,7 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(json.loads((theme / 'navi.json.before-chordata').read_text()), nav)
         self.assertEqual(len(json.loads((theme / 'navi.json').read_text())), 2)
         self.assertEqual((self.config / 'moonraker.conf').read_text().count('[chordata_web]'), 1)
-        self.assertIn('origin: https://github.com/alextverdyy/Chordata.git', (self.config / 'moonraker.conf').read_text())
+        self.assertIn('origin: https://github.com/HydrateFrequently/Chordata.git', (self.config / 'moonraker.conf').read_text())
         settings = self.config / 'chordata_settings.cfg'
         settings.write_text('[chordata]\nbelt_target: 95\n')
         self.assertEqual(self.run_installer().returncode, 0)

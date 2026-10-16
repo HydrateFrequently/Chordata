@@ -130,12 +130,14 @@ in a background thread, so allow time for large files to finish. Chordata retain
 40 raw CSV files; a background capture counts as a file too. Check `klippy.log` and
 directory permissions if a completed recording is not saved.
 
-## Updates appear to follow upstream instead of the fork
+## Updates use an unexpected repository
 
-Inspect `git remote -v` in the checkout and `[update_manager chordata]` in
-`moonraker.conf`. Both should refer to `https://github.com/alextverdyy/Chordata.git`
-when following this fork. Existing update entries are not overwritten by the
-installer. See [migration](USER_GUIDE.md#migrate-an-existing-upstream-install).
+Inspect `git remote -v`, the local branch's tracking remote, and
+`[update_manager chordata]` in `moonraker.conf`. For upstream installations they
+should follow `https://github.com/HydrateFrequently/Chordata.git`. If using a fork,
+keep both the checkout and update manager pointed at that fork. Existing update
+entries are not overwritten by the installer. See
+[updating an existing installation](USER_GUIDE.md#update-an-existing-installation).
 Preserve local changes before updating; do not force-reset them.
 
 ## Gather a useful issue report

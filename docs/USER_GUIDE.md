@@ -1,6 +1,6 @@
 # Chordata user guide
 
-This guide covers the fork at [alextverdyy/Chordata](https://github.com/alextverdyy/Chordata).
+This guide covers [Chordata](https://github.com/HydrateFrequently/Chordata).
 It works as a Klipper/Kalico measurement module, a Moonraker companion page, and a
 Mainsail sidebar link. You can use the entire measurement workflow with AI disabled.
 
@@ -13,7 +13,7 @@ printer's documentation. No physical-printer validation is implied by these imag
 On a computer with Python 3:
 
 ```sh
-git clone https://github.com/alextverdyy/Chordata.git
+git clone https://github.com/HydrateFrequently/Chordata.git
 cd Chordata
 python3 -m http.server 8765 --bind 127.0.0.1 --directory web
 ```
@@ -61,7 +61,7 @@ SSH into the printer's Linux host as its normal user, then run:
 
 ```sh
 cd ~
-git clone https://github.com/alextverdyy/Chordata.git
+git clone https://github.com/HydrateFrequently/Chordata.git
 cd Chordata
 ./install.sh
 sudo systemctl restart moonraker klipper
@@ -81,7 +81,7 @@ The installer:
 | Companion component | Moonraker's `moonraker/components/chordata_web.py` | Symlink to the checkout |
 | Page configuration | `[chordata_web]` in `moonraker.conf` | Added when absent |
 | Mainsail navigation | Config directory's `.theme/navi.json` | Preserves other links |
-| Update entry | `[update_manager chordata]` in `moonraker.conf` | Points new installations at this fork |
+| Update entry | `[update_manager chordata]` in `moonraker.conf` | Points new installations at this repository |
 
 The initial configuration backups end in `.before-chordata`. The installer refuses
 to overwrite a regular plugin file; inspect and back up such files before replacing
@@ -313,7 +313,7 @@ not remove the stored key unless you also select the clear option.
 ## 8. Updates and migration
 
 Before updating, finish maintenance and preserve any local code changes. For a clean
-checkout of this fork:
+checkout of this repository:
 
 ```sh
 cd ~/Chordata
@@ -326,34 +326,30 @@ Mainsail's update manager can use the generated `[update_manager chordata]` entr
 The installer's symlinks keep modules connected to the checkout, so restart Klipper
 and Moonraker after changing Python modules. Reload the browser for page changes.
 
-### Migrate an existing upstream install
+### Update an existing installation
 
-If your current `~/Chordata` is clean and still points at `HydrateFrequently/Chordata`:
+For an existing clean checkout, inspect the remote and pull its configured branch:
 
 ```sh
 cd ~/Chordata
 git status --short
-git remote rename origin upstream
-git remote add origin https://github.com/alextverdyy/Chordata.git
-git fetch origin
-git merge --ff-only origin/main
-git branch --set-upstream-to=origin/main main
+git remote -v
+git pull --ff-only
 ./install.sh
 ```
 
-Stop and preserve local changes if `git status --short` reports any. If an `upstream`
-remote already exists, inspect `git remote -v` and adjust the remote names. Do not
-force a failed fast-forward. These commands assume you are on `main`; the tracking
-change makes future `git pull --ff-only` updates follow the fork.
+Preserve local changes before updating. Do not force a failed fast-forward. Check
+that the tracked branch and Moonraker update entry point at the repository you want
+to follow. If you use a fork, keep its remote and branch instead of mixing sources.
 
-Existing Moonraker update entries are preserved by the installer. Edit only this
-entry's `origin` to follow the fork:
+Existing Moonraker update entries are preserved by the installer. An upstream
+installation can use:
 
 ```ini
 [update_manager chordata]
 type: git_repo
 path: ~/Chordata
-origin: https://github.com/alextverdyy/Chordata.git
+origin: https://github.com/HydrateFrequently/Chordata.git
 primary_branch: main
 managed_services: klipper moonraker
 ```

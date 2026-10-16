@@ -94,8 +94,8 @@ installer tests use temporary directories; the installer was not run on a real p
 
 The fork adds a detailed illustrated user guide, troubleshooting reference and four
 reproducible screenshots captured from the offline demo. They contain illustrative
-data and no provider credentials. New installer update entries now follow
-`alextverdyy/Chordata`; existing entries remain untouched and migration is documented.
+data and no provider credentials. The upstream PR branch keeps installation and update URLs pointed at
+`HydrateFrequently/Chordata`; existing entries remain untouched and updating is documented.
 
 The fork was created after upstream advanced to `b4b2adb47b199d265ccedd9223b6c73d09185191`.
 Both newer upstream commits were merged before publication, retaining the tap's

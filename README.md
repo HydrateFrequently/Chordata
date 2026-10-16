@@ -44,7 +44,7 @@ also open `web/index.html?demo` through a local web server.
 
 ```sh
 cd ~
-git clone https://github.com/alextverdyy/Chordata.git
+git clone https://github.com/HydrateFrequently/Chordata.git
 cd Chordata
 ./install.sh
 sudo systemctl restart moonraker klipper
@@ -65,9 +65,9 @@ not a patched Mainsail build. The normal Mainsail reverse proxy must forward
 `/server/`, `/access/` and `/websocket` to Moonraker. Fluidd users can open the page
 directly. The `CHORDATA` macro also provides the measurement prompts.
 
-The installer adds a Mainsail update-manager entry pointing at this fork. Existing
-update-manager entries are preserved; if you previously installed upstream, follow
-the [migration instructions](docs/USER_GUIDE.md#migrate-an-existing-upstream-install).
+The installer adds a Mainsail update-manager entry pointing at this repository.
+Existing entries are preserved; see [updating an existing installation](docs/USER_GUIDE.md#update-an-existing-installation)
+if your checkout or update-manager entry uses a different remote.
 
 ## Measure
 

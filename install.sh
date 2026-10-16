@@ -1,7 +1,7 @@
 #!/bin/bash
 # Chordata installer for Kalico or Klipper (with Moonraker and Mainsail or Fluidd).
 #
-#   cd ~ && git clone https://github.com/alextverdyy/Chordata.git
+#   cd ~ && git clone https://github.com/HydrateFrequently/Chordata.git
 #   ~/Chordata/install.sh
 #
 # It links the files from this folder (so a git pull updates them), adds two includes
@@ -146,7 +146,7 @@ if [ -f "$CONFIG_DIR/moonraker.conf" ] && ! grep -q '^\[update_manager chordata\
 [update_manager chordata]
 type: git_repo
 path: $HERE
-origin: https://github.com/alextverdyy/Chordata.git
+origin: https://github.com/HydrateFrequently/Chordata.git
 primary_branch: main
 managed_services: klipper moonraker
 EOF
