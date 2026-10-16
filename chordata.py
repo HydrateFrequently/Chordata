@@ -134,7 +134,7 @@ class Chordata:
         self.belt_plucks = plucks
         self.belts = {"target": target, "plucks": plucks, "round": 0,
                       "A": None, "B": None, "heard": [], "advice": "Measure belt A", "done": False,
-                      "tol": self.belt_tol, "tap": [], "fails": {"A": 0, "B": 0}, "deaf": False,
+                      "tol": self.belt_tol, "tap": [], "tap_ring": [], "tap_tau": None, "fails": {"A": 0, "B": 0}, "deaf": False,
                       "possible": False, "good": {}, "prev": {}}
         self.belt_live = []
         self.measurement = {"phase": "idle", "belt": None}
@@ -187,7 +187,7 @@ class Chordata:
             if gcmd.get_int("UI", 0):
                 self.gcode.run_script_from_command("_CHORDATA_UI STEP=pluck BELT=%s" % belt)
             live = dict(quiet=[[s[i] for s in quiet] for i in (1, 2, 3)], expect=n,
-                        avoid=self.belts.get("tap", []), target=self.belts["target"],
+                        avoid=self.belts.get("tap_ring") or self.belts.get("tap", []), target=self.belts["target"],
                         prev=(self.belts.get("good") or {}).get(belt),
                         other=(self.belts.get("B" if belt == "A" else "A") or {}).get("freq"))
             samples = self._record(chip, toolhead, secs, live=live)
@@ -206,7 +206,7 @@ class Chordata:
             res = belts.analyse(t, [s[1] for s in samples], [s[2] for s in samples],
                                 [s[3] for s in samples], target=self.belts["target"], expect=n,
                                 quiet=[[s[i] for s in quiet] for i in (1, 2, 3)],
-                                avoid=self.belts.get("tap", []), other=other, prev=good.get(belt))
+                                avoid=self.belts.get("tap_ring") or self.belts.get("tap", []), other=other, prev=good.get(belt))
         except ValueError as error:
             raise gcmd.error("Chordata: invalid accelerometer recording: %s" % error)
         res["measured_at"] = time.time()
@@ -364,12 +364,15 @@ class Chordata:
             raise gcmd.error("Chordata: invalid accelerometer recording: %s" % error)
         b = dict(self.belts)
         b["tap"] = res["modes"]
+        b["tap_ring"] = res["ring"]          # per line: how long it rings and how wide it is
+        b["tap_tau"] = res["tau"]
         b["tap_note"] = res["note"]
         self.belts = b
         self._end_measurement(result=res)
         if res["modes"]:
-            gcmd.respond_info("Chordata: the toolhead rings by itself at %s Hz; ignored when listening to the belts"
-                              % ", ".join("%.1f" % m for m in res["modes"]))
+            gcmd.respond_info("Chordata: the toolhead rings by itself at %s; ignored when listening to the belts"
+                              % ", ".join("%.1f Hz (%.2f s, +-%.1f Hz)" % (r["freq"], r["tau"], r["guard"])
+                                          for r in res["ring"]))
         else:
             gcmd.respond_info("Chordata: tap: %s" % res["note"])
 

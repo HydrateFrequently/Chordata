@@ -171,7 +171,9 @@ flowchart TD
 2. Confirm the target and position. Chordata does not choose a manufacturer's target.
 3. If using tap calibration, select **Listen for the tap**, keep your hands off while
    background noise is recorded, then lightly tap the toolhead when prompted. This
-   identifies toolhead modes to avoid mistaking a knock for a belt. You may skip it.
+   identifies toolhead frequencies, ring duration and line width to help distinguish
+   a knock from a belt. The learned width sets a per-mode guard; long-ringing
+   toolheads also use onset detection outside those modes. You may skip this step.
 4. Select **Listen to belt A**. Wait through the initial background recording, then
    pluck the documented belt span evenly, about once a second.
 5. Inspect the counted and rejected plucks. When recording finishes, continue to B.

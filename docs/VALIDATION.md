@@ -7,8 +7,8 @@ Date: 2026-10-16. Checkout: `/home/hermes/Chordata`, based on upstream
 
 | Check | Result |
 | --- | --- |
-| Python unit/integration-contract tests | 42 passed on Python 3.12.13 |
-| Existing synthetic signal and adjustment-planner checks | 40 passed |
+| Python unit/integration-contract tests | 44 passed on Python 3.12.13 |
+| Synthetic signal and adjustment-planner checks, including current upstream | 48 passed |
 | Chromium browser suite | Passed at 390 px and 1280 px |
 | Installer tests | Included above: Klipper/Kalico layout, reruns, user settings/navigation preservation, malformed navigation, regular-file protection |
 | Shell syntax, Python compilation, whitespace | Passed |
@@ -96,3 +96,10 @@ The fork adds a detailed illustrated user guide, troubleshooting reference and f
 reproducible screenshots captured from the offline demo. They contain illustrative
 data and no provider credentials. New installer update entries now follow
 `alextverdyy/Chordata`; existing entries remain untouched and migration is documented.
+
+The fork was created after upstream advanced to `b4b2adb47b199d265ccedd9223b6c73d09185191`.
+Both newer upstream commits were merged before publication, retaining the tap's
+per-mode ring duration, width and guard features. The combined analysis validator
+accepts both plain frequency modes and the new ring objects; valid and invalid
+ring-object regression cases were added. After integration, 44 Python tests, all
+48 synthetic/planner checks, and the Chromium suite passed.

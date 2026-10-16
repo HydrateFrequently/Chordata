@@ -269,6 +269,19 @@ class AnalysisValidationTests(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     belts.analyse(self.t, *self.axes, **params)
 
+    def test_upstream_tap_ring_objects_are_accepted(self):
+        from test_belts import rec, series, quiet
+        result = belts.analyse(*rec(series([91.] * 5)), quiet=quiet(), expect=5,
+                               avoid=[{"freq": 163., "guard": 3., "tau": .1}])
+        self.assertEqual(result["used"], 5)
+        self.assertAlmostEqual(result["freq"], 91., delta=.4)
+
+    def test_invalid_tap_ring_objects_rejected(self):
+        for mode in ({"freq": float("nan")}, {"freq": 110., "guard": -1.},
+                     {"freq": 110., "tau": float("inf")}, {"guard": 2.}):
+            with self.subTest(mode=mode), self.assertRaises(ValueError):
+                belts.analyse(self.t, *self.axes, avoid=[mode])
+
     def test_metadata_remains_available_without_a_pluck(self):
         result = belts.analyse(self.t, *self.axes)
         self.assertEqual(result["metadata"]["sample_count"], 3200)

@@ -74,7 +74,8 @@ the [migration instructions](docs/USER_GUIDE.md#migrate-an-existing-upstream-ins
 1. Finish or cancel any print. Move to the manufacturer's measurement position.
 2. Start Chordata and set the target for that belt span. The default 110 Hz is a
    starting value, not a recommendation for every printer.
-3. Record a light toolhead tap to identify its resonances, or skip this step.
+3. Record a light toolhead tap to learn its resonant frequencies, ring duration and
+   line width, or skip this step.
 4. Record belt A, then belt B, using even plucks about a second apart. Inspect
    counted and rejected plucks before adjusting anything.
 5. Adjust manually using the frequency comparison, then measure **both** belts again.

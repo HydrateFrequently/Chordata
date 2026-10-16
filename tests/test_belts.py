@@ -24,7 +24,7 @@ rng = np.random.default_rng(1)
 
 def rec(events, secs=8.0, noise=30.0, fan=None):
     """events: (time, kind, freq, amp, ratio2[, tau]) with kind pluck | hard | harm |
-    tap | ring. harm: amp is (F, 2F, 4F). ring: one decaying tone (a frame mode, a click)."""
+    tap | ring (for a tap, tau is how long the toolhead rings). harm: amp is (F, 2F, 4F). ring: one decaying tone (a frame mode, a click)."""
     t = np.arange(int(secs * FS)) / FS
     ax, ay, az = (rng.normal(0, noise, len(t)) for _ in range(3))
     if fan:
@@ -54,8 +54,9 @@ def rec(events, secs=8.0, noise=30.0, fan=None):
             ax += 0.7 * along + 0.3 * side
             ay += 0.7 * along - 0.3 * side
             az += 0.4 * side
-        else:   # the toolhead ringing by itself after a tap
-            ring = amp * np.where(on, np.exp(-np.clip(tt, 0, None) / 0.15), 0.0) * np.sin(2 * np.pi * fr * tt)
+        else:   # the toolhead ringing by itself after a tap (tau: how long it rings)
+            rt = ev[5] if len(ev) > 5 else 0.15
+            ring = amp * np.where(on, np.exp(-np.clip(tt, 0, None) / rt), 0.0) * np.sin(2 * np.pi * fr * tt)
             if r2:   # the belts attached to the toolhead ring a little too: (F, amp F, amp 2F)
                 bf, b1, b2 = r2
                 ring = ring + b1 * env * np.sin(2 * np.pi * bf * tt)
@@ -141,6 +142,7 @@ def synthetic():
         FAILS.append("tap")
     octaves(q)
     knocks(q)
+    toolheads(q)
     series_rules(q)
 
 
@@ -175,6 +177,33 @@ def octaves(q):
     print("%-4s %-46s %s" % ("ok" if ok else "FAIL", "tie: the last reading (91) decides", fr))
     if not ok:
         FAILS.append("prev tie")
+
+
+def toolheads(q):
+    """Toolheads differ: a plastic one rings briefly in broad lines, a stiff all metal one
+    rings long. The tap learns each line, how long it rings and how wide it is; then
+    knocks on the toolhead among the plucks are never counted, and plucks that come while
+    it still rings are still found."""
+    for name, modes in (("plastic, damped", [(62.0, 0.04), (140.0, 0.06)]),
+                        ("metal, rings 0.4 s", [(104.5, 0.4), (190.0, 0.4)]),
+                        ("metal, rings 0.8 s", [(104.5, 0.8), (190.0, 0.8)]),
+                        ("metal, belt 2F on its line", [(104.5, 0.6), (176.0, 0.6)])):
+        tr = belts.analyse_tap(*rec([(1.0, "tap", fr, 3000.0, 0.0, tau) for fr, tau in modes], 3.0), quiet=q)
+        learned = sorted(r["freq"] for r in tr["ring"])
+        ok = (len(learned) == len(modes) and all(abs(a - b[0]) < 0.6 for a, b in zip(learned, sorted(modes)))
+              # a long ring is measured to 25 %; a brief one only coarsely (half windows of 0.3 s)
+              and (tr["tau"] < belts.KNOCK_TAU if max(t for _, t in modes) < 0.1 else
+                   abs(tr["tau"] - max(t for _, t in modes)) <= 0.25 * max(t for _, t in modes)))
+        print("%-4s %-46s %s" % ("ok" if ok else "FAIL", "tap, " + name, tr["ring"]))
+        if not ok:
+            FAILS.append("tap " + name)
+        # 5 plucks at 88 Hz, two hard knocks on the toolhead in between
+        ev = [(1.0 + 1.2 * i, "pluck", 88.0, 1500.0, 1.0) for i in range(5)]
+        ev += [(1.6 + 2.4 * i, "tap", fr, 6000.0, 0.0, tau) for i in range(2) for fr, tau in modes]
+        r = belts.analyse(*rec(sorted(ev)), quiet=q, target=110.0, avoid=tr["ring"])
+        # (a knock while the last pluck still rings may count: it reads that belt)
+        check("knocks among plucks, " + name, near(r, 88.0, 0.2) and r["used"] >= 5
+              and all(abs(p["freq"] - 88.0) < 0.3 for p in r["plucks"] if p["ok"]), r)
 
 
 def knocks(q):
@@ -225,7 +254,7 @@ def series_rules(q):
     kinds = [("pluck", 90.5), ("pluck", 72.0), ("tap", 104.0), ("pluck", 60.0), ("pluck", 90.5),
              ("ring", 439.0), ("pluck", 72.0), ("pluck", 90.5), ("tap", 104.0), ("pluck", 60.0)]
     ev = [(1.0 + 1.2 * i, k, fr, 6000.0 if k == "tap" else 1500.0, 0 if k == "tap" else 1.0,
-           0.05 if k == "ring" else 0.3)
+           0.05 if k == "ring" else 0.15 if k == "tap" else 0.3)
           for i, (k, fr) in enumerate(kinds)]
     r = belts.analyse(*rec(ev, 14.0), quiet=q, target=110.0)
     why = [p["why"] for p in r["plucks"]]
@@ -288,9 +317,10 @@ def real(d):
             on = belts.find_plucks(seg[1:], fs, belts.SEARCH[0], 0.45 * fs / 2.0, None)
             n = (on[0] - int(0.05 * fs)) if on else 0
             return seg, ([x[:n] for x in seg[1:]] if n > int(0.5 * fs) else None)
-        seg, q = calm(2.3, 5.5)
-        tap = belts.analyse_tap(*seg, quiet=q)
-        avoid = tap["modes"]
+        # the tap, with a quiet stretch from before the audio started (as Chordata records
+        # one before every tap)
+        tap = belts.analyse_tap(*cut(2.6, 5.5), quiet=cut(-4.0, -2.5)[1:])
+        avoid = tap["ring"]
         seg, q = calm(5.5, 19.5)
         right = belts.analyse(*seg, quiet=q, target=110.0, avoid=avoid)
         seg, q = calm(23.5, 37.0)
