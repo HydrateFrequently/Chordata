@@ -1,0 +1,6 @@
+{
+  "name": "chordata-browser-tests",
+  "private": true,
+  "scripts": { "test": "node tests/test_web.cjs" },
+  "devDependencies": { "playwright": "1.64.0" }
+}

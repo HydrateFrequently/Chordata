@@ -106,7 +106,7 @@ details.card[open] > summary::before { content: "\25BE"; }
 .field { margin: 18px 0; }
 .field > label, .field > .label { display: block; font-weight: 600; margin-bottom: 8px; font-size: 18px; }
 .stepnum { color: var(--primary); margin-right: 6px; }
-input[type=text], input[type=number] {
+input[type=text], input[type=number], input[type=password], input[type=url], select {
   font: inherit; font-size: 18px; width: 100%; min-height: 52px; padding: 10px 14px;
   border-radius: 10px; border: 1px solid var(--line); background: var(--card2); color: var(--text);
 }
@@ -234,6 +234,13 @@ details.sub > summary { cursor: pointer; color: var(--primary); font-weight: 600
   .card { padding: 12px; margin: 8px 0; }
   header.top { position: static; padding: 6px 16px; }
 }
+.measurements { overflow-x:auto; }
+table { border-collapse:collapse; width:100%; font-size:14px; font-variant-numeric:tabular-nums; }
+th,td { padding:8px; border-bottom:1px solid var(--line); text-align:left; }
+.trend { display:block; width:100%; height:auto; margin:12px 0; }
+.trend text { fill:var(--muted); font:22px system-ui; }
+summary:focus-visible,select:focus-visible { outline:3px solid var(--primary); outline-offset:2px; }
+@media(prefers-reduced-motion:reduce) { * { scroll-behavior:auto!important; transition:none!important; } }
 </style></head>
 <body>
 <header class="top">
@@ -286,6 +293,24 @@ details.sub > summary { cursor: pointer; color: var(--primary); font-weight: 600
         moves the toolhead when you press a button.</p>
     </details>
   </section>
+<section class="card" id="measurePanel" hidden><h2>Pluck measurements</h2>
+<p class="help">Frequency is measured in Hz. Force requires belt mass and span length. Use your printer manufacturer's target and measurement position.</p>
+<div id="trend"></div><p class="small muted">Circles: counted · Crosses: rejected · Dashed line: target. Updates after each detected pluck; not a raw accelerometer waveform.</p>
+<details><summary>Measurement data</summary><div class="measurements"><table><thead><tr><th scope="col">Belt</th><th scope="col">Pluck</th><th scope="col">Hz</th><th scope="col">Result</th><th scope="col">Reason</th></tr></thead><tbody id="measureRows"></tbody></table></div></details>
+<button type="button" id="exportBtn">Export CSV</button></section>
+<details class="card" id="aiPanel"><summary>Optional Laya / Jev review</summary>
+<p class="help">Measurements work without AI. Reviews are advice; they never move the printer.</p>
+<form id="aiForm"><p><label><input id="aiEnabled" type="checkbox"> Enable review</label></p>
+<div class="field"><label for="aiProvider">Provider</label><select id="aiProvider"><option value="laya">Laya</option><option value="jev">Jev</option></select></div>
+<div class="field"><label for="aiEndpoint">Full inference endpoint URL</label><input id="aiEndpoint" type="url" placeholder="https://your-server/v1/systemone" autocomplete="off"></div>
+<div class="field"><label for="aiModel">Model</label><input id="aiModel" type="text" value="auto" autocomplete="off"></div>
+<div class="field"><label for="aiKey">Provider API key (optional)</label><input id="aiKey" type="password" autocomplete="new-password"><p class="help">Stored on your printer server. Leave blank to retain the key for the same provider and endpoint. Changing either clears it.</p></div>
+<p><label><input id="aiClearKey" type="checkbox"> Clear saved provider key when saving</label></p>
+<div class="field"><label for="aiConfidence">Minimum confidence</label><input id="aiConfidence" type="number" min="0" max="1" step="0.05" value="0.7"></div>
+<p class="help">Review measurements sends a numeric measurement summary to this endpoint.</p>
+<button type="submit" id="aiSave">Save review settings</button><button type="button" id="aiReview">Review measurements</button></form>
+<p id="aiStatus" role="status">Review disabled until configured.</p></details>
+<details class="card" id="authPanel"><summary>Printer connection</summary><form id="authForm"><div class="field"><label for="moonrakerKey">Moonraker API key</label><input id="moonrakerKey" type="password" autocomplete="off"></div><p class="help">Held in memory for this page only. Reload to forget it.</p><button type="submit">Authenticate</button></form></details>
   <p class="disclaimer">Chordata comes without any warranty. You use it at your own risk.</p>
 </main>
 <div id="toast" role="alert" hidden></div>
@@ -330,6 +355,8 @@ function store(key, val) {
   return null;
 }
 
+let moonrakerKey = "", authRequired = false;
+const demo = new URLSearchParams(location.search).has("demo");
 let toastTimer = null;
 function toast(msg, ok) {
   const t = $("toast");
@@ -377,12 +404,17 @@ function connect() {
     scheduleReconnect();
     return;
   }
-  ws.onopen = () => {
+  ws.onopen = async () => {
     connected = true;
+    if (moonrakerKey) {
+      try { await identify(); authRequired=false; }
+      catch(err) { authBanner(); return; }
+    }
     backoff = 1000;
     render();
     checkKlippy();
     applyTheme();
+    loadAI();
   };
   ws.onmessage = (ev) => {
     let msg;
@@ -390,6 +422,7 @@ function connect() {
     if (msg.id != null && pending.has(msg.id)) {
       const p = pending.get(msg.id);
       pending.delete(msg.id);
+      clearTimeout(p.timer);
       if (msg.error) p.reject(msg.error); else p.resolve(msg.result);
     } else if (msg.method) {
       onNotify(msg.method, msg.params || []);
@@ -397,7 +430,7 @@ function connect() {
   };
   ws.onclose = () => {
     connected = false;
-    for (const p of pending.values()) p.reject({ message: "Connection lost" });
+    for (const p of pending.values()) { clearTimeout(p.timer); p.reject({ message: "Connection lost" }); }
     pending.clear();
     render();
     scheduleReconnect();
@@ -438,13 +471,14 @@ function rpc(method, params) {
   return new Promise((resolve, reject) => {
     if (!ws || ws.readyState !== 1) { reject({ message: "Not connected to the printer" }); return; }
     const id = rpcId++;
-    pending.set(id, { resolve, reject });
+    const timer=setTimeout(()=>{ pending.delete(id); reject({message:"Printer request timed out. Try again."}); },30000);
+    pending.set(id, { resolve, reject, timer });
     ws.send(JSON.stringify({ jsonrpc: "2.0", method, params: params || {}, id }));
   });
 }
 
 function errText(err) {
-  if (err && (err.code === 401 || err.code === 403)) return "Moonraker needs a login: add this device to trusted_clients";
+  if (err && (err.code === 401 || err.code === 403)) return "Moonraker requires authentication. Open Printer connection and enter its API key.";
   let m = (err && err.message) || String(err);
   // Moonraker wraps Klipper errors as a python dict string: {'error': 'WebRequestError', 'message': '...'}
   const mm = /'message':\s*'([^']*)'/.exec(m) || /"message":\s*"([^"]*)"/.exec(m);
@@ -453,6 +487,7 @@ function errText(err) {
 }
 
 function runGcode(script, quiet) {
+  if (demo) return Promise.reject({message:"Demo mode cannot send printer commands"});
   return rpc("printer.gcode.script", { script }).catch((err) => {
     const t = errText(err);
     if (!quiet) toast(t);
@@ -462,7 +497,9 @@ function runGcode(script, quiet) {
 }
 
 function authBanner() {
-  $("klippyBanner").textContent = "Moonraker needs a login: add this device to trusted_clients";
+  authRequired=true;
+  $("authPanel").open=true;
+  $("klippyBanner").textContent = "Moonraker requires authentication. Open Printer connection and enter its API key.";
   $("klippyBanner").hidden = false;
 }
 
@@ -715,7 +752,7 @@ function renderBelts() {
   const box = $("beltView");
   const jogOpen = !!(box.querySelector(".jog") || {}).open;
   box.textContent = "";
-  if (pt().state !== "listening") box.appendChild(jogPad(jogOpen));
+  if (!demo && pt().state !== "listening") box.appendChild(jogPad(jogOpen));
   const now = pt().belt_now || (/belt (A|B)/i.exec(prompt.title || "") || [])[1] || "";
   const cur = (now === "A" || now === "B") ? b[now] : null;
   // the newest pluck of the belt being measured, big
@@ -725,7 +762,7 @@ function renderBelts() {
   const live = el("div", { class: "live" });
   if (pt().state === "listening") {
     live.appendChild(el("div", { class: "hz" + (last && !last.ok ? " out" : "") },
-      last && last.freq != null ? fmtHz(last.freq) : "..."));
+      last && last.freq != null ? fmtHz(last.freq) + " Hz" : "..."));
     const okN = plucks.filter((p) => p.ok).length;
     live.appendChild(el("div", { class: "sub" }, listening && plucks.length
       ? Math.min(okN, b.plucks || okN) + " of " + (b.plucks || plucks.length) + " counted" + (last && !last.ok ? " (last: " + (last.why || "not counted") + ")" : "")
@@ -759,7 +796,7 @@ function renderBelts() {
     const r = b[k];
     const t = el("div", { class: "belt" + (k === now ? " now" : "") });
     t.appendChild(el("div", { class: "name" }, "Belt " + k));
-    t.appendChild(el("div", { class: "hz" }, r && r.freq != null ? fmtHz(r.freq) : "--"));
+    t.appendChild(el("div", { class: "hz" }, r && r.freq != null ? fmtHz(r.freq) + " Hz" : "--"));
     if (r && r.freq != null) {
       const d = r.freq - b.target, tol = b.tol || 0.25;
       const cls = Math.abs(d) <= tol ? "good" : (Math.abs(d) <= 2 ? "near" : "far");
@@ -787,13 +824,13 @@ function obj(name) { return S[name] || {}; }
 function pt() { return obj("chordata"); }
 function isPrinting() { return ["printing", "paused"].includes(obj("print_stats").state || ""); }
 function merge(dst, src) {
-  for (const k in src) {
-    const v = src[k];
-    if (v && typeof v === "object" && !Array.isArray(v) && dst[k] && typeof dst[k] === "object" && !Array.isArray(dst[k])) {
-      merge(dst[k], v);
-    } else {
-      dst[k] = v;
-    }
+  // Subscription updates omit unchanged object fields. Each included field is a
+  // complete value: recursively merging belts would resurrect a cleared result.
+  for (const name in src) {
+    const fields = src[name];
+    if (fields && typeof fields === "object" && !Array.isArray(fields)) {
+      dst[name] = Object.assign({}, dst[name] || {}, fields);
+    } else dst[name] = fields;
   }
 }
 
@@ -836,7 +873,7 @@ function renderHome() {
   show("noAccel", known && !tools.accel);
   show("notXY", known && tools.accel && !tools.corexy);
   $("kinName").textContent = tools.kinematics || "unknown";
-  $("startBtn").disabled = isPrinting() || (known && !(tools.accel && tools.corexy));
+  $("startBtn").disabled = demo || !connected || klippyState !== "ready" || isPrinting() || (known && !(tools.accel && tools.corexy));
   const box = $("homeJog");
   const open = !!(box.querySelector(".jog") || {}).open;
   box.textContent = "";
@@ -850,7 +887,7 @@ function renderHome() {
 function render() {
   show("connBanner", !connected);
   const kb = $("klippyBanner");
-  if (kb.textContent.indexOf("trusted_clients") < 0) {
+  if (!authRequired) {
     kb.textContent = "Klipper is not ready" + (klippyState && klippyState !== "ready" ? " (" + klippyState + ")" : "");
     kb.hidden = !connected || klippyState === "ready";
   }
@@ -860,12 +897,64 @@ function render() {
   show("home", !prompt);
   if (!prompt) renderHome();
   renderPrompt();
+  renderMeasurements();
+}
+
+function measurementRows() {
+  const state=pt(), belts=state.belts || {}, rows=[];
+  for(const belt of ['A','B']) {
+    const samples=state.state==='listening' && state.belt_now===belt ? state.belt_live || [] : (belts[belt] || {}).plucks || [];
+    samples.forEach((p,i)=>rows.push({belt,index:i+1,freq:p.freq,ok:!!p.ok,why:p.why || ''}));
+  }
+  return rows;
+}
+let reviewedSignature = null;
+function measurementSignature() { return JSON.stringify([pt().state, pt().belt_now, pt().belts, pt().belt_live]); }
+function renderMeasurements() {
+  if (reviewedSignature !== null && reviewedSignature !== measurementSignature()) { reviewedSignature=null; $("aiStatus").textContent="Measurements changed. Request a new review when measurement is complete."; }
+  const rows=measurementRows(); show('measurePanel',rows.length>0);
+  const body=$('measureRows'); body.replaceChildren();
+  for(const r of rows) { const tr=el('tr'); for(const value of [r.belt,r.index,fmtHz(r.freq),r.ok?'Counted':'Rejected',r.why || '—']) tr.appendChild(el('td',{},value)); body.appendChild(tr); }
+  const holder=$('trend'); holder.replaceChildren(); if(!rows.length) return;
+  const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');
+  svg.setAttribute('viewBox','0 0 660 240'); svg.setAttribute('class','trend'); svg.setAttribute('role','img'); svg.setAttribute('aria-label','Frequency by pluck number for belts A and B. Exact values follow in Measurement data.');
+  const add=(tag,attrs,text)=>{ const n=document.createElementNS(svg.namespaceURI,tag); for(const k in attrs)n.setAttribute(k,attrs[k]); if(text)n.textContent=text; svg.appendChild(n); };
+  const target=Number((pt().belts || {}).target), values=rows.filter(r=>r.freq!=null && Number.isFinite(Number(r.freq))).map(r=>Number(r.freq));
+  if(target>0)values.push(target); if(!values.length) { holder.appendChild(el('p',{},'No frequency detected yet.')); return; }
+  const low=Math.floor(Math.min(...values)-5), high=Math.ceil(Math.max(...values)+5), maxN=Math.max(2,...rows.map(r=>r.index));
+  const y=f=>200-(f-low)/(high-low)*170, x=i=>90+(i-1)/(maxN-1)*530;
+  for(let n=0;n<3;n++) { const f=low+(high-low)*n/2; add('line',{x1:90,y1:y(f),x2:620,y2:y(f),stroke:'var(--line)'}); add('text',{x:0,y:y(f)+5},f.toFixed(0)+' Hz'); }
+  if(target>0)add('line',{x1:90,y1:y(target),x2:620,y2:y(target),stroke:'var(--muted)','stroke-dasharray':'6 5'});
+  for(const r of rows) { if(r.freq==null || !Number.isFinite(Number(r.freq)))continue; const px=x(r.index),py=y(Number(r.freq)),color=r.belt==='A'?'var(--primary)':'var(--warn)',attrs={stroke:color,'stroke-width':2}; if(r.ok)add('circle',{...attrs,cx:px,cy:py,r:5,fill:color}); else add('path',{...attrs,d:`M${px-5},${py-5}l10,10m0,-10l-10,10`,fill:'none'}); }
+  add('text',{x:90,y:228},'Pluck 1'); add('text',{x:530,y:228},'Pluck '+maxN); holder.appendChild(svg); holder.appendChild(el('p',{class:'small muted'},'Belt A: blue · Belt B: amber'));
+}
+function csvMeasurements() {
+  const quote=v=>'"'+String(v==null?'':v).replace(/^[=+@-]/,"'$&").replace(/"/g,'""')+'"';
+  return ['belt,pluck,frequency_hz,accepted,reason',...measurementRows().map(r=>[r.belt,r.index,r.freq,r.ok,r.why].map(quote).join(','))].join('\r\n');
+}
+function identify() { return rpc('server.connection.identify',{client_name:'Chordata',version:'1',type:'web',url:location.origin,api_key:moonrakerKey}); }
+async function loadAI() {
+  try { const c=await rpc('access.chordata_ai',{action:'get'}); $('aiEnabled').checked=!!c.enabled; $('aiProvider').value=c.provider || 'laya'; $('aiEndpoint').value=c.endpoint || ''; $('aiModel').value=c.model || 'auto'; $('aiConfidence').value=c.min_confidence==null?.7:c.min_confidence; $('aiStatus').textContent=c.enabled?'Review enabled. Measurements are sent only when requested.':'Review disabled.'; }
+  catch(err) { $('aiStatus').textContent='Review settings unavailable: '+errText(err); }
+}
+function initReview() {
+  $('authForm').onsubmit=async e=>{ e.preventDefault(); moonrakerKey=$('moonrakerKey').value; $('moonrakerKey').value=''; try { await identify(); authRequired=false; $('authPanel').open=false; checkKlippy(); applyTheme(); loadAI(); } catch(err) { authBanner(); toast(errText(err)); } };
+  $('exportBtn').onclick=()=>{ const url=URL.createObjectURL(new Blob([csvMeasurements()],{type:'text/csv;charset=utf-8'})); const link=el('a',{href:url,download:'chordata-measurements.csv'}); link.click(); setTimeout(()=>URL.revokeObjectURL(url),1000); };
+  $('aiForm').onsubmit=async e=>{ e.preventDefault(); $('aiSave').disabled=true; try { const config={action:'configure',enabled:$('aiEnabled').checked,provider:$('aiProvider').value,endpoint:$('aiEndpoint').value.trim(),model:$('aiModel').value.trim(),min_confidence:Number($('aiConfidence').value)}; if($('aiClearKey').checked)config.api_key=''; else if($('aiKey').value)config.api_key=$('aiKey').value; await rpc('access.chordata_ai',config); $('aiKey').value=''; $('aiClearKey').checked=false; reviewedSignature=null; $('aiStatus').textContent='Settings saved. '+(config.enabled?'Ready to review measurements.':'Review disabled.'); } catch(err) { $('aiStatus').textContent=errText(err); } finally { $('aiSave').disabled=false; } };
+  $('aiReview').onclick=async()=>{ $('aiReview').disabled=true; const signature=measurementSignature(); reviewedSignature=signature; $('aiStatus').textContent='Reviewing measurements…'; try { const r=await rpc('server.chordata.evaluate'); if(signature!==measurementSignature()) { $('aiStatus').textContent='Measurements changed during review. Request a new review.'; return; } $('aiStatus').textContent=r.status==='ok'?'Advice: '+String(r.decision).replace(/_/g,' ')+(Number.isFinite(r.confidence)?' (confidence '+Math.round(r.confidence*100)+'%). ':'. ')+(r.message || ''):r.message || 'No advice returned: '+r.status; } catch(err) { $('aiStatus').textContent='Review unavailable: '+errText(err); } finally { $('aiReview').disabled=false; } };
 }
 
 function init() {
+  initReview();
   $("startBtn").onclick = () => runGcode("CHORDATA").catch(() => {});
   render();
-  connect();
+  if (demo) {
+    S.chordata={state:"idle",belts:{target:110,plucks:3,A:{freq:109.9,used:3,heard:4,plucks:[{freq:109.5,ok:true},{freq:110.2,ok:true},{freq:145,ok:false,why:"Off target"},{freq:110,ok:true}]},B:{freq:106.8,used:3,heard:3,plucks:[{freq:107,ok:true},{freq:106.5,ok:true},{freq:107.1,ok:true}]}},tools:{}};
+    prompt={title:"Chordata - belt results",items:[],footer:[]}; promptSeq++; render();
+    $("connBanner").textContent="Demo · illustrative data · printer commands disabled";
+    $("aiForm").hidden=true; $("authForm").hidden=true;
+    renderMeasurements();
+  } else connect();
 }
 
 init();
