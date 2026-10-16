@@ -1,73 +1,169 @@
 # Chordata
 
-Accelerometer based belt tension measuring for Kalico and Klipper.
+Measure CoreXY belt frequency using the toolhead accelerometer on Klipper or Kalico.
+Pluck each belt, inspect the accepted readings, and compare both against the target
+specified by your printer manufacturer. Chordata measures frequency in Hz; it does
+not measure force or establish a mechanically safe tension.
 
-Pluck a belt like a guitar string. The accelerometer on the toolhead hears it, and Chordata shows the belt's
-frequency, so you can tension both CoreXY belts to the same, known value. No phone app, no holding a microphone
-next to the belt: the sensor is already on the printer, and you keep both hands free.
+The live page shows both belts, individual plucks, rejected readings and a target
+line. It uses Moonraker subscriptions and updates about once a second while
+recording. CSV export includes the latest series for each belt. Raw accelerometer
+recordings remain available through Mainsail's config file browser.
 
-> **Status: very early in development.** Chordata was written entirely with an AI assistant ("vibecoded").
-> It comes without any warranty (GPL-3.0): you use it at your own risk, and no responsibility is accepted for
-> anything that happens to your printer. Chordata only measures; it never prints, and it moves the toolhead
-> only when you press "Go to belt tensioning position".
+Optional Laya or Jev review evaluates measurement quality. It is **off by default**,
+asks for your endpoint when enabled, and cannot move the printer, change a target,
+or replace the signal-processing result. No AI service is needed to measure belts.
 
-## What it does
+![Chordata desktop demo with belt frequencies, pluck chart and optional AI review](docs/images/desktop-demo.png)
 
-1. **Tap.** You tap the toolhead once. Chordata learns how the toolhead rings by itself, so a knock is never
-   taken for a belt.
-2. **Pluck.** You pluck belt A, then belt B, about once a second. Each pluck is judged: loud enough, not a
-   knock, not the other belt ringing along. Bad plucks are left out, and Chordata keeps listening until
-   5 good plucks are counted ("3 of 5 counted").
-3. **Read and adjust.** For each belt you get its frequency, how far it is from your target, and which way to
-   turn. CoreXY belts pull on each other, so both are measured again after every adjustment. A belt is good
-   when the average of 5 good plucks is within 0.25 Hz of the target.
+*Illustrative demo data; these readings are not a printer calibration.*
 
-Where to put the toolhead, which stretch of belt to pluck and the target frequency all come from your
-printer's own documentation. Chordata can save the toolhead position for next time.
+Start with the **[illustrated user guide](docs/USER_GUIDE.md)** for a complete walkthrough,
+or the **[troubleshooting guide](docs/TROUBLESHOOTING.md)** if setup or measurement fails.
+
+## Preview without a printer
+
+From this checkout:
+
+```sh
+python3 -m http.server 8765 --bind 127.0.0.1 --directory web
+```
+
+Open <http://127.0.0.1:8765/?demo>. The page uses illustrative data and disables
+printer commands and network connections to Moonraker or an AI service. You can
+also open `web/index.html?demo` through a local web server.
 
 ## Requirements
 
-- Kalico or mainline Klipper, Moonraker, and Mainsail or Fluidd
-- An accelerometer on the toolhead (ADXL345, LIS2DW, a probe with one built in) and `[resonance_tester]`
-- `[respond]` in printer.cfg, and numpy in the Klipper Python environment (input shaper needs it too)
-- A CoreXY printer (two belts that must match)
+- CoreXY printer with Klipper or Kalico, Moonraker and Mainsail or Fluidd.
+- Toolhead accelerometer and `[resonance_tester]` configured in Klipper.
+- `[respond]` and NumPy installed in Klipper's Python environment.
+- Your manufacturer's target frequency, measurement span and toolhead position.
 
-## Install
+## Install on the printer host
 
-```
-cd ~ && git clone https://github.com/HydrateFrequently/Chordata.git
-~/Chordata/install.sh
+```sh
+cd ~
+git clone https://github.com/alextverdyy/Chordata.git
+cd Chordata
+./install.sh
 sudo systemctl restart moonraker klipper
 ```
 
-The installer links the plugin into Klipper (`klippy/extras`, or Kalico's `klippy/plugins`), adds
-`[include chordata.cfg]` and `[include chordata_settings.cfg]` at the top of printer.cfg (with a backup), and
-an update entry for Mainsail's update manager. It also adds the **Chordata page**, served by Moonraker (a small
-component, `[chordata_web]`), with a link in Mainsail's sidebar. Open it on a phone at
-`http://<printer>/server/chordata`: it shows each pluck live in big numbers, both belts against the target, and a
-pad to move the toolhead to your belt tensioning position. The same steps also run as prompts from the
-**CHORDATA** macro in Mainsail or Fluidd.
+The installer links the Klipper/Kalico modules and Moonraker component, creates
+`chordata_settings.cfg` if missing, and adds the macro/settings includes. It preserves
+existing settings, backs up printer and Moonraker configuration, and refuses to
+replace regular plugin files. It does not restart services itself.
 
-Settings (`chordata_settings.cfg`): `belt_target` (Hz, default 110; you can also change it on the first prompt)
-and `belt_tolerance` (Hz, default 0.25). Every recording is saved in `chordata/recordings/` in the config
-folder, so you can download it from Mainsail. `CHORDATA_RECORD SECONDS=10 NAME=test` records any accelerometer
-(`CHIP=` as in Klipper's own commands) into the same folder.
+For nonstandard installations, set `KLIPPER_DIR`, `KLIPPY_ENV`, `MOONRAKER_DIR` and
+`CONFIG_DIR` before running it. Without Moonraker source available, it installs only
+the Klipper macro workflow.
 
-## How it was tested
+Mainsail's supported [custom navigation](https://github.com/mainsail-crew/docs/blob/zensical/docs/settings/navigation.md)
+links to the page at `/server/chordata`. This is a Moonraker companion component,
+not a patched Mainsail build. The normal Mainsail reverse proxy must forward
+`/server/`, `/access/` and `/websocket` to Moonraker. Fluidd users can open the page
+directly. The `CHORDATA` macro also provides the measurement prompts.
 
-- The pluck analysis was checked on real recordings from a CoreXY printer, with both a Beacon and an ADXL345,
-  against a Zoom H5 recorder with the XYH-5 microphone as reference: the averages agreed within 0.0 to 0.13 Hz.
-  Interesting detail: the accelerometer mostly hears the belt at twice its frequency, so Chordata looks for
-  the tone and twice the tone together.
-- The same module ran on that real printer as part of Printune (Kalico), measuring both belts.
-- As a standalone plugin, Chordata was installed with install.sh on virtual printers (real Kalico and real
-  mainline Klipper with a simulated MCU and a simulated accelerometer) and run end to end, with bad plucks
-  mixed in on purpose. **It has not yet been run on a physical printer as a standalone plugin.**
-- `tests/test_belts.py` checks the pluck judge on synthetic recordings (and on real ones, if you have them).
+The installer adds a Mainsail update-manager entry pointing at this fork. Existing
+update-manager entries are preserved; if you previously installed upstream, follow
+the [migration instructions](docs/USER_GUIDE.md#migrate-an-existing-upstream-install).
 
-## Origin
+## Measure
 
-Chordata started as the belt tension step of [Printune](https://github.com/HydrateFrequently/Printune), a
-tuning wizard for Kalico/Klipper, and is now available on its own.
+1. Finish or cancel any print. Move to the manufacturer's measurement position.
+2. Start Chordata and set the target for that belt span. The default 110 Hz is a
+   starting value, not a recommendation for every printer.
+3. Record a light toolhead tap to identify its resonances, or skip this step.
+4. Record belt A, then belt B, using even plucks about a second apart. Inspect
+   counted and rejected plucks before adjusting anything.
+5. Adjust manually using the frequency comparison, then measure **both** belts again.
 
-License: GPL-3.0-or-later.
+Completion requires five accepted plucks per belt and an average within the
+configured tolerance (default 0.25 Hz). Spread and standard deviation describe
+repeatability; they are not calibrated measurement uncertainty. A new attempt
+invalidates the previous result for that belt immediately. Recording failures clear
+completion rather than leaving a stale success visible.
+
+The direct G-code commands also reject printing, paused printers and concurrent
+measurements. Saved-position movement remains an explicit user action. Saved
+positions use G-code coordinates; re-save them if you change coordinate offsets.
+
+Settings in `chordata_settings.cfg`:
+
+```ini
+[chordata]
+belt_target: 110
+belt_tolerance: 0.25
+```
+
+`CHORDATA_RECORD SECONDS=10 NAME=test` saves a raw CSV; optional `CHIP=` selects an
+accelerometer. Recordings are under `chordata/recordings/` in the config directory;
+only the latest 40 CSVs are retained. Download important captures before recording more.
+
+## Optional Laya / Jev review
+
+Open **Optional Laya / Jev review** on the page. Enable it, choose the provider,
+enter the **full inference URL**, and save. Examples:
+
+| Provider | Endpoint example | Model |
+| --- | --- | --- |
+| Laya `laya-serve` | `http://laya-host:8000/v1/systemone` | `auto` or a checkpoint your server supports |
+| Jev / TypeSafe | `https://api.typesafe.ai/v1/systemone` | `jev-latest` (`auto` maps to this) |
+
+A compatible gateway can use a different URL. Chordata does not append a path or
+assume that an arbitrary chat/completions API implements System One. The contract is
+`state` plus typed `questions`, returning `answers.review` with a choice, probability
+distribution and confidence. See [TypeSafe's HTTP API](https://docs.typesafe.ai/api).
+
+Enter the provider key only in the page's password field. A blank field retains the
+key for the same endpoint; changing endpoint/provider clears the old key. The page
+also has an explicit clear-key option. Settings are stored with mode `0600` in
+Moonraker's data directory as `chordata-ai.json`, outside the downloadable config
+root and reserved from file-manager access. Keys are never returned to the browser.
+Use HTTPS when credentials cross an untrusted network.
+
+**Review measurements** makes one manual request. It sends only frequency,
+target, tolerance, counts, spread, timestamps and standardized rejection reasons.
+It sends no raw recordings, printer configuration or file paths. Requests have a
+10-second deadline, refuse redirects and validate TLS certificates. An unavailable
+service leaves measurement working. Disabling review stops future provider calls.
+
+Review is advisory and experimental. Its confidence is model uncertainty, not sensor
+accuracy. The default threshold is 0.7. Low-confidence, malformed, incomplete or
+stale reviews are withheld. The live Laya trials for this rewrite abstained; they do
+not establish reliable belt-quality classification. Keep the threshold unless you
+have validated a different value on your own labelled recordings.
+
+Moonraker protects settings and evaluation with its normal authorization. If your
+device is not authenticated, the **Printer connection** section accepts a Moonraker
+API key in memory for that page session. It is not stored in browser storage.
+
+## Development and verification
+
+```sh
+python3 -m venv .venv
+.venv/bin/pip install -r requirements-dev.txt
+.venv/bin/python -m unittest discover -s tests -v
+.venv/bin/python tests/test_belts.py
+npm ci
+npx playwright install chromium
+npm test
+```
+
+The browser suite covers the offline demo, mobile/desktop layout, live updates,
+authentication, endpoint settings, CSV export and stale review invalidation. Python
+tests cover synthetic signal processing, printer interlocks, capture cleanup,
+configuration privacy, provider failures and installer reruns. GitHub Actions runs
+these suites on pushes and pull requests. The [validation record](docs/VALIDATION.md)
+distinguishes local checks from remote CI and hardware testing.
+
+See [the validation record](docs/VALIDATION.md) for what was actually run and what
+still needs testing on a physical printer. Original upstream testing and real-recording
+claims are historical; this rewrite has not reproduced them on hardware.
+
+## Origin and license
+
+Chordata started as the belt-tension step of
+[Printune](https://github.com/HydrateFrequently/Printune).
+GPL-3.0-or-later; see [LICENSE](LICENSE).

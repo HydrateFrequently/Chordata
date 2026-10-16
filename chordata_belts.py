@@ -339,12 +339,26 @@ def _steady(axes, fs, n, nfft):
 def _setup(t, ax, ay, az, quiet):
     t = np.asarray(t, float)
     axes = [np.asarray(a, float) for a in (ax, ay, az)]
+    if t.ndim != 1 or any(a.ndim != 1 or len(a) != len(t) for a in axes):
+        raise ValueError("recording must contain equally sized one-dimensional time and acceleration arrays")
+    if not np.isfinite(t).all() or any(not np.isfinite(a).all() for a in axes):
+        raise ValueError("recording contains non-finite samples")
+    if len(t) > 1 and not np.all(np.diff(t) > 0):
+        raise ValueError("recording timestamps must increase strictly")
     if len(t) < 100:
         return None
     fs = (len(t) - 1) / (t[-1] - t[0])
+    if fs <= 2 * SEARCH[0] / 0.45:
+        raise ValueError("accelerometer sample rate is too low for belt analysis")
     q = None
-    if quiet is not None and len(quiet[0]) > int(0.5 * fs):
-        q = [np.asarray(a, float) for a in quiet]
+    if quiet is not None:
+        if len(quiet) != 3:
+            raise ValueError("quiet recording must contain three acceleration arrays")
+        qa = [np.asarray(a, float) for a in quiet]
+        if any(a.ndim != 1 or len(a) != len(qa[0]) or not np.isfinite(a).all() for a in qa):
+            raise ValueError("quiet recording contains invalid acceleration samples")
+        if len(qa[0]) > int(0.5 * fs):
+            q = qa
     return axes, fs, q
 
 
@@ -387,13 +401,27 @@ def analyse(t, ax, ay, az, target=None, expect=None, quiet=None, avoid=(), other
     dict: freq (None unless the series is good), plucks (every pluck heard: freq, dB at
     the tone and at twice it, ok, why), used, heard, verdict (good, again, spread,
     spans, none), note."""
-    def out(verdict, note, plucks=(), freq=None, used=0):
-        return {"freq": freq, "plucks": list(plucks), "used": used, "heard": len(plucks),
-                "verdict": verdict, "note": note}
+    for name, value in (("target", target), ("other", other), ("prev", prev)):
+        if value is not None and (not math.isfinite(value) or value <= 0):
+            raise ValueError("%s frequency must be positive and finite" % name)
+    if expect is not None and (isinstance(expect, bool) or not isinstance(expect, (int, np.integer)) or expect < 1):
+        raise ValueError("expected pluck count must be a positive integer")
+    avoid = tuple(avoid)
+    if any(not math.isfinite(value) or value <= 0 for value in avoid):
+        raise ValueError("toolhead modes must be positive and finite")
     st = _setup(t, ax, ay, az, quiet)
+    metadata = {"sample_count": len(t), "sample_rate": None, "duration": 0.0}
+
+    def out(verdict, note, plucks=(), freq=None, used=0):
+        frequencies = [p["freq"] for p in plucks if p["ok"] and p["freq"] is not None]
+        return {"freq": freq, "plucks": list(plucks), "used": used, "heard": len(plucks),
+                "verdict": verdict, "note": note, "metadata": dict(metadata),
+                "spread": round(max(frequencies) - min(frequencies), 3) if frequencies else None,
+                "stddev": round(float(np.std(frequencies)), 3) if frequencies else None}
     if st is None:
         return out("none", "no data from the accelerometer")
     axes, fs, q = st
+    metadata.update(sample_rate=round(float(fs), 3), duration=round(float(t[-1] - t[0]), 3))
     lo, hi = SEARCH[0], min(SEARCH[1], 0.45 * fs / 2.0)
     mask = steady_lines(q, fs) if q is not None else None
     base = float(np.median(_band(q, fs, lo, hi, mask))) if q is not None else None
@@ -505,7 +533,10 @@ def analyse_tap(t, ax, ay, az, quiet=None):
     on, a0, a1 = next(_windows(axes, fs, onsets[:1]), (None, None, None))
     if on is None:
         return {"modes": [], "note": "the tap was too close to the end"}
-    p, nz, halves = _spectra(axes, q, fs, nfft, f, None, a0, a1, {})
+    sp = _spectra(axes, q, fs, nfft, f, None, a0, a1, {})
+    if sp is None:
+        return {"modes": [], "note": "not enough background data for the tap"}
+    p, nz, halves = sp
     snr = p / np.maximum(nz, 1e-30)
     sel = np.flatnonzero((f >= lo) & (f <= hi))
     # real lines only: a local maximum over +-3 Hz that rises at least 6 dB above the
