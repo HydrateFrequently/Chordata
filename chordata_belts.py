@@ -212,6 +212,7 @@ OTHER_GUARD = 1.0         # Hz: a pluck this close to the other belt is that bel
 SPREAD = 1.0              # Hz: accepted plucks must all be this close to their median
 SPAN = 0.05               # share: plucks this far from the rest rang on another stretch of belt
 MIN_GOOD = 3              # fewer accepted plucks than this: no reading
+EARLY_SPREAD = 0.1        # Hz: the first MIN_GOOD plucks this close together are enough (no need for all)
 # How long a line rings tells a belt from the toolhead or the frame: a knocked toolhead
 # rings out within ~0.15-0.3 s, a belt much longer. The pull at twice the tone goes
 # with the swing squared, so it dies twice as fast as the tone itself.
@@ -590,7 +591,7 @@ def _clusters(fr):
     return best
 
 
-def analyse(t, ax, ay, az, target=None, expect=None, quiet=None, avoid=(), other=None, prev=None):
+def analyse(t, ax, ay, az, target=None, expect=None, quiet=None, avoid=(), other=None, prev=None, free=False):
     """Belt tone from a recording with several plucks. quiet: (ax, ay, az) of a short
     recording without plucks, to tell fans and motors from the belt. target: the
     target tone (bounds where the tone is looked for). avoid: the toolhead's own
@@ -715,6 +716,10 @@ def analyse(t, ax, ay, az, target=None, expect=None, quiet=None, avoid=(), other
         ok = [x for x in plucks if x["ok"]]
     if not plucks:
         return out("none", "no clear pluck heard")
+    if free:
+        # free tune: the belts change between plucks on purpose, so each clear pluck stands alone
+        return out("free" if ok else "none", "%d of %d plucks clear" % (len(ok), len(plucks)), plucks,
+                   freq=ok[-1]["freq"] if ok else None, used=len(ok))
     if len(ok) < MIN_GOOD:
         return out("again", "%d of %d plucks clear" % (len(ok), len(plucks)), plucks, used=len(ok))
     # plucks far from the rest rang on another stretch of belt: left out if most agree,
@@ -750,8 +755,19 @@ def analyse(t, ax, ay, az, target=None, expect=None, quiet=None, avoid=(), other
             x["ok"], x["why"] = False, "more than needed"
         ok = ok[:expect]
         fr = [x["freq"] for x in ok]
-    return out("good", "%d of %d plucks counted" % (len(ok), len(plucks)), plucks,
-               freq=round(float(np.mean(fr)), 1), used=len(ok))
+    res = out("good", "%d of %d plucks counted" % (len(ok), len(plucks)), plucks,
+              freq=round(float(np.mean(fr)), 1), used=len(ok))
+    res["enough"] = early_enough(fr, expect)
+    return res
+
+
+def early_enough(fr, expect):
+    """Enough plucks for a final reading: all that were asked for, or the first MIN_GOOD
+    of them within EARLY_SPREAD of each other (a steady hand: the rest wouldn't change it)."""
+    if not expect or len(fr) >= expect:
+        return True
+    first = fr[:MIN_GOOD]
+    return len(first) >= MIN_GOOD and max(first) - min(first) <= EARLY_SPREAD
 
 
 def _width(f, p, k, df):
@@ -861,7 +877,9 @@ def plan(b):
     if fa is None or fb is None:
         return "", upd
     need = b.get("plucks", 5)
-    good = {k: abs(f - tgt) <= tol and ((b.get(k) or {}).get("used") or 0) >= need
+    def enough(r):
+        return r.get("enough", (r.get("used") or 0) >= need)
+    good = {k: abs(f - tgt) <= tol and enough(b.get(k) or {})
             for k, f in (("A", fa), ("B", fb))}
     upd["belt_good"] = good
     upd["done"] = good["A"] and good["B"]

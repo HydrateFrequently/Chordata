@@ -267,6 +267,15 @@ def series_rules(q):
     r = belts.analyse(*rec(ev), quiet=q, target=110.0)
     check("4 of 6 agree: 72 and 60 left out", near(r, 90.5) and r["used"] == 4
           and sum(p["why"].startswith("rang at") for p in r["plucks"]) == 2, r)
+    # free tune: every clear pluck counts on its own, the last one is the reading
+    r = belts.analyse(*rec(series([100.0, 105.0, 110.0])), quiet=q, target=110.0, free=True)
+    check("free tune: 3 different plucks, last read", r["verdict"] == "free" and abs(r["freq"] - 110.0) < 0.4
+          and r["used"] == 3, r)
+    r = belts.analyse(*rec([]), quiet=q, target=110.0, free=True)
+    check("free tune: silence, no reading", r["freq"] is None and r["verdict"] == "none", r)
+    # three plucks within 0.1 Hz are enough; three spread wider need all five
+    check("early: 3 within 0.1 Hz enough", belts.early_enough([110.0, 110.05, 110.1], 5), {"freq": None, "verdict": "", "used": 3, "heard": 3, "note": "", "plucks": []})
+    check("early: 3 within 0.3 Hz not enough", not belts.early_enough([110.0, 110.3, 110.1], 5), {"freq": None, "verdict": "", "used": 3, "heard": 3, "note": "", "plucks": []})
     # all plucks on the same wrong stretch: a reading all the same (the judge can't know)
     r = belts.analyse(*rec(series([72.0] * 5)), quiet=q, target=110.0)
     check("5 plucks at 72 Hz: a reading", near(r, 72.0), r)

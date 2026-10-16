@@ -40,11 +40,29 @@ const path = require('node:path');
         send(raw){const request=JSON.parse(raw); window.__calls.push(request); let result={};
           if(request.method==='server.info')result={klippy_state:'ready'};
           if(request.method==='printer.objects.subscribe')result={status:{chordata:{state:'idle',tools:{accel:true,corexy:true},belts:{target:110,A:{plucks:[{freq:110,ok:true}]}}}}};
-          setTimeout(()=>this.onmessage({data:JSON.stringify({id:request.id,result})}),0);
+          const reply=()=>this.onmessage({data:JSON.stringify({id:request.id,result})});
+          if(request.method==='printer.gcode.script'&&request.params.script==='G28'){window.__releaseHome=reply;return;}
+          setTimeout(reply,0);
         }
       };
     });
     await live.goto('file://'+path.resolve(__dirname,'../web/index.html'));
+    // A long homing: no request timeout, and no jog pad until our G28 returns (X/Y report homed before Z)
+    await live.locator('#homeJog summary').click();   // the landing page keeps the pad closed
+    const homeBtn=live.locator('#homeJog button',{hasText:/^Home$/});
+    await homeBtn.click();
+    await live.waitForFunction(()=>typeof window.__releaseHome==='function');
+    assert.equal(await live.evaluate(()=>[...pending.values()].every(p=>p.timer===null)),true);
+    await live.evaluate(()=>{ S.toolhead={homed_axes:'xy',position:[10,20,0,0]}; render(); });
+    assert.match(await live.locator('#homeJog').textContent(),/Stand by, homing\./);
+    assert.equal(await live.locator('#homeJog .pad').count(),0);
+    await live.evaluate(()=>window.__releaseHome());
+    await live.waitForFunction(()=>document.querySelector('#homeJog .pad'));
+    // Reloaded mid-homing: the printer is busy and Z is not homed yet
+    await live.evaluate(()=>{ S.idle_timeout={state:'Printing'}; S.toolhead={homed_axes:'xy',position:[10,20,0,0]}; render(); });
+    assert.match(await live.locator('#homeJog').textContent(),/Stand by, homing\./);
+    await live.evaluate(()=>{ S.idle_timeout={state:'Ready'}; S.toolhead={homed_axes:'xyz',position:[10,20,0,0]}; render(); });
+    assert.equal(await live.locator('#homeJog .pad').count(),1);
     await live.locator('#authPanel summary').click();
     await live.locator('#moonrakerKey').fill('test-moonraker-placeholder');
     await live.locator('#authForm button').click();

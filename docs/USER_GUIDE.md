@@ -143,8 +143,9 @@ Restart Klipper after changing configuration. You can also adjust the session ta
 in Chordata's initial prompts. A session target does not rewrite the config file.
 
 Use the page's explicit toolhead controls, or Mainsail's own controls, to home and
-move to the documented belt-measurement position. Select **Save belt tensioning
-position** if you want to reuse it. **Go to belt tensioning position** is a separate
+move to the documented belt-measurement position. Select **Save this position**
+(**Save belt tensioning position** in the setup prompt) if you want to reuse it.
+**Go to saved position** (**Go to belt tensioning position** in the prompt) is a separate
 movement action and requires homing first. It only raises Z when the saved position
 requires more clearance; it does not lower Z to the saved value.
 

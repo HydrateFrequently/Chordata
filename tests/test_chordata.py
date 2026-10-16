@@ -58,11 +58,37 @@ def status(**values):
 class SafetyTests(unittest.TestCase):
     def test_all_direct_commands_reject_printing_and_paused(self):
         for state in ("printing", "paused"):
-            for command in ("START", "LISTEN", "TAP", "POS", "RECORD"):
+            for command in ("START", "LISTEN", "BOTH", "FREE", "TAP", "POS", "RECORD"):
                 with self.subTest(state=state, command=command):
                     obj = plugin({"print_stats": status(state=state)})
                     with self.assertRaisesRegex(ValueError, "finish or cancel"):
                         getattr(obj, "cmd_CHORDATA_" + command)(Command())
+
+    def test_free_tune_needs_the_tap_and_leaves_belts_alone(self):
+        obj = plugin({"print_stats": status(state="standby")})
+        obj.belts["tap_done"] = False
+        before = json.dumps(obj.belts, sort_keys=True)
+        with self.assertRaisesRegex(ValueError, "tap the toolhead"):
+            obj.cmd_CHORDATA_FREE(Command())
+        self.assertEqual(json.dumps(obj.belts, sort_keys=True), before)
+        self.assertEqual(obj.state, "idle")
+
+    def test_both_needs_the_tap(self):
+        obj = plugin({"print_stats": status(state="standby")})
+        obj.belts["tap_done"] = False
+        with self.assertRaisesRegex(ValueError, "tap the toolhead"):
+            obj.cmd_CHORDATA_BOTH(Command())
+        self.assertEqual(obj.state, "idle")
+
+    def test_quiet_recorded_again_when_a_fan_changes(self):
+        fan = {"speed": 0.}
+        obj = plugin()
+        obj.printer.lookup_objects = lambda: [("fan", status(**fan)), ("toolhead", object())]
+        obj._quiet_rec = (obj._fans(), [(0., 1., 2., 3.)])
+        self.assertIsNotNone(obj._quiet_cached())
+        fan["speed"] = .5
+        obj.printer.lookup_objects = lambda: [("fan", status(**fan))]
+        self.assertIsNone(obj._quiet_cached())
 
     def test_active_sd_and_pause_interlocks_without_print_stats(self):
         for name, value in (("virtual_sdcard", status(is_active=True)),
@@ -320,3 +346,15 @@ class AnalysisValidationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MacroRecursionTest(unittest.TestCase):
+    """Klipper refuses a macro that runs itself ("called recursively"), e.g. after Go/Save in the setup prompt."""
+
+    def test_no_macro_runs_itself(self):
+        import re
+        text = open(os.path.join(os.path.dirname(__file__), "..", "chordata.cfg")).read()
+        for name, body in re.findall(r"^\[gcode_macro (\S+)\]\n(.*?)(?=^\[|\Z)", text, re.M | re.S):
+            for line in body.splitlines():
+                cmd = line.strip().split(" ")[0]
+                self.assertNotEqual(cmd, name, "%s runs itself: %s" % (name, line.strip()))

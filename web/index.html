@@ -158,14 +158,20 @@ details.sub > summary { cursor: pointer; color: var(--primary); font-weight: 600
 .jog { margin: 0 0 10px; background: var(--card2); border-radius: var(--radius); padding: 8px 12px; }
 .jog summary { font-weight: 600; cursor: pointer; }
 .jog .pos { text-align: center; font-variant-numeric: tabular-nums; font-size: 18px; margin: 6px 0; }
-.jog .pad { display: grid; grid-template-columns: repeat(3, minmax(0, 64px)); gap: 6px; justify-content: center; }
-.jog .pad button, .jog .row button { min-height: 52px; font-size: 18px; }
-.jog .row { display: flex; gap: 6px; justify-content: center; flex-wrap: wrap; margin-top: 8px; }
-.jog .row button.sel { outline: 2px solid var(--primary); }
+/* compact: the arrows and the step column sit side by side, so the pad fits a phone screen without scrolling */
+.jog .jogbody { display: flex; gap: 12px; justify-content: center; align-items: center; margin-top: 4px; }
+.jog .pad { display: grid; grid-template-columns: repeat(3, 52px); grid-auto-rows: 46px; gap: 6px; }
+.jog .steps { display: grid; grid-template-columns: 1fr; gap: 6px; min-width: 84px; }
+.jog .pad button, .jog .row button, .jog .steps button { min-height: 44px; padding: 4px 8px; font-size: 16px; }
+.jog .row { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 6px; margin-top: 8px; }
+.jog .saved { text-align: center; color: var(--muted); font-size: 14px; margin-top: 6px; font-variant-numeric: tabular-nums; }
+.jog .row button.sel { background: var(--primary); color: var(--primary-text); font-weight: 700; }  /* inverse video, like a selected MFD option */
 #beltView .live { text-align: center; padding: 10px 0 4px; }
 #beltView .live .hz { font-size: 64px; font-weight: 700; line-height: 1.05; font-variant-numeric: tabular-nums; }
 #beltView .live .hz.out { color: var(--muted); text-decoration: line-through; }
 #beltView .live .sub { color: var(--muted); font-size: 16px; }
+#beltView .live .d { font-size: 20px; font-weight: 600; }
+#beltView .live .d.good { color: var(--ok); } #beltView .live .d.near { color: var(--warn); } #beltView .live .d.far { color: var(--err); }
 #beltView .chips { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; margin: 8px 0; }
 #beltView .chip { padding: 4px 10px; border-radius: 999px; background: var(--card2); font-variant-numeric: tabular-nums; font-size: 16px; }
 #beltView .chip.ok { background: var(--primary-soft); color: var(--text); }
@@ -174,7 +180,7 @@ details.sub > summary { cursor: pointer; color: var(--primary); font-weight: 600
 #beltView .belt { background: var(--card2); border-radius: var(--radius); padding: 12px; text-align: center; border: 2px solid transparent; min-width: 0; }
 #beltView .belt.now { border-color: var(--primary); }
 #beltView .belt .name { color: var(--muted); font-size: 15px; }
-#beltView .belt .hz { font-size: 40px; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; }
+#beltView .belt .hz { white-space: nowrap; font-size: clamp(26px, 8vw, 40px); font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; }
 #beltView .belt .d { font-size: 16px; font-weight: 600; }
 #beltView .belt .d.good { color: var(--ok); }
 #beltView .belt .d.near { color: var(--warn); }
@@ -241,8 +247,25 @@ th,td { padding:8px; border-bottom:1px solid var(--line); text-align:left; }
 .trend text { fill:var(--muted); font:22px system-ui; }
 summary:focus-visible { outline:3px solid var(--primary); outline-offset:2px; }
 @media(prefers-reduced-motion:reduce) { * { scroll-behavior:auto!important; transition:none!important; } }
+/* Full-screen cue cards for the steps that matter (hands off, tap, ready): seen from the corner of an eye.
+   Fixed colours on purpose, the same in both themes. */
+#cue {
+  position: fixed; inset: 0; z-index: 50; display: flex; flex-direction: column; align-items: center;
+  justify-content: center; gap: 18px; text-align: center; cursor: pointer;
+  padding: max(24px, env(safe-area-inset-top, 0px)) max(20px, env(safe-area-inset-right, 0px))
+           max(24px, env(safe-area-inset-bottom, 0px)) max(20px, env(safe-area-inset-left, 0px));
+  --cbg: #d32f2f; --cfg: #ffffff; background: var(--cbg); color: var(--cfg);
+}
+#cue.yellow { --cbg: #ffd600; --cfg: #111111; }
+#cue.green { --cbg: #2e7d32; --cfg: #ffffff; }
+#cue.inv { background: var(--cfg); color: var(--cbg); }
+#cue .cbig {
+  font-size: clamp(30px, 10vw, 64px); font-weight: 900; line-height: 1.1; letter-spacing: .02em;
+  text-transform: uppercase; text-wrap: balance; max-width: 14em; }
+#cue .sub { font-size: clamp(16px, 4.5vw, 22px); font-weight: 600; opacity: .85; max-width: 26em; }
 </style></head>
 <body>
+<div id="cue" role="alert" aria-live="assertive" hidden><div class="cbig" id="cueBig"></div><div class="sub" id="cueSub"></div></div>
 <header class="top">
   <span class="dot" id="dot" aria-hidden="true"></span>
   <h1>Chordata</h1>
@@ -306,7 +329,7 @@ summary:focus-visible { outline:3px solid var(--primary); outline-offset:2px; }
 "use strict";
 
 const SUBSCRIBE = {
-  print_stats: null,
+  print_stats: null, idle_timeout: ["state"],
   toolhead: ["homed_axes", "position"], gcode_move: ["homing_origin", "gcode_position"],
   chordata: null,
 };
@@ -454,11 +477,12 @@ function scheduleReconnect() {
   render();
 }
 
-function rpc(method, params) {
+function rpc(method, params, wait) {
   return new Promise((resolve, reject) => {
     if (!ws || ws.readyState !== 1) { reject({ message: "Not connected to the printer" }); return; }
     const id = rpcId++;
-    const timer=setTimeout(()=>{ pending.delete(id); reject({message:"Printer request timed out. Try again."}); },30000);
+    // G-code (homing, moves) may legitimately run for minutes; it ends with its reply or a lost connection
+    const timer = wait === 0 ? null : setTimeout(()=>{ pending.delete(id); reject({message:"Printer request timed out. Try again."}); }, wait || 30000);
     pending.set(id, { resolve, reject, timer });
     ws.send(JSON.stringify({ jsonrpc: "2.0", method, params: params || {}, id }));
   });
@@ -475,7 +499,7 @@ function errText(err) {
 
 function runGcode(script, quiet) {
   if (demo) return Promise.reject({message:"Demo mode cannot send printer commands"});
-  return rpc("printer.gcode.script", { script }).catch((err) => {
+  return rpc("printer.gcode.script", { script }, 0).catch((err) => {
     const t = errText(err);
     if (!quiet) toast(t);
     if (err && err.code === 401) authBanner();
@@ -670,21 +694,26 @@ function fmtHz(v) { return v == null ? "--" : Number(v).toFixed(1); }
 // Jog pad: the user moves the toolhead to where their printer's guide says to pluck.
 // Chordata itself never moves it; every move here is a button press.
 let jogStep = 10;
-function jogPad(open) {
+let homing = false;   // homed_axes shows X and Y before Z is done, so track our own G28 until it returns
+function jogPad(open, landing) {
   const th = obj("toolhead"), homed = String(th.homed_axes || "");
+  // After a page reload (phone screen lock) our own flag is gone: a busy printer without Z homed is still homing
+  const homingNow = homing || (obj("idle_timeout").state === "Printing" && !isPrinting() && !homed.includes("z"));
   const d = el("details", { class: "jog" });
-  if (open || !pt().belt_pos) d.open = true;      // nothing saved yet: open, so the move isn't forgotten
+  if (open || (!landing && !pt().belt_pos)) d.open = true;      // in the prompt with nothing saved yet: open, so the move isn't forgotten
   d.appendChild(el("summary", {}, "Move the toolhead"));
   const pos = obj("gcode_move").gcode_position || th.position || [];
-  d.appendChild(el("div", { class: "pos" }, homed.includes("x") && homed.includes("y") && pos.length
+  d.appendChild(el("div", { class: "pos" }, homingNow ? "Stand by, homing."
+    : homed.includes("x") && homed.includes("y") && pos.length
     ? "X " + Number(pos[0]).toFixed(1) + "   Y " + Number(pos[1]).toFixed(1) + (homed.includes("z") ? "   Z " + Number(pos[2]).toFixed(1) : "")
     : "Not homed: home first"));
   const move = (axis, dist) => () => runGcode("SAVE_GCODE_STATE NAME=_chordata_jog\nG91\nG1 " + axis + dist +
     " F" + (axis === "Z" ? 600 : 6000) + "\nRESTORE_GCODE_STATE NAME=_chordata_jog");
+  if (homingNow) return d;
   if (!(homed.includes("x") && homed.includes("y"))) {
     const r = el("div", { class: "row" });
     const h = el("button", { type: "button", class: "primary" }, "Home");
-    h.onclick = () => runGcode("G28");
+    h.onclick = () => { homing = true; render(); runGcode("G28").catch(() => {}).finally(() => { homing = false; render(); }); };
     r.appendChild(h);
     d.appendChild(r);
     return d;
@@ -698,10 +727,11 @@ function jogPad(open) {
   };
   for (const c of [["", 0, 0], ["Y+", "Y", 1], ["", 0, 0], ["X-", "X", -1], ["", 0, 0], ["X+", "X", 1], ["", 0, 0], ["Y-", "Y", -1], ["", 0, 0]])
     pad.appendChild(cell(...c));
-  d.appendChild(pad);
-  const r = el("div", { class: "row" });
+  const body = el("div", { class: "jogbody" });
+  body.appendChild(pad);
+  const r = el("div", { class: "steps" });
   for (const st of [1, 10, 50]) {
-    const bt = el("button", { type: "button", class: st === jogStep ? "sel" : "" }, st + " mm");
+    const bt = el("button", { type: "button", class: st === jogStep ? "sel" : "", "aria-pressed": String(st === jogStep) }, st + " mm");
     bt.onclick = () => { jogStep = st; render(); };
     r.appendChild(bt);
   }
@@ -710,20 +740,56 @@ function jogPad(open) {
     z.onclick = move("Z", 10);
     r.appendChild(z);
   }
-  d.appendChild(r);
+  body.appendChild(r);
+  d.appendChild(body);
   const bp = pt().belt_pos;
   const r2 = el("div", { class: "row" });
   if (bp) {
-    const go = el("button", { type: "button", class: "primary" }, "Go to belt tensioning position");
+    const go = el("button", { type: "button", class: "primary" }, "Go to saved position");
     go.onclick = () => runGcode("_CHORDATA_POS GO=1");
     r2.appendChild(go);
   }
-  const sv = el("button", { type: "button" }, "Save belt tensioning position");
+  const sv = el("button", { type: "button" }, "Save this position");
   sv.onclick = () => runGcode("_CHORDATA_POS SAVE=1");
   r2.appendChild(sv);
   d.appendChild(r2);
-  if (bp) d.appendChild(el("div", { class: "pos" }, "Saved: X " + Number(bp.x).toFixed(1) + "  Y " + Number(bp.y).toFixed(1)));
+  if (bp) d.appendChild(el("div", { class: "saved" }, "Belt tensioning position: X " + Number(bp.x).toFixed(1) + "  Y " + Number(bp.y).toFixed(1)));
   return d;
+}
+
+// Free tune: one big number, the newest clear pluck, and how far it is from the target
+function renderFree(box, b) {
+  const listening = pt().state === "listening" && pt().belt_now === "free";
+  const plucks = (listening ? pt().belt_live : (b.free || {}).plucks) || [];
+  const good = plucks.filter((p) => p.ok && p.freq != null);
+  const last = good.length ? good[good.length - 1].freq : null;
+  const live = el("div", { class: "live" });
+  live.appendChild(el("div", { class: "hz" }, last != null ? fmtHz(last) + " Hz" : (listening ? "..." : "--")));
+  if (last != null) {
+    const d = last - b.target, tol = b.tol || 0.25;
+    const cls = Math.abs(d) <= tol ? "good" : (Math.abs(d) <= 2 ? "near" : "far");
+    live.appendChild(el("div", { class: "d " + cls }, Math.abs(d) <= tol ? "on target"
+      : (d < 0 ? "-" : "+") + Math.abs(d).toFixed(1) + " Hz, " + (d < 0 ? "tighten" : "loosen")));
+  }
+  live.appendChild(el("div", { class: "sub" }, "Target " + Number(b.target).toFixed(0) + " Hz" +
+    (listening ? "  ·  " + (pt().message || "Listening") : "")));
+  box.appendChild(live);
+  if (plucks.length) {
+    const chips = el("div", { class: "chips" });
+    for (const p of plucks.slice(-12)) {
+      const c = el("span", { class: "chip " + (p.ok ? "ok" : "out") }, p.freq != null ? fmtHz(p.freq) : "x");
+      if (!p.ok && p.why) c.title = p.why;
+      chips.appendChild(c);
+    }
+    box.appendChild(chips);
+  }
+  if (listening && pt().measurement && pt().measurement.phase === "listening") {
+    const done = el("button", { class: "primary", type: "button", style: "width:100%;margin-top:12px" }, accepting ? "Stopping..." : "Done");
+    done.disabled = accepting;
+    done.onclick = () => { accepting = true; done.disabled = true;
+      rpc("server.chordata.accept", {}).catch((e) => { accepting = false; toast(errText(e)); }); };
+    box.appendChild(done);
+  }
 }
 
 // "4 of 5 counted (1 left out)": counted out of the plucks needed, not out of those heard
@@ -733,13 +799,15 @@ function countText(r, need) {
 }
 function renderBelts() {
   const b = pt().belts || {};
-  const on = !!prompt && /^Chordata - (belt|pluck|tap)/i.test(prompt.title || "") && !!b.target;
+  const free = !!prompt && /^Chordata - free/i.test(prompt.title || "");
+  const on = !!prompt && /^Chordata - (belt|pluck|tap|free)/i.test(prompt.title || "") && !!b.target;
   show("beltView", on);
   if (!on) return;
   const box = $("beltView");
   const jogOpen = !!(box.querySelector(".jog") || {}).open;
   box.textContent = "";
   if (!demo && pt().state !== "listening") box.appendChild(jogPad(jogOpen));
+  if (free) { renderFree(box, b); return; }
   const now = pt().belt_now || (/belt (A|B)/i.exec(prompt.title || "") || [])[1] || "";
   const cur = (now === "A" || now === "B") ? b[now] : null;
   // the newest pluck of the belt being measured, big
@@ -754,15 +822,12 @@ function renderBelts() {
     live.appendChild(el("div", { class: "sub" }, listening && plucks.length
       ? Math.min(okN, b.plucks || okN) + " of " + (b.plucks || plucks.length) + " counted" + (last && !last.ok ? " (last: " + (last.why || "not counted") + ")" : "")
       : (pt().message || "Listening")));
-  } else if (cur && cur.freq != null) {
-    live.appendChild(el("div", { class: "hz" }, fmtHz(cur.freq) + " Hz"));
-    live.appendChild(el("div", { class: "sub" }, "Belt " + now + ": " + countText(cur, b.plucks)));
-  } else if (cur) {
+  } else if (cur && cur.freq == null) {     // a finished belt is shown once, in its card below
     live.appendChild(el("div", { class: "hz out" }, last && last.freq != null ? fmtHz(last.freq) : "--"));
     live.appendChild(el("div", { class: "sub" }, "Pluck again"));
   }
   if (live.childNodes.length) box.appendChild(live);
-  if (plucks.length) {
+  if (plucks.length && pt().state === "listening") {   // once done, the belt cards say it (the table below keeps every pluck)
     const chips = el("div", { class: "chips" });
     for (const p of plucks) {
       const c = el("span", { class: "chip " + (p.ok ? "ok" : "out") }, p.freq != null ? fmtHz(p.freq) : "x");
@@ -787,7 +852,7 @@ function renderBelts() {
     if (r && r.freq != null) {
       const d = r.freq - b.target, tol = b.tol || 0.25;
       const cls = Math.abs(d) <= tol ? "good" : (Math.abs(d) <= 2 ? "near" : "far");
-      const good = Math.abs(d) <= tol && r.used >= (b.plucks || 5);
+      const good = Math.abs(d) <= tol && (r.enough != null ? r.enough : r.used >= (b.plucks || 5));
       t.appendChild(el("div", { class: "d " + cls }, Math.abs(d) <= tol ? (good ? "Belt good" : "on target")
         : (d < 0 ? "-" : "+") + Math.abs(d).toFixed(1) + " Hz, " + (d < 0 ? "tighten" : "loosen")));
       t.appendChild(el("div", { class: "n" }, countText(r, b.plucks)));
@@ -808,6 +873,72 @@ const S = {};             // merged printer status
 let klippyState = "";     // "ready", "startup", "shutdown", "error", "disconnected"
 let connected = false;
 function obj(name) { return S[name] || {}; }
+// ---------- cue cards: red = hands off (recording the quiet), yellow = do it now, green = ready ----------
+let cueKey = "", cueTimer = null, cueHide = null, cueSawTap = false, cueLast = "";
+const CUES = {
+  silence: ["red", "Stand by: recording silence", "Hands off the printer. Chordata is listening to how quiet it is."],
+  tap: ["yellow", "Tap the toolhead lightly with a finger or tool", "Once. Don't touch the belts."],
+  ready: ["green", "Ready to listen for plucks", "Tap to close"],
+  "pluck:A": ["green", "Pluck belt A", "Like a guitar string, evenly."],
+  "pluck:B": ["green", "Pluck belt B", "Like a guitar string, evenly."],
+  "pluck:free": ["green", "Pluck either belt", "As often as you like."],
+  switch: ["yellow", "Tap the toolhead", "Belt A is counted. Tap the toolhead once, then pluck belt B."],
+  enough: ["green", "3 plucks agree", "Tap here to accept them, or keep plucking to 5."],
+};
+const CUE_BRIEF = ["ready", "pluck:A", "pluck:B", "pluck:free"];   // green: close by themselves
+function cueFlash(times, ms, done) {
+  const box = $("cue");
+  clearInterval(cueTimer);
+  let n = 0;
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) times = 0;
+  if (!times) { box.classList.remove("inv"); if (done) done(); return; }
+  cueTimer = setInterval(() => {
+    box.classList.toggle("inv");
+    if (++n >= times * 2) { clearInterval(cueTimer); box.classList.remove("inv"); if (done) done(); }
+  }, ms);
+}
+function cueSet(key) {
+  if (key === cueKey) return;
+  const was = cueKey, box = $("cue");
+  cueKey = key;
+  clearTimeout(cueHide);
+  if (!key) { clearInterval(cueTimer); box.hidden = true; return; }
+  const [colour, big, sub] = CUES[key];
+  const paint = () => { box.className = colour; $("cueBig").textContent = big; $("cueSub").textContent = sub; };
+  if (key === "silence") { paint(); box.hidden = false; cueFlash(3, 110); }
+  else if (key === "tap") { box.hidden = false; cueFlash(2, 55, () => { paint(); }); }
+  else { box.hidden = false; cueFlash(1, 110, () => { paint(); if (CUE_BRIEF.includes(key)) cueHide = setTimeout(() => cueSet(""), key === "ready" ? 4000 : 2500); }); }
+  if (!was && key !== "silence") paint();
+}
+function cueUpdate() {
+  const st = pt(), m = st.measurement || {};
+  if (!m.early || st.state !== "listening") accepting = false;
+  const kind = m.belt, phase = m.phase;
+  let key = "";
+  if (st.state === "listening" && phase === "background") key = "silence";
+  else if (st.state === "listening" && phase === "listening" && m.early && !accepting
+           && (["A", "B"].includes(kind) || (kind === "both" && m.step !== "tap"))) key = "enough";
+  else if (kind === "tap" && (phase === "listening" || phase === "analysing")) { key = "tap"; cueSawTap = true; }
+  else if (kind === "tap" && phase === "complete" && cueSawTap && (st.belts || {}).tap_done) key = "ready";
+  else if (st.state === "listening" && phase === "listening" && kind === "both")
+    key = m.step === "tap" ? "switch" : "pluck:" + (m.step === "B" ? "B" : "A");
+  else if (st.state === "listening" && phase === "listening" && ["A", "B", "free"].includes(kind)) key = "pluck:" + kind;
+  // the tap that switches to belt B was heard: a buzz, so the user knows without looking
+  if (cueLast === "switch" && key === "pluck:B" && navigator.vibrate) { try { navigator.vibrate(200); } catch (e) {} }
+  if (key === "ready") cueSawTap = false;
+  if (key === cueLast) return;                     // same step: a closed or timed-out card stays away
+  cueLast = key;
+  if (!key && CUE_BRIEF.includes(cueKey)) return;  // green cards close by themselves (or by a tap)
+  cueSet(key);
+}
+// accept the plucks so far (three that agree), or end a free tune. Not G-code: G-code is
+// busy with the listen, so this goes to the plugin through Moonraker directly.
+let accepting = false, acceptNext = false;
+function accept() {
+  accepting = true;
+  if (pt().measurement && ["A", "B"].includes(pt().measurement.belt)) acceptNext = true;
+  rpc("server.chordata.accept", {}).catch((e) => { accepting = false; acceptNext = false; toast(errText(e)); });
+}
 function pt() { return obj("chordata"); }
 function isPrinting() { return ["printing", "paused"].includes(obj("print_stats").state || ""); }
 function merge(dst, src) {
@@ -831,7 +962,11 @@ function renderPrompt() {
     const body = $("pBody");
     body.textContent = "";
     let solo = null;
-    for (const it of prompt.items) {
+    // After a belt is measured the next step's buttons go first, so they sit right under the numbers, no scrolling
+    const items = /^Chordata - belt/i.test(prompt.title || "")
+      ? prompt.items.filter((it) => it.type !== "text").concat(prompt.items.filter((it) => it.type === "text"))
+      : prompt.items;
+    for (const it of items) {
       if (it.type === "button") {
         if (!solo) { solo = el("div", { class: "pbuttons" }); body.appendChild(solo); }
         solo.appendChild(promptButton(it.btn));
@@ -849,6 +984,12 @@ function renderPrompt() {
     foot.textContent = "";
     for (const b of prompt.footer) foot.appendChild(promptButton(b));
     foot.hidden = !prompt.footer.length;
+    // plucks accepted with a tap: on to the next belt (or the result) without another tap
+    if (acceptNext && pt().state !== "listening") {
+      const next = [...body.querySelectorAll("button")].find((x) => /^Listen to belt/.test(x.textContent));
+      if (next) { acceptNext = false; next.click(); }
+      else if (/^Chordata - belts/.test(prompt.title || "")) acceptNext = false;   // both done: the result
+    }
   }
   renderBelts();
 }
@@ -866,7 +1007,7 @@ function renderHome() {
   box.textContent = "";
   box.id = "homeJog";
   const wrap = el("div", { id: "beltViewHome" });
-  wrap.appendChild(jogPad(open));
+  wrap.appendChild(jogPad(open, true));
   box.appendChild(wrap);
   show("homeJog", !isPrinting() && known && tools.accel && tools.corexy);
 }
@@ -885,6 +1026,7 @@ function render() {
   if (!prompt) renderHome();
   renderPrompt();
   renderMeasurements();
+  cueUpdate();
 }
 
 function measurementRows() {
@@ -925,6 +1067,7 @@ function initPage() {
 function init() {
   initPage();
   $("startBtn").onclick = () => runGcode("CHORDATA").catch(() => {});
+  $("cue").onclick = () => { if (cueKey === "enough") accept(); cueSet(""); };
   render();
   if (demo) {
     S.chordata={state:"idle",belts:{target:110,plucks:3,A:{freq:109.9,used:3,heard:4,plucks:[{freq:109.5,ok:true},{freq:110.2,ok:true},{freq:145,ok:false,why:"Off target"},{freq:110,ok:true}]},B:{freq:106.8,used:3,heard:3,plucks:[{freq:107,ok:true},{freq:106.5,ok:true},{freq:107.1,ok:true}]}},tools:{}};

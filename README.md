@@ -9,7 +9,7 @@ next to the belt: the sensor is already on the printer, and you keep both hands 
 > **Status: very early in development.** Chordata was written entirely with an AI assistant ("vibecoded").
 > It comes without any warranty (GPL-3.0): you use it at your own risk, and no responsibility is accepted for
 > anything that happens to your printer. Chordata only measures; it never prints, and it moves the toolhead
-> only when you press "Go to belt tensioning position".
+> only when you press one of its move buttons (Home, the arrows, or Go to the saved position).
 
 ## What it does
 
