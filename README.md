@@ -79,6 +79,15 @@ Interesting detail: the accelerometer mostly hears the belt at twice its frequen
   another measurement runs), input checks, cleanup after errors and installer reruns. `npm test` checks the page
   in a browser (demo, live updates, CSV export, phone and desktop layout). GitHub Actions runs both.
 
+## Branches
+
+- `main` is what you install, and what Mainsail's update manager updates from. It only changes through
+  reviewed pull requests from `dev`.
+- `dev` is where work happens. It may be broken at any time; don't install from it.
+- `ai-review` is a separate version with optional AI review of the measurements.
+
+Pull requests go to `dev`, see [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## Origin
 
 Chordata started as the belt tension step of [Printune](https://github.com/HydrateFrequently/Printune), a
