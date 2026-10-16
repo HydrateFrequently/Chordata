@@ -83,7 +83,10 @@ Interesting detail: the accelerometer mostly hears the belt at twice its frequen
 
 - `main` is what you install, and what Mainsail's update manager updates from. It only changes through
   reviewed pull requests from `dev`.
-- `dev` is where work happens. It may be broken at any time; don't install from it.
+- `dev` is where work happens. It may be broken at any time. To try it anyway, on the printer:
+  `cd ~/Chordata && git fetch && git checkout dev && ./install.sh`, then restart Moonraker and Klipper.
+  The installer points Mainsail's update entry at the branch you have checked out, so updates then come
+  from `dev`. Go back the same way with `git checkout main`.
 - `ai-review` is a separate version with optional AI review of the measurements.
 
 Pull requests go to `dev`, see [CONTRIBUTING.md](CONTRIBUTING.md).

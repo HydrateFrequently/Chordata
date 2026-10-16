@@ -276,7 +276,8 @@ Preserve local changes before updating. Do not force a failed fast-forward. Chec
 that the tracked branch and Moonraker update entry point at the repository you want
 to follow. If you use a fork, keep its remote and branch instead of mixing sources.
 
-Existing Moonraker update entries are preserved by the installer. An upstream
+The installer keeps an existing Moonraker update entry, except that it sets
+`primary_branch` to the branch checked out in the Chordata folder. An upstream
 installation can use:
 
 ```ini

@@ -100,8 +100,8 @@ directory permissions if a completed recording is not saved.
 Inspect `git remote -v`, the local branch's tracking remote, and
 `[update_manager chordata]` in `moonraker.conf`. For upstream installations they
 should follow `https://github.com/HydrateFrequently/Chordata.git`. If using a fork,
-keep both the checkout and update manager pointed at that fork. Existing update
-entries are not overwritten by the installer. See
+keep both the checkout and update manager pointed at that fork. The installer only
+changes an existing entry's `primary_branch`, to the branch checked out in the Chordata folder. See
 [updating an existing installation](USER_GUIDE.md#update-an-existing-installation).
 Preserve local changes before updating; do not force-reset them.
 

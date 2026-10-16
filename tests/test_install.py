@@ -48,6 +48,21 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(self.run_installer().returncode, 0)
         self.assertIn('belt_target: 95', settings.read_text())
 
+    def test_update_entry_follows_checked_out_branch(self):
+        branch = subprocess.run(['git', '-C', str(ROOT), 'symbolic-ref', '--quiet', '--short', 'HEAD'],
+                                text=True, capture_output=True).stdout.strip() or 'main'
+        conf = self.config / 'moonraker.conf'
+        conf.write_text('[server]\n\n[update_manager chordata]\ntype: git_repo\n'
+                        'primary_branch: some-old-branch\n\n[update_manager other]\nprimary_branch: keep\n')
+        result = self.run_installer()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        text = conf.read_text()
+        self.assertIn('[update_manager chordata]\ntype: git_repo\nprimary_branch: %s\n' % branch, text)
+        self.assertIn('[update_manager other]\nprimary_branch: keep\n', text)
+        self.assertIn('some-old-branch', (self.config / 'moonraker.conf.before-chordata-branch').read_text())
+        self.assertEqual(self.run_installer().returncode, 0)
+        self.assertEqual(conf.read_text(), text)
+
     def test_invalid_navigation_fails_before_changes(self):
         (self.config / '.theme').mkdir()
         (self.config / '.theme/navi.json').write_text('{broken')
