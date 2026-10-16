@@ -76,6 +76,14 @@ class SafetyTests(unittest.TestCase):
         plugin({"print_stats": status(state="standby"),
                 "idle_timeout": status(state="Printing")})._require_idle(Command())
 
+    def test_printune_measuring_blocks_chordata(self):
+        for state in ("listening", "shaper", "soaking"):
+            with self.subTest(state=state):
+                obj = plugin({"printune": SimpleNamespace(state=state)})
+                with self.assertRaisesRegex(ValueError, "Printune is using the printer"):
+                    obj.cmd_CHORDATA_START(Command())
+        plugin({"printune": SimpleNamespace(state="idle")})._require_idle(Command())
+
     def test_measurement_excludes_other_direct_commands(self):
         obj = plugin()
         obj._begin_measurement("A", 5)

@@ -66,6 +66,10 @@ class Chordata:
         """Direct console commands must obey the same interlocks as the web UI."""
         if self.state != "idle":
             raise gcmd.error("Chordata: another measurement is running")
+        # Printune on the same printer: two recordings at once would hear each other's plucks
+        other = self.printer.lookup_object("printune", None)
+        if getattr(other, "state", None) in ("listening", "shaper", "soaking"):
+            raise gcmd.error("Chordata: Printune is using the printer, wait until it is done")
         now = self.reactor.monotonic()
         stats = self.printer.lookup_object("print_stats", None)
         if stats is not None and stats.get_status(now).get("state") in ("printing", "paused"):
