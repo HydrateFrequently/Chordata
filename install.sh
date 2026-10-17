@@ -4,6 +4,9 @@
 #   cd ~ && git clone https://github.com/HydrateFrequently/Chordata.git
 #   ~/Chordata/install.sh
 #
+# The update entry follows the branch this folder has checked out: main for normal
+# installs. To try work in progress: git -C ~/Chordata checkout dev, then run this again.
+#
 # It links the files from this folder (so a git pull updates them), adds two includes
 # at the top of printer.cfg (with a backup), the Chordata page and an update entry to
 # moonraker.conf, and a link in Mainsail's sidebar.
@@ -139,15 +142,40 @@ else
   say "note: no Moonraker in $MOONRAKER_DIR (set MOONRAKER_DIR=...): the page is left out, the CHORDATA macro still works"
 fi
 
-# 4. updates from Mainsail's update manager
-if [ -f "$CONFIG_DIR/moonraker.conf" ] && ! grep -q '^\[update_manager chordata\]' "$CONFIG_DIR/moonraker.conf"; then
+# 4. updates from Mainsail's update manager, following the branch checked out here
+BRANCH=$(git -C "$HERE" symbolic-ref --quiet --short HEAD 2>/dev/null || echo main)
+if [ -f "$CONFIG_DIR/moonraker.conf" ] && grep -q '^\[update_manager chordata\]' "$CONFIG_DIR/moonraker.conf"; then
+  python3 - "$CONFIG_DIR/moonraker.conf" "$BRANCH" <<'PY'
+import os, re, shutil, sys, tempfile
+path, branch = sys.argv[1], sys.argv[2]
+text = open(path).read()
+head = re.search(r"^\[update_manager chordata\][^\n]*$", text, re.M)   # same match as the grep above
+end = re.search(r"^\[", text[head.end():], re.M)
+stop = head.end() + end.start() if end else len(text)
+section = text[head.end():stop]
+line = re.search(r"^primary_branch:[ \t]*(\S*)[ \t]*$", section, re.M)
+if line and line.group(1) == branch:
+    sys.exit(0)
+if line:
+    section = section[:line.start()] + "primary_branch: " + branch + section[line.end():]
+else:
+    section = "\nprimary_branch: " + branch + section
+if not os.path.exists(path + ".before-chordata-branch"):
+    shutil.copy2(path, path + ".before-chordata-branch")
+fd, temp = tempfile.mkstemp(dir=os.path.dirname(path), prefix=".moonraker-")
+with os.fdopen(fd, "w") as out:
+    out.write(text[:head.end()] + section + text[stop:])
+os.replace(temp, path)
+print("Chordata: the update entry now follows the %s branch" % branch)
+PY
+elif [ -f "$CONFIG_DIR/moonraker.conf" ]; then
   cat >> "$CONFIG_DIR/moonraker.conf" <<EOF
 
 [update_manager chordata]
 type: git_repo
 path: $HERE
 origin: https://github.com/HydrateFrequently/Chordata.git
-primary_branch: main
+primary_branch: $BRANCH
 managed_services: klipper moonraker
 EOF
   say "added [update_manager chordata] to moonraker.conf"

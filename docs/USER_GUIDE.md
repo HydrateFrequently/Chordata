@@ -143,8 +143,9 @@ Restart Klipper after changing configuration. You can also adjust the session ta
 in Chordata's initial prompts. A session target does not rewrite the config file.
 
 Use the page's explicit toolhead controls, or Mainsail's own controls, to home and
-move to the documented belt-measurement position. Select **Save belt tensioning
-position** if you want to reuse it. **Go to belt tensioning position** is a separate
+move to the documented belt-measurement position. Select **Save this position**
+(**Save belt tensioning position** in the setup prompt) if you want to reuse it.
+**Go to saved position** (**Go to belt tensioning position** in the prompt) is a separate
 movement action and requires homing first. It only raises Z when the saved position
 requires more clearance; it does not lower Z to the saved value.
 
@@ -155,9 +156,10 @@ or the physical measurement setup. Do not copy another printer's saved coordinat
 
 ```mermaid
 flowchart TD
-    setup[Set the manufacturer's target and measurement position] --> tap[Optional toolhead tap calibration]
-    tap --> a[Record belt A]
-    a --> b[Record belt B]
+    setup[Set Target Frequency and position] --> tap[Start: background noise, then tap the toolhead]
+    tap --> a[Pluck belt A]
+    a --> sw[Tap the toolhead]
+    sw --> b[Pluck belt B]
     b --> inspect[Inspect frequencies and rejected plucks]
     inspect --> decision{Both belts complete and on target?}
     decision -->|Yes| finish[Finish or repeat to confirm]
@@ -165,22 +167,51 @@ flowchart TD
     adjust --> a
 ```
 
-1. Select **Belt tension** on the page or run `CHORDATA` from the console to open
-   setup. Select **Start** in that prompt when ready; this also switches off the
-   part-cooling fan through the macro's `M106 S0` command.
-2. Confirm the target and position. Chordata does not choose a manufacturer's target.
-3. Select **Listen for the tap**, keep your hands off while
-   background noise is recorded, then lightly tap the toolhead when prompted. This
-   identifies toolhead frequencies, ring duration and line width to help distinguish
-   a knock from a belt. The learned width sets a per-mode guard; long-ringing
-   toolheads also use onset detection outside those modes. This step is required:
-   the belts can only be measured once a tap was heard.
-4. Select **Listen to belt A**. Wait through the initial background recording, then
-   pluck the documented belt span evenly, about once a second.
-5. Inspect the counted and rejected plucks. When recording finishes, continue to B.
-6. Repeat for **belt B**, using the same measurement method and position.
-7. Read the comparison. If you adjust either tensioner, measure **both** belts again:
-   the belts interact mechanically.
+1. Select **Measure Belts** on the page or run `CHORDATA` from the console to open
+   **Set Target Frequency**. Type the target and press **Set** (Mainsail's own pop-up has
+   -5/-1/+1/+5 buttons instead; Chordata does not choose a manufacturer's target), move the toolhead with the arrows (0.5 to 50 mm steps) or by
+   typing X and Y, and save the belt tensioning position. The screen shows the accelerometer
+   `[resonance_tester]` uses and the range it hears reliably (for example ADXL345, 0-1440 Hz;
+   LIS2DW12, 0-400 Hz); a target outside it flashes red and can't be started. The instructions and specs are on
+   the page's **How it works**.
+2. Select **Start**. This switches off the part-cooling fan (the
+   macro's `M106 S0`) and goes straight into the taps: keep your hands off while the red card
+   records the background noise. This is the only background recording of the session.
+   When the card turns yellow, tap one solid spot on the toolhead (the extruder is a good
+   one) lightly, one tap at a time. Each tap shows a check mark or an X; keep tapping until
+   3 check marks. It stops by itself. A tap counts when it is heard, alone (not a double
+   tap) and rings loudest at the same note as the first good tap: another spot rings
+   differently. After 9 taps that don't count, Chordata stops and suggests turning off fans
+   and anything else that vibrates, and checking that the toolhead is tight. The good taps
+   teach Chordata the toolhead's own note, ring time and line width: knocks there are never
+   taken for a belt. This step is required: the belts can only be measured once it is done.
+   **Measure Toolhead Frequency** repeats it (and records the background again).
+3. Pick a mode:
+   - **Guided Mode**: pluck belt A while the green card shows each pluck until 5 are
+     counted, then select **Measure belt B** and pluck belt B the same way.
+   - **Pluck - Tap - Pluck Mode**: the same, but when belt A is done the card turns yellow:
+     tap your spot on the toolhead once, then pluck belt B. No press on the phone. Only a
+     knock whose toolhead note is clearly heard and louder than belt A's note switches to
+     belt B, so a dropped tool or a slap on the frame doesn't. Not offered when the toolhead
+     rang nothing near the belts (a stiff toolhead): a tap can't be told from a pluck there.
+   - **Tuner Mode**: every clear pluck of either belt, with no counting: pluck, and turn a
+     tensioner between plucks. It stops by itself a minute after the last pluck, or select
+     **Done** on the Chordata page (Mainsail's prompt can't end it while it listens).
+   The phone beeps (1000 Hz, 200 ms) when a green card appears: ready to measure.
+4. Read the comparison. If you adjust either tensioner, measure **both** belts again: the
+   belts interact mechanically.
+
+Fans are told from a belt by how they sound: a pluck or a tap starts its note and dies
+away, a fan hums at one level before and after. A fan's hum is left out, whether it was
+running when the background was recorded or started later. A belt a few Hz from a fan is
+still read. If a fan sits on the belt's note (within about 2 Hz), the green card and the
+result say "steady hum at X Hz on the belt's note (a fan?)": turn that fan off and measure
+again. The same goes for the toolhead taps: if a fan hides the toolhead's note, Measure
+Toolhead Frequency stops after three taps and says "Turn fans off". A fan on the toolhead's
+note never counts as the tap that switches Pluck - Tap - Pluck Mode to belt B.
+
+Cards never need a press on the phone (only Tuner Mode has a Done button): red means hands off, yellow means tap the
+toolhead, green means pluck, and each stays until that step is over.
 
 A recording can continue for a bounded extra interval to collect enough accepted
 plucks. If a pluck is weak or rejected, wait for the prompt and pluck again rather
@@ -226,7 +257,7 @@ the latest displayed A/B series. Columns are `belt`, `pluck`, `frequency_hz`,
 This export is a frequency summary, not raw accelerometer samples.
 
 Raw recordings appear under `chordata/recordings/` in the config file browser.
-Belt captures and background captures have separate names. Chordata retains the
+Belt captures and the session's background capture (saved with the taps) have separate names. Chordata retains the
 latest 40 CSV files; save important captures elsewhere before continuing.
 
 For a standalone capture:
@@ -276,7 +307,8 @@ Preserve local changes before updating. Do not force a failed fast-forward. Chec
 that the tracked branch and Moonraker update entry point at the repository you want
 to follow. If you use a fork, keep its remote and branch instead of mixing sources.
 
-Existing Moonraker update entries are preserved by the installer. An upstream
+The installer keeps an existing Moonraker update entry, except that it sets
+`primary_branch` to the branch checked out in the Chordata folder. An upstream
 installation can use:
 
 ```ini
@@ -293,7 +325,14 @@ The user settings file and saved recordings remain in the printer config directo
 
 ### Remove Chordata
 
-Remove its two include lines from `printer.cfg`, `[chordata_web]` and its update
+```sh
+~/Chordata/uninstall.sh
+sudo systemctl restart moonraker klipper
+rm -rf ~/Chordata
+```
+
+`uninstall.sh` does the steps below and backs up each file it changes
+(`*.before-chordata-uninstall`). By hand: remove its two include lines from `printer.cfg`, `[chordata_web]` and its update
 entry from `moonraker.conf`, and the Chordata item from `.theme/navi.json`. Remove
 only the Chordata symlinks installed in Klipper/Kalico, Moonraker and the config
 directory after confirming their targets. Restart the affected services. Preserve

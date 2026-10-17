@@ -7,6 +7,20 @@
 <!-- Chordata web UI: belt tension by plucking. GPL-3.0. Self-contained: no external resources. -->
 <script>
 try { if (localStorage.getItem("chordata_theme") === "light") document.documentElement.dataset.theme = "light"; } catch (e) {}
+// Two layouts. Phones (and tablets): big buttons and full-screen cue cards, for a phone lying on the
+// bed while both hands pluck. A PC (wide screen and a mouse): the look of Mainsail's own pop-ups,
+// like PROBE_CALIBRATE's, which is what people expect there.
+// PHONE_EVERYWHERE: the dev branch shows the phone layout on every screen, for testing at a desk;
+// main sets it to false. ?layout=pc or ?layout=phone picks one on any branch and screen.
+const PHONE_EVERYWHERE = false;
+const pcQuery = window.matchMedia ? matchMedia("(min-width: 900px) and (pointer: fine)") : null;
+function pcLayout() {
+  let want = null;
+  try { want = new URLSearchParams(location.search).get("layout"); } catch (e) {}
+  if (want === "pc" || want === "phone") return want === "pc";
+  return !PHONE_EVERYWHERE && !!(pcQuery && pcQuery.matches);
+}
+document.documentElement.classList.toggle("pc", pcLayout());
 </script>
 <style>
 :root {
@@ -38,6 +52,11 @@ header.top {
   background: var(--card); border-bottom: 1px solid var(--line);
   position: sticky; top: 0; z-index: 5;
 }
+header.top a.back {
+  color: var(--primary); text-decoration: none; font-size: 17px; font-weight: 600;
+  padding: 8px 12px; margin: -8px 0 -8px -12px; border-radius: 8px; flex: none;
+}
+header.top a.back:hover, header.top a.back:focus-visible { background: var(--line); }
 header.top h1 { margin: 0; font-size: 22px; letter-spacing: .3px; }
 header.top .dot { width: 12px; height: 12px; border-radius: 50%; background: var(--muted); flex: none; }
 header.top .dot.ok { background: var(--ok); }
@@ -143,7 +162,15 @@ input[type=text], input[type=number], input[type=password] {
 .check { display: flex; gap: 12px; align-items: flex-start; padding: 12px; border: 2px solid var(--warn);
   border-radius: 10px; cursor: pointer; font-size: 16px; font-weight: 400 !important; }
 .check input { flex: none; width: 26px; height: 26px; margin: 2px 0 0; accent-color: var(--primary); }
-.how { margin: 8px 0; padding: 0 0 0 4px; }
+.how { margin: 8px 0; padding: 0 0 0 20px; }
+#howBtn, #exitBtn { background: var(--card); color: var(--primary); border: 2px solid var(--primary); }
+#prompt .perr { color: var(--err); font-weight: 700; font-size: 18px; }
+#prompt form.ptarget { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; margin: 4px 0 10px; font-size: 22px; font-weight: 700; }
+#prompt form.ptarget input { width: 5.5em; font-size: 22px; font-weight: 700; padding: 6px 10px; }
+#prompt form.ptarget button { min-width: 88px; }
+.jog .xy { display: grid; grid-template-columns: 1fr 1fr auto; gap: 6px; margin-top: 8px; align-items: end; }
+.jog .xy label { font-size: 14px; color: var(--muted); display: grid; gap: 2px; }
+.jog .xy input { min-height: 44px; font-size: 18px; width: 100%; box-sizing: border-box; }
 .how li { margin: 6px 0; }
 details.sub > summary { cursor: pointer; color: var(--primary); font-weight: 600; min-height: 44px; display: flex; align-items: center; }
 /* Prompt card */
@@ -158,14 +185,20 @@ details.sub > summary { cursor: pointer; color: var(--primary); font-weight: 600
 .jog { margin: 0 0 10px; background: var(--card2); border-radius: var(--radius); padding: 8px 12px; }
 .jog summary { font-weight: 600; cursor: pointer; }
 .jog .pos { text-align: center; font-variant-numeric: tabular-nums; font-size: 18px; margin: 6px 0; }
-.jog .pad { display: grid; grid-template-columns: repeat(3, minmax(0, 64px)); gap: 6px; justify-content: center; }
-.jog .pad button, .jog .row button { min-height: 52px; font-size: 18px; }
-.jog .row { display: flex; gap: 6px; justify-content: center; flex-wrap: wrap; margin-top: 8px; }
-.jog .row button.sel { outline: 2px solid var(--primary); }
+/* compact: the arrows and the step column sit side by side, so the pad fits a phone screen without scrolling */
+.jog .jogbody { display: flex; gap: 12px; justify-content: center; align-items: center; margin-top: 4px; }
+.jog .pad { display: grid; grid-template-columns: repeat(3, 52px); grid-auto-rows: 46px; gap: 6px; }
+.jog .steps { display: grid; grid-template-columns: 1fr; gap: 6px; min-width: 84px; }
+.jog .pad button, .jog .row button, .jog .steps button { min-height: 44px; padding: 4px 8px; font-size: 16px; }
+.jog .row { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 6px; margin-top: 8px; }
+.jog .saved { text-align: center; color: var(--muted); font-size: 14px; margin-top: 6px; font-variant-numeric: tabular-nums; }
+.jog .steps button.sel, .jog .row button.sel { background: var(--primary); color: var(--primary-text); font-weight: 700; }  /* inverse video, like a selected MFD option */
 #beltView .live { text-align: center; padding: 10px 0 4px; }
 #beltView .live .hz { font-size: 64px; font-weight: 700; line-height: 1.05; font-variant-numeric: tabular-nums; }
 #beltView .live .hz.out { color: var(--muted); text-decoration: line-through; }
 #beltView .live .sub { color: var(--muted); font-size: 16px; }
+#beltView .live .d { font-size: 20px; font-weight: 600; }
+#beltView .live .d.good { color: var(--ok); } #beltView .live .d.near { color: var(--warn); } #beltView .live .d.far { color: var(--err); }
 #beltView .chips { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; margin: 8px 0; }
 #beltView .chip { padding: 4px 10px; border-radius: 999px; background: var(--card2); font-variant-numeric: tabular-nums; font-size: 16px; }
 #beltView .chip.ok { background: var(--primary-soft); color: var(--text); }
@@ -174,7 +207,7 @@ details.sub > summary { cursor: pointer; color: var(--primary); font-weight: 600
 #beltView .belt { background: var(--card2); border-radius: var(--radius); padding: 12px; text-align: center; border: 2px solid transparent; min-width: 0; }
 #beltView .belt.now { border-color: var(--primary); }
 #beltView .belt .name { color: var(--muted); font-size: 15px; }
-#beltView .belt .hz { font-size: 40px; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; }
+#beltView .belt .hz { white-space: nowrap; font-size: clamp(26px, 8vw, 40px); font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; }
 #beltView .belt .d { font-size: 16px; font-weight: 600; }
 #beltView .belt .d.good { color: var(--ok); }
 #beltView .belt .d.near { color: var(--warn); }
@@ -240,10 +273,75 @@ th,td { padding:8px; border-bottom:1px solid var(--line); text-align:left; }
 .trend { display:block; width:100%; height:auto; margin:12px 0; }
 .trend text { fill:var(--muted); font:22px system-ui; }
 summary:focus-visible { outline:3px solid var(--primary); outline-offset:2px; }
+.ptitlebar { display: flex; align-items: center; gap: 8px; }
+.ptitlebar h2 { flex: 1 1 auto; min-width: 0; }
+.pclose { display: none; }
+/* ---------- PC layout: Mainsail's pop-up look (html.pc; see PHONE_EVERYWHERE) ---------- */
+html.pc { --bg: #0c0c0c; --radius: 4px; }
+html.pc[data-theme="light"] { --bg: #c9ccd1; }
+html.pc body { font-size: 15px; }
+html.pc header.top h1 { font-size: 18px; }
+html.pc main { max-width: 640px; padding-top: 40px; }
+html.pc .card, html.pc #home {
+  border-radius: 4px; box-shadow: 0 11px 15px -7px rgba(0,0,0,.2), 0 24px 38px 3px rgba(0,0,0,.14), 0 9px 46px 8px rgba(0,0,0,.12); }
+html.pc #home { background: var(--card); border: 1px solid var(--line); padding: 16px; display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+html.pc #home > .card { flex: 1 1 100%; box-shadow: none; margin: 0 0 8px; }
+html.pc #home::before { content: "Chordata - belt tension"; flex: 1 1 100%; font-size: 18px; font-weight: 700; margin: -16px -16px 8px; padding: 12px 16px; background: var(--card2); border-bottom: 1px solid var(--line); }
+html.pc button, html.pc .btn { font-size: 14px; min-height: 36px; padding: 0 16px; border-radius: 4px; border-width: 1px;
+  text-transform: uppercase; letter-spacing: .09em; font-weight: 500; }
+html.pc .big { width: auto; min-height: 36px; font-size: 14px; font-weight: 500; padding: 0 16px; flex-direction: row; border-radius: 4px; }
+html.pc #howBtn, html.pc #exitBtn { border-width: 1px; }
+html.pc input[type=text], html.pc input[type=number], html.pc input[type=password] { font-size: 15px; min-height: 40px; border-radius: 4px; }
+html.pc #prompt .ptitlebar { margin: -16px -16px 12px; padding: 8px 8px 8px 16px; background: var(--card2); border-bottom: 1px solid var(--line); }
+html.pc #pTitle { font-size: 18px; margin: 0; }
+html.pc .pclose { display: inline-flex; flex: none; min-height: 36px; width: 36px; padding: 0; border: 0; font-size: 24px; color: var(--muted); letter-spacing: 0; }
+html.pc .pclose:hover { color: var(--text); background: var(--line); }
+html.pc #prompt .pbuttons { gap: 8px; margin: 10px 0; }
+html.pc #prompt .pgroup { gap: 8px; margin: 10px 0; }
+html.pc #prompt .pgroup button, html.pc #prompt .pbuttons button { min-height: 36px; font-weight: 500; }
+html.pc #prompt .pfooter { justify-content: flex-end; gap: 8px; }
+html.pc #prompt .pfooter button { flex: 0 0 auto; }
+html.pc #prompt .perr { font-size: 15px; }
+html.pc #prompt form.ptarget, html.pc #prompt form.ptarget input { font-size: 16px; }
+html.pc .jog .pad button, html.pc .jog .row button, html.pc .jog .steps button { min-height: 32px; font-size: 13px; letter-spacing: .03em; }
+html.pc #measurePanel { box-shadow: none; margin: 12px 0 0; }
+/* the cue: a band across the top of the window instead of the whole screen, still in the signal colours */
+html.pc #cue { inset: var(--hdr, 0px) 0 auto 0; flex-direction: row; flex-wrap: wrap; gap: 8px 24px; padding: 18px 24px;
+  box-shadow: 0 6px 20px rgba(0,0,0,.45); }
+html.pc #cue .cbig { font-size: 30px; max-width: none; }
+html.pc #cueLive { grid-auto-flow: column; align-items: center; gap: 16px; }
+html.pc #cueLive .lhz { font-size: 40px; }
+html.pc #cueLive .lsub { font-size: 16px; }
+html.pc #cueLive .marks { font-size: 36px; }
+html.pc #cueLive button { margin: 0; min-height: 36px; min-width: 0; font-size: 14px; }
 @media(prefers-reduced-motion:reduce) { * { scroll-behavior:auto!important; transition:none!important; } }
+/* Full-screen cue cards for what the hands do on the printer (hands off, tap, pluck): seen from the corner of an eye.
+   Fixed colours on purpose, the same in both themes. */
+#cue {
+  position: fixed; inset: 0; z-index: 50; display: flex; flex-direction: column; align-items: center;
+  justify-content: center; gap: 18px; text-align: center;
+  padding: max(24px, env(safe-area-inset-top, 0px)) max(20px, env(safe-area-inset-right, 0px))
+           max(24px, env(safe-area-inset-bottom, 0px)) max(20px, env(safe-area-inset-left, 0px));
+  --cbg: #d32f2f; --cfg: #ffffff; background: var(--cbg); color: var(--cfg);
+}
+#cue.yellow { --cbg: #ffd600; --cfg: #111111; }
+#cue.green { --cbg: #2e7d32; --cfg: #ffffff; }
+#cue.inv { background: var(--cfg); color: var(--cbg); }
+#cue .cbig {
+  font-size: clamp(30px, 10vw, 64px); font-weight: 900; line-height: 1.1; letter-spacing: .02em;
+  text-transform: uppercase; text-wrap: balance; max-width: 14em; }
+#cueLive:empty { display: none; }
+#cueLive { display: grid; gap: 6px; justify-items: center; }
+#cueLive .lhz { font-size: clamp(40px, 16vw, 96px); font-weight: 900; font-variant-numeric: tabular-nums; line-height: 1; }
+#cueLive .lsub { font-size: clamp(16px, 4.5vw, 22px); font-weight: 700; }
+#cueLive .marks { font-size: clamp(40px, 14vw, 80px); font-weight: 900; letter-spacing: .15em; line-height: 1; }
+#cueLive button { margin-top: 14px; min-width: 12em; min-height: 56px; font-size: 20px; font-weight: 800;
+  background: var(--cfg); color: var(--cbg); border: 0; }
 </style></head>
 <body>
-<header class="top">
+<div id="cue" role="alert" aria-live="assertive" hidden><div class="cbig" id="cueBig"></div><div id="cueLive" aria-live="off"></div></div>
+<header class="top" id="hdrTop">
+  <a class="back" id="backUi" href="/" title="Back to Mainsail or Fluidd">&lsaquo; Back</a>
   <span class="dot" id="dot" aria-hidden="true"></span>
   <h1>Chordata</h1>
   <span class="state" id="hdrState"></span>
@@ -254,7 +352,7 @@ summary:focus-visible { outline:3px solid var(--primary); outline-offset:2px; }
 <main>
   <!-- Prompt card: the belt steps, shown on top -->
   <section class="card" id="prompt" aria-live="polite" hidden>
-    <h2 id="pTitle"></h2>
+    <div class="ptitlebar"><h2 id="pTitle"></h2><button type="button" class="pclose" id="pClose" aria-label="Close Chordata" title="Close Chordata">&times;</button></div>
     <div id="beltView" aria-live="polite" hidden></div>
     <div id="pBody"></div>
     <div class="pfooter" id="pFooter"></div>
@@ -266,8 +364,7 @@ summary:focus-visible { outline:3px solid var(--primary); outline-offset:2px; }
       <h2>The printer is busy</h2>
       <p>It is printing. Belt tension can be measured when the print is done.</p>
     </div>
-    <button type="button" class="big" id="startBtn">Belt tension
-      <small>Pluck each belt; the accelerometer on the toolhead hears it and tells you which belt to tighten or loosen</small></button>
+    <button type="button" class="big" id="startBtn">Measure Belts</button>
     <div class="card lock-note" id="noAccel" hidden>
       <h2>No accelerometer set up</h2>
       <p>Chordata listens to the belts with an accelerometer on the toolhead (an ADXL345 or LIS2DW board,
@@ -279,26 +376,77 @@ summary:focus-visible { outline:3px solid var(--primary); outline-offset:2px; }
       <p>On a CoreXY printer both belts pull the toolhead, so they must match. This printer's kinematics:
         <span id="kinName"></span>.</p>
     </div>
-    <div id="homeJog"></div>
-    <details class="card">
-      <summary>How it works</summary>
-      <ol class="how">
-        <li>Set the target frequency your printer's guide gives.</li>
-        <li>Move the toolhead where the guide says (the pad above), and save that spot for next time.</li>
-        <li>Tap the toolhead once: Chordata learns how it rings by itself, so a knock is never taken for a belt.</li>
-        <li>Pluck belt A about once a second until 5 good plucks are counted, then belt B.</li>
-        <li>Turn one tensioner a little as advised and measure both again, until both are on target.</li>
-      </ol>
-      <p class="small muted">Which belt you call A doesn't matter: the goal is equal tension. Chordata only
-        moves the toolhead when you press a button.</p>
-    </details>
+    <button type="button" class="big" id="howBtn">How it works</button>
+    <button type="button" class="big" id="exitBtn">Close Chordata</button>
   </section>
+<!-- HOW IT WORKS: every instruction and spec, so the steps themselves only show their controls -->
+<section id="how" hidden>
+  <button type="button" id="howBack">Back</button>
+  <div class="card">
+    <h2>How it works</h2>
+    <p>A plucked belt rings like a guitar string. The accelerometer on the toolhead hears it, and Chordata
+      shows its frequency. Tension goes with the frequency squared, so 1% in Hz is 2% in tension.</p>
+    <p>On CoreXY printers both belts pull the toolhead and pull on each other, so they must match:
+      both are measured after every turn of a tensioner. Which belt you call A doesn't matter.</p>
+  </div>
+  <div class="card">
+    <h2>Set Target Frequency</h2>
+    <ol class="how">
+      <li>Set the target your printer's guide gives for the stretch of belt it says to pluck.</li>
+      <li>Move the toolhead where the guide says, with the arrows or by typing X and Y, and save it as the
+        belt tensioning position. Next time, Go to belt tensioning position takes it there.</li>
+      <li>Turn off loud fans if you can.</li>
+      <li>The screen shows the accelerometer your printer measures with and the frequencies it hears
+        reliably (from its datasheet and the rate Klipper sets). A target outside that range flashes
+        red: that sensor can't measure it.</li>
+    </ol>
+    <p class="small muted">Chordata only moves the toolhead when you press a button.</p>
+  </div>
+  <div class="card">
+    <h2>Measure Toolhead Frequency</h2>
+    <p>First, Chordata learns how your toolhead rings by itself, so a knock is never taken for a belt.
+      This happens at every start: work on the toolhead changes it.</p>
+    <ol class="how">
+      <li>Pick one solid spot on the toolhead, like the extruder. Always tap that same spot, now and later
+        when you switch from belt A to belt B: another spot rings differently.</li>
+      <li>Hands off while the screen is red: it records the background noise (fans, motors) once.</li>
+      <li>When it turns yellow, tap that spot lightly with a finger, one tap at a time. Each tap shows a
+        check mark or an X. An X doesn't count: keep tapping until 3 check marks. It stops by itself.</li>
+    </ol>
+    <p>A toolhead that rings long: pluck firmly, and keep your hands off the toolhead while plucking.
+      A stiff toolhead that rings nothing near the belts has nothing to learn; Pluck - Tap - Pluck Mode
+      then can't tell a tap from a pluck, so use Guided Mode.</p>
+  </div>
+  <div class="card">
+    <h2>The modes</h2>
+    <ul class="how">
+      <li><b>Guided Mode:</b> pluck belt A until 5 are counted, press Measure belt B, pluck belt B.</li>
+      <li><b>Pluck - Tap - Pluck Mode:</b> the same, but a tap on your toolhead spot switches to belt B,
+        so you never press the phone.</li>
+      <li><b>Tuner Mode:</b> pluck either belt and turn a tensioner between plucks; every clear pluck
+        shows up. It stops 60 seconds after your last pluck, or press Done.</li>
+    </ul>
+    <p>Pluck evenly, the same way each time, not too hard. Red means hands off, yellow means tap your
+      toolhead spot, green means pluck. The phone beeps when it is ready for plucks.</p>
+  </div>
+  <div class="card">
+    <h2>The rules</h2>
+    <ul class="how">
+      <li>A belt is on target when the average of 5 good plucks is within <span id="howTol">0.25</span> Hz of the target.</li>
+      <li>Only clear plucks count: 12 dB over the background noise, not a knock on the toolhead, not the
+        other belt ringing along, and within 1 Hz of the others.</li>
+      <li>A fan hums at one steady level; a pluck starts loud and dies away. A hum that starts after the
+        background was recorded is left out, and if it sits on the belt's note Chordata says so.</li>
+      <li>Chordata says which belt to tighten or loosen, one belt per round, taking turns, then measure both again.</li>
+    </ul>
+  </div>
+</section>
 <section class="card" id="measurePanel" hidden><h2>Pluck measurements</h2>
 <p class="help">Frequency is measured in Hz. Force requires belt mass and span length. Use your printer manufacturer's target and measurement position.</p>
-<div id="trend"></div><p class="small muted">Circles: counted · Green: belt A and B within the tolerance (0.25 Hz by default) of each other at the same pluck · Star: within 0.1 Hz · Crosses: rejected · Dashed line: target. Updates after each detected pluck; not a raw accelerometer waveform.</p>
+<div id="trend"></div><p class="small muted">Circles: counted · Crosses: rejected · Dashed line: target. Updates after each detected pluck; not a raw accelerometer waveform.</p>
 <details><summary>Measurement data</summary><div class="measurements"><table><thead><tr><th scope="col">Belt</th><th scope="col">Pluck</th><th scope="col">Hz</th><th scope="col">Result</th><th scope="col">Reason</th></tr></thead><tbody id="measureRows"></tbody></table></div></details>
 <button type="button" id="exportBtn">Export CSV</button></section>
-<details class="card" id="authPanel"><summary>Printer connection</summary><form id="authForm"><div class="field"><label for="moonrakerKey">Moonraker API key</label><input id="moonrakerKey" type="password" autocomplete="off"></div><p class="help">Held in memory for this page only. Reload to forget it.</p><button type="submit">Authenticate</button></form></details>
+<details class="card" id="authPanel" hidden><summary>Printer connection</summary><form id="authForm"><div class="field"><label for="moonrakerKey">Moonraker API key</label><input id="moonrakerKey" type="password" autocomplete="off"></div><p class="help">Held in memory for this page only. Reload to forget it.</p><button type="submit">Authenticate</button></form></details>
   <p class="disclaimer">Chordata comes without any warranty. You use it at your own risk.</p>
 </main>
 <div id="toast" role="alert" hidden></div>
@@ -306,7 +454,7 @@ summary:focus-visible { outline:3px solid var(--primary); outline-offset:2px; }
 "use strict";
 
 const SUBSCRIBE = {
-  print_stats: null,
+  print_stats: null, idle_timeout: ["state"],
   toolhead: ["homed_axes", "position"], gcode_move: ["homing_origin", "gcode_position"],
   chordata: null,
 };
@@ -454,11 +602,12 @@ function scheduleReconnect() {
   render();
 }
 
-function rpc(method, params) {
+function rpc(method, params, wait) {
   return new Promise((resolve, reject) => {
     if (!ws || ws.readyState !== 1) { reject({ message: "Not connected to the printer" }); return; }
     const id = rpcId++;
-    const timer=setTimeout(()=>{ pending.delete(id); reject({message:"Printer request timed out. Try again."}); },30000);
+    // G-code (homing, moves) may legitimately run for minutes; it ends with its reply or a lost connection
+    const timer = wait === 0 ? null : setTimeout(()=>{ pending.delete(id); reject({message:"Printer request timed out. Try again."}); }, wait || 30000);
     pending.set(id, { resolve, reject, timer });
     ws.send(JSON.stringify({ jsonrpc: "2.0", method, params: params || {}, id }));
   });
@@ -475,7 +624,7 @@ function errText(err) {
 
 function runGcode(script, quiet) {
   if (demo) return Promise.reject({message:"Demo mode cannot send printer commands"});
-  return rpc("printer.gcode.script", { script }).catch((err) => {
+  return rpc("printer.gcode.script", { script }, 0).catch((err) => {
     const t = errText(err);
     if (!quiet) toast(t);
     if (err && err.code === 401) authBanner();
@@ -485,6 +634,7 @@ function runGcode(script, quiet) {
 
 function authBanner() {
   authRequired=true;
+  $("authPanel").hidden=false;     // shown only when Moonraker refuses the page (its trusted_clients leave this device out)
   $("authPanel").open=true;
   $("klippyBanner").textContent = "Moonraker requires authentication. Open Printer connection and enter its API key.";
   $("klippyBanner").hidden = false;
@@ -656,74 +806,185 @@ function pressPromptButton(gcode) {
   runGcode(gcode).catch(() => unlockButtons());
 }
 
+// Set Target Frequency: the target is typed (40-300 Hz, rounded to whole Hz): quicker than buttons.
+// Mainsail's pop-up can't hold a box, so the prompt keeps its -5..+5 buttons; this page leaves them out.
+function targetBox(text) {
+  const now = (text.match(/([\d.]+)\s*Hz/) || [])[1] || "";
+  const f = el("form", { class: "ptarget" });
+  f.appendChild(el("label", { for: "targetHz" }, "Target Frequency:"));
+  const inp = el("input", { id: "targetHz", type: "number", inputmode: "numeric", min: "40", max: "300", step: "any", value: now });
+  f.appendChild(inp);
+  f.appendChild(el("span", {}, "Hz"));
+  const set = el("button", { type: "submit", "data-g": "1" }, "Set");
+  set.disabled = buttonsLocked;
+  f.appendChild(set);
+  f.onsubmit = (e) => {
+    e.preventDefault();
+    const v = Math.round(Number(inp.value));
+    if (!Number.isFinite(v) || v < 40 || v > 300) { errorFlash("Error: target must be 40-300 Hz"); return; }
+    pressPromptButton("_CHORDATA_BELTS HZ=" + v);
+  };
+  return f;
+}
+
+// A target typed but not Set yet goes with whichever setup button is pressed (Start, Go, Save), so it isn't lost
+function withTypedTarget(gcode) {
+  const box = $("targetHz");
+  if (!box || !/^_CHORDATA_BELTS STEP=(start|go|save)\b/.test(gcode) || /\b(HZ|DT)=/.test(gcode)) return gcode;
+  const v = Math.round(Number(box.value)), was = Math.round(Number(box.defaultValue));
+  if (!Number.isFinite(v) || v < 40 || v > 300 || v === was) return gcode;
+  // Start: set it and show the step again, so a target the accelerometer can't hear is flagged
+  // before anything starts; Start is then pressed once more
+  return /STEP=start\b/.test(gcode) ? "_CHORDATA_BELTS HZ=" + v : gcode + " HZ=" + v;
+}
+
 function promptButton(b) {
   const cls = { primary: "primary", secondary: "", info: "info", warning: "warning", error: "error-btn" }[b.style] || "";
   const btn = el("button", { type: "button", class: cls, "data-g": "1" }, b.label);
   btn.disabled = buttonsLocked;
-  btn.onclick = () => pressPromptButton(b.gcode);
+  btn.onclick = () => pressPromptButton(withTypedTarget(b.gcode));
+  // Close Chordata: the prompt ends, and the page goes back to Mainsail or Fluidd
+  if (b.label === "Close Chordata") btn.onclick = () => { pressPromptButton(b.gcode); setTimeout(() => { location.href = $("backUi").href; }, 300); };
   return btn;
 }
 
 // Belt tension: big numbers on top of the belt prompts, for a phone held at the printer
 let beltBuzz = "";
 function fmtHz(v) { return v == null ? "--" : Number(v).toFixed(1); }
-// Jog pad: the user moves the toolhead to where their printer's guide says to pluck.
-// Chordata itself never moves it; every move here is a button press.
+// Jog pad on Set Target Frequency: the user moves the toolhead to where their printer's guide says to pluck,
+// with the arrows or by typing X and Y. Chordata itself never moves it; every move here is a button press.
+// Built once per prompt and updated in place, so a coordinate being typed is never wiped by a status update.
 let jogStep = 10;
-function jogPad(open) {
-  const th = obj("toolhead"), homed = String(th.homed_axes || "");
-  const d = el("details", { class: "jog" });
-  if (open || !pt().belt_pos) d.open = true;      // nothing saved yet: open, so the move isn't forgotten
-  d.appendChild(el("summary", {}, "Move the toolhead"));
-  const pos = obj("gcode_move").gcode_position || th.position || [];
-  d.appendChild(el("div", { class: "pos" }, homed.includes("x") && homed.includes("y") && pos.length
-    ? "X " + Number(pos[0]).toFixed(1) + "   Y " + Number(pos[1]).toFixed(1) + (homed.includes("z") ? "   Z " + Number(pos[2]).toFixed(1) : "")
-    : "Not homed: home first"));
-  const move = (axis, dist) => () => runGcode("SAVE_GCODE_STATE NAME=_chordata_jog\nG91\nG1 " + axis + dist +
-    " F" + (axis === "Z" ? 600 : 6000) + "\nRESTORE_GCODE_STATE NAME=_chordata_jog");
-  if (!(homed.includes("x") && homed.includes("y"))) {
-    const r = el("div", { class: "row" });
-    const h = el("button", { type: "button", class: "primary" }, "Home");
-    h.onclick = () => runGcode("G28");
-    r.appendChild(h);
-    d.appendChild(r);
-    return d;
-  }
-  const pad = el("div", { class: "pad" });
-  const cell = (label, axis, sign) => {
-    if (!label) return el("span");
-    const bt = el("button", { type: "button" }, label);
-    bt.onclick = () => move(axis, sign * jogStep)();
-    return bt;
-  };
-  for (const c of [["", 0, 0], ["Y+", "Y", 1], ["", 0, 0], ["X-", "X", -1], ["", 0, 0], ["X+", "X", 1], ["", 0, 0], ["Y-", "Y", -1], ["", 0, 0]])
-    pad.appendChild(cell(...c));
-  d.appendChild(pad);
-  const r = el("div", { class: "row" });
-  for (const st of [1, 10, 50]) {
-    const bt = el("button", { type: "button", class: st === jogStep ? "sel" : "" }, st + " mm");
-    bt.onclick = () => { jogStep = st; render(); };
-    r.appendChild(bt);
-  }
-  if (homed.includes("z")) {
-    const z = el("button", { type: "button" }, "Z +10");
-    z.onclick = move("Z", 10);
-    r.appendChild(z);
-  }
+let homing = false;   // homed_axes shows X and Y before Z is done, so track our own G28 until it returns
+const JOG_STEPS = [0.5, 1, 10, 50];
+// Absolute moves from the shown position: if a move is refused (outside the limits), the printer is
+// left in G90, its normal mode, never in relative mode
+// Quick presses add up: each move goes on from the last one sent, until the status has had time to catch up.
+const jogAim = { X: null, Y: null, Z: null, at: 0 };
+function jogMove(axis, dist) {
+  const pos = obj("gcode_move").gcode_position || obj("toolhead").position || [];
+  const i = { X: 0, Y: 1, Z: 2 }[axis];
+  if (Date.now() - jogAim.at > 1500) jogAim.X = jogAim.Y = jogAim.Z = null;
+  const now = jogAim[axis] != null ? jogAim[axis] : Number(pos[i]);
+  if (!Number.isFinite(now)) return;
+  jogAim[axis] = Math.round((now + dist) * 1000) / 1000;
+  jogAim.at = Date.now();
+  runGcode("SAVE_GCODE_STATE NAME=_chordata_jog\nG90\nG1 " + axis + jogAim[axis] +
+    " F" + (axis === "Z" ? 600 : 6000) + "\nRESTORE_GCODE_STATE NAME=_chordata_jog").catch(() => {});
+}
+const jogTyped = { x: "", y: "" };     // what was typed: kept when the step is shown again (+1 Hz, Go, Save)
+function jogPad() {
+  const d = el("div", { class: "jog", id: "setupJog" });
+  d.appendChild(el("div", { class: "pos" }));
+  const r = el("div", { class: "row home" });
+  const h = el("button", { type: "button", class: "primary" }, "Home");
+  h.onclick = () => { homing = true; render(); runGcode("G28").catch(() => {}).finally(() => { homing = false; render(); }); };
+  r.appendChild(h);
   d.appendChild(r);
-  const bp = pt().belt_pos;
-  const r2 = el("div", { class: "row" });
-  if (bp) {
-    const go = el("button", { type: "button", class: "primary" }, "Go to belt tensioning position");
-    go.onclick = () => runGcode("_CHORDATA_POS GO=1");
-    r2.appendChild(go);
+  const body = el("div", { class: "jogbody" });
+  const pad = el("div", { class: "pad" });
+  for (const [label, axis, sign] of [["", 0, 0], ["Y+", "Y", 1], ["", 0, 0], ["X-", "X", -1], ["", 0, 0], ["X+", "X", 1], ["", 0, 0], ["Y-", "Y", -1], ["", 0, 0]]) {
+    if (!label) { pad.appendChild(el("span")); continue; }
+    const bt = el("button", { type: "button" }, label);
+    bt.onclick = () => jogMove(axis, sign * jogStep);
+    pad.appendChild(bt);
   }
-  const sv = el("button", { type: "button" }, "Save belt tensioning position");
-  sv.onclick = () => runGcode("_CHORDATA_POS SAVE=1");
-  r2.appendChild(sv);
-  d.appendChild(r2);
-  if (bp) d.appendChild(el("div", { class: "pos" }, "Saved: X " + Number(bp.x).toFixed(1) + "  Y " + Number(bp.y).toFixed(1)));
+  body.appendChild(pad);
+  const steps = el("div", { class: "steps" });
+  for (const st of JOG_STEPS) {
+    const bt = el("button", { type: "button", "data-step": String(st) }, st + " mm");
+    bt.onclick = () => { jogStep = st; jogUpdate(); };
+    steps.appendChild(bt);
+  }
+  const z = el("button", { type: "button", class: "zup" }, "Z +10");
+  z.onclick = () => jogMove("Z", 10);
+  steps.appendChild(z);
+  body.appendChild(steps);
+  d.appendChild(body);
+  // a coordinate typed directly: absolute X and Y
+  const xy = el("form", { class: "xy" });
+  for (const a of ["X", "Y"]) {
+    const lb = el("label", {}, a);
+    const inp = el("input", { type: "number", inputmode: "decimal", step: "0.5", name: a.toLowerCase(), "aria-label": a + " (mm)" });
+    inp.value = jogTyped[a.toLowerCase()];
+    inp.oninput = () => { jogTyped[a.toLowerCase()] = inp.value; };
+    lb.appendChild(inp);
+    xy.appendChild(lb);
+  }
+  xy.appendChild(el("button", { type: "submit" }, "Move"));
+  xy.onsubmit = (e) => {
+    e.preventDefault();
+    const x = Number(xy.elements.x.value), y = Number(xy.elements.y.value);
+    if (xy.elements.x.value === "" || xy.elements.y.value === "" || !Number.isFinite(x) || !Number.isFinite(y)) {
+      toast("Type both X and Y"); return;
+    }
+    jogAim.X = x; jogAim.Y = y; jogAim.at = Date.now();
+    runGcode("SAVE_GCODE_STATE NAME=_chordata_jog\nG90\nG1 X" + x + " Y" + y +
+      " F6000\nRESTORE_GCODE_STATE NAME=_chordata_jog").catch(() => {});
+  };
+  d.appendChild(xy);
   return d;
+}
+function jogUpdate() {
+  const d = $("setupJog");
+  if (!d) return;
+  const th = obj("toolhead"), homed = String(th.homed_axes || "");
+  // After a page reload (phone screen lock) our own flag is gone: a busy printer without Z homed is still homing
+  const homingNow = homing || (obj("idle_timeout").state === "Printing" && !isPrinting() && !homed.includes("z"));
+  const xyHomed = homed.includes("x") && homed.includes("y");
+  const pos = obj("gcode_move").gcode_position || th.position || [];
+  d.querySelector(".pos").textContent = homingNow ? "Stand by, homing."
+    : xyHomed && pos.length
+    ? "X " + Number(pos[0]).toFixed(1) + "   Y " + Number(pos[1]).toFixed(1) + (homed.includes("z") ? "   Z " + Number(pos[2]).toFixed(1) : "")
+    : "Not homed: home first";
+  d.querySelector(".home").hidden = homingNow || xyHomed;
+  d.querySelector(".jogbody").hidden = d.querySelector(".xy").hidden = homingNow || !xyHomed;
+  d.querySelector(".zup").hidden = !homed.includes("z");
+  for (const bt of d.querySelectorAll("[data-step]")) {
+    const sel = Number(bt.dataset.step) === jogStep;
+    bt.className = sel ? "sel" : "";
+    bt.setAttribute("aria-pressed", String(sel));
+  }
+}
+
+// A fan humming on the belt's note: the plucks can't be read there
+function humText(st) {
+  const h = (st || pt()).belt_hum || [];
+  return h.length ? "Steady hum at " + h.map((x) => Math.round(x)).join(" and ") + " Hz on the belt's note (a fan?): turn fans off" : "";
+}
+// Tuner Mode: one big number, the newest clear pluck, and how far it is from the target
+function renderFree(box, b) {
+  const listening = pt().state === "listening" && pt().belt_now === "free";
+  const plucks = (listening ? pt().belt_live : (b.free || {}).plucks) || [];
+  const good = plucks.filter((p) => p.ok && p.freq != null);
+  const last = good.length ? good[good.length - 1].freq : null;
+  const live = el("div", { class: "live" });
+  live.appendChild(el("div", { class: "hz" }, last != null ? fmtHz(last) + " Hz" : (listening ? "..." : "--")));
+  if (last != null) {
+    const d = last - b.target, tol = b.tol || 0.25;
+    const cls = Math.abs(d) <= tol ? "good" : (Math.abs(d) <= 2 ? "near" : "far");
+    live.appendChild(el("div", { class: "d " + cls }, Math.abs(d) <= tol ? "on target"
+      : (d < 0 ? "-" : "+") + Math.abs(d).toFixed(1) + " Hz, " + (d < 0 ? "tighten" : "loosen")));
+  }
+  live.appendChild(el("div", { class: "sub" }, "Target " + Number(b.target).toFixed(0) + " Hz" +
+    (listening ? "  ·  " + (pt().message || "Listening") : "")));
+  if (humText()) live.appendChild(el("div", { class: "d far" }, humText()));
+  box.appendChild(live);
+  if (plucks.length) {
+    const chips = el("div", { class: "chips" });
+    for (const p of plucks.slice(-12)) {
+      const c = el("span", { class: "chip " + (p.ok ? "ok" : "out") }, p.freq != null ? fmtHz(p.freq) : "x");
+      if (!p.ok && p.why) c.title = p.why;
+      chips.appendChild(c);
+    }
+    box.appendChild(chips);
+  }
+  if (listening && pt().measurement && pt().measurement.phase === "listening") {
+    const done = el("button", { class: "primary", type: "button", style: "width:100%;margin-top:12px" }, accepting ? "Stopping..." : "Done");
+    done.disabled = accepting;
+    done.onclick = freeDone;
+    box.appendChild(done);
+  }
 }
 
 // "4 of 5 counted (1 left out)": counted out of the plucks needed, not out of those heard
@@ -733,13 +994,13 @@ function countText(r, need) {
 }
 function renderBelts() {
   const b = pt().belts || {};
-  const on = !!prompt && /^Chordata - (belt|pluck|tap)/i.test(prompt.title || "") && !!b.target;
+  const free = !!prompt && /^Chordata - (free|tuner)/i.test(prompt.title || "");
+  const on = !!prompt && /^Chordata - (belt|pluck|tap|free|tuner)/i.test(prompt.title || "") && !!b.target;
   show("beltView", on);
   if (!on) return;
   const box = $("beltView");
-  const jogOpen = !!(box.querySelector(".jog") || {}).open;
   box.textContent = "";
-  if (!demo && pt().state !== "listening") box.appendChild(jogPad(jogOpen));
+  if (free) { renderFree(box, b); return; }
   const now = pt().belt_now || (/belt (A|B)/i.exec(prompt.title || "") || [])[1] || "";
   const cur = (now === "A" || now === "B") ? b[now] : null;
   // the newest pluck of the belt being measured, big
@@ -754,15 +1015,13 @@ function renderBelts() {
     live.appendChild(el("div", { class: "sub" }, listening && plucks.length
       ? Math.min(okN, b.plucks || okN) + " of " + (b.plucks || plucks.length) + " counted" + (last && !last.ok ? " (last: " + (last.why || "not counted") + ")" : "")
       : (pt().message || "Listening")));
-  } else if (cur && cur.freq != null) {
-    live.appendChild(el("div", { class: "hz" }, fmtHz(cur.freq) + " Hz"));
-    live.appendChild(el("div", { class: "sub" }, "Belt " + now + ": " + countText(cur, b.plucks)));
-  } else if (cur) {
+  } else if (cur && cur.freq == null) {     // a finished belt is shown once, in its card below
     live.appendChild(el("div", { class: "hz out" }, last && last.freq != null ? fmtHz(last.freq) : "--"));
     live.appendChild(el("div", { class: "sub" }, "Pluck again"));
   }
+  if (humText()) live.appendChild(el("div", { class: "d far" }, humText()));
   if (live.childNodes.length) box.appendChild(live);
-  if (plucks.length) {
+  if (plucks.length && pt().state === "listening") {   // once done, the belt cards say it (the table below keeps every pluck)
     const chips = el("div", { class: "chips" });
     for (const p of plucks) {
       const c = el("span", { class: "chip " + (p.ok ? "ok" : "out") }, p.freq != null ? fmtHz(p.freq) : "x");
@@ -787,7 +1046,7 @@ function renderBelts() {
     if (r && r.freq != null) {
       const d = r.freq - b.target, tol = b.tol || 0.25;
       const cls = Math.abs(d) <= tol ? "good" : (Math.abs(d) <= 2 ? "near" : "far");
-      const good = Math.abs(d) <= tol && r.used >= (b.plucks || 5);
+      const good = Math.abs(d) <= tol && (r.enough != null ? r.enough : r.used >= (b.plucks || 5));
       t.appendChild(el("div", { class: "d " + cls }, Math.abs(d) <= tol ? (good ? "Belt good" : "on target")
         : (d < 0 ? "-" : "+") + Math.abs(d).toFixed(1) + " Hz, " + (d < 0 ? "tighten" : "loosen")));
       t.appendChild(el("div", { class: "n" }, countText(r, b.plucks)));
@@ -808,6 +1067,186 @@ const S = {};             // merged printer status
 let klippyState = "";     // "ready", "startup", "shutdown", "error", "disconnected"
 let connected = false;
 function obj(name) { return S[name] || {}; }
+// ---------- cue cards: red = hands off (recording the background noise), yellow = tap the toolhead, green = pluck ----------
+let cueKey = "", cueTimer = null, cueLast = "";
+const CUES = {     // the big text only: the card says one thing
+  background: ["red", "Stand by: recording background noise"],
+  tap: ["yellow", "Tap your toolhead"],
+  "pluck:A": ["green", "Pluck belt A"],
+  "pluck:B": ["green", "Pluck belt B"],
+  "pluck:free": ["green", "Pluck either belt"],
+  switch: ["yellow", "Tap your toolhead"],
+};
+// No card closes on a timer or needs a press on the phone: each stays until the printer is done
+// with that step (red until the quiet is recorded, yellow until the tap is heard, green until
+// the plucking is over). The green ones show each pluck as it is heard.
+function cueFlash(times, ms, done) {
+  const box = $("cue");
+  clearInterval(cueTimer);
+  let n = 0;
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) times = 0;
+  if (!times) { box.classList.remove("inv"); if (done) done(); return; }
+  cueTimer = setInterval(() => {
+    box.classList.toggle("inv");
+    if (++n >= times * 2) { clearInterval(cueTimer); box.classList.remove("inv"); if (done) done(); }
+  }, ms);
+}
+function cueSet(key) {
+  if (key === cueKey) return;
+  const was = cueKey, box = $("cue");
+  cueKey = key;
+  if (!key) { clearInterval(cueTimer); box.hidden = true; $("cueLive").textContent = ""; return; }
+  const [colour, big] = CUES[key];
+  const paint = () => { box.className = colour; $("cueBig").textContent = big; };
+  if (key === "background") { paint(); box.hidden = false; cueFlash(3, 110); }
+  else if (key === "tap" || key === "switch") { box.hidden = false; cueFlash(2, 55, () => { paint(); }); }
+  else { box.hidden = false; cueFlash(1, 110, () => { paint(); }); }
+  if (!was && key !== "background") paint();
+  if (key.startsWith("pluck:")) beep();       // ready to measure (after the switch tap: the tap was heard)
+}
+// How it works: its own page (#how). Back returns to where it was opened, or home if opened by a link
+let howFromPage = false;
+function howButton(body) {
+  const how = el("button", { type: "button", class: "howlink" }, "How it works");
+  how.onclick = openHow;
+  body.appendChild(el("div", { class: "pbuttons" })).appendChild(how);
+}
+function openHow() { howFromPage = true; location.hash = "how"; }
+// An error on a step (a target the accelerometer can't hear): the screen flashes red with it, then the step stays
+function errorFlash(text) {
+  if (cueKey || location.hash === "#how") return;    // a measuring card is up, or the user is reading
+  const box = $("cue");
+  box.className = "";
+  $("cueBig").textContent = text;
+  $("cueLive").textContent = "";
+  box.hidden = false;
+  cueFlash(3, 150, () => setTimeout(() => { if (!cueKey) box.hidden = true; }, 600));
+}
+// A short 1000 Hz beep, 200 ms: heard when the phone is out of sight
+let audio = null;
+function beepUnlock() {
+  try {
+    if (!audio) audio = new (window.AudioContext || window.webkitAudioContext)();
+    if (audio.state === "suspended") audio.resume();
+  } catch (e) { audio = null; }
+}
+// Keep the screen on while the page is open: the phone lies on the bed while both hands pluck, and a
+// screen that goes dark hides the cue cards. The browser's wake lock where it is allowed (HTTPS or
+// localhost); a printer's plain-http page doesn't get it, so there a tiny silent black video loops
+// unseen, which phones also keep the screen on for. Both need a first press on the page.
+let wakeLock = null, wakeVideo = null;
+async function keepAwake() {
+  if (document.visibilityState !== "visible") return;
+  try {
+    if (navigator.wakeLock && window.isSecureContext) {
+      if (!wakeLock) {               // one press fires several events: they share one request
+        wakeLock = navigator.wakeLock.request("screen").then((lock) => {
+          lock.addEventListener("release", () => { wakeLock = null; });
+          return lock;
+        });
+      }
+      await wakeLock;
+      return;
+    }
+  } catch (e) { wakeLock = null; }
+  try {
+    if (!wakeVideo) {
+      wakeVideo = el("video", { muted: "", playsinline: "", loop: "", "aria-hidden": "true", tabindex: "-1",
+        style: "position:fixed;left:0;bottom:0;width:1px;height:1px;opacity:0.01;pointer-events:none" });
+      wakeVideo.muted = true; wakeVideo.playsInline = true; wakeVideo.loop = true;
+      wakeVideo.appendChild(el("source", { type: "video/webm", src: "data:video/webm;base64,GkXfo59ChoEBQveBAULygQRC84EIQoKEd2VibUKHgQRChYECGFOAZwEAAAAAAAeFEU2bdLpNu4tTq4QVSalmU6yBoU27i1OrhBZUrmtTrIHYTbuMU6uEElTDZ1OsggGETbuMU6uEHFO7a1Osggdv7AEAAAAAAABZAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAVSalmsirXsYMPQkBNgI1MYXZmNjAuMTYuMTAwV0GNTGF2ZjYwLjE2LjEwMESJiECfYAAAAAAAFlSua0CmrgEAAAAAAAA414EBc8WIqjsYWzqrv5KcgQAitZyDdW5kiIEAhoVWX1ZQOIOBASPjg4Q7msoA4ImwgRC6gRCagQKuAQAAAAAAAFzXgQJzxYiffT3T9Jf/R5yBACK1nIN1bmSIgQCGhkFfT1BVU1aqg2MuoFa7hATEtACDgQLhkZ+BAbWIQL9AAAAAAABiZIEQY6KTT3B1c0hlYWQBATgBQB8AAAAAABJUw2dA1nNzoGPAgGfImkWjh0VOQ09ERVJEh41MYXZmNjAuMTYuMTAwc3PWY8CLY8WIqjsYWzqrv5JnyKFFo4dFTkNPREVSRIeUTGF2YzYwLjMxLjEwMiBsaWJ2cHhnyKFFo4hEVVJBVElPTkSHkzAwOjAwOjAyLjAwMDAwMDAwMABzc9djwItjxYiffT3T9Jf/R2fIokWjh0VOQ09ERVJEh5VMYXZjNjAuMzEuMTAyIGxpYm9wdXNnyKFFo4hEVVJBVElPTkSHkzAwOjAwOjAyLjAwODAwMDAwMAAfQ7Z1RQnngQCji4IAAIAIC+Y7I6tgo6OBAACAEAIAnQEqEAAQAABHCIWFiJmEiAICAAwNYAD+/6tQgKOKggAVgAgIrLMOxqOKggApgAgIrLMOxqOKggA9gAgIrLMOxqOKggBRgAgIrLMOxqOKggBlgAgIrLMOxqOKggB5gAgIrLMOxqOKggCNgAgIrLMOxqOKggChgAgIrLMOxqOKggC1gAgIrLMOxqOKggDJgAgIrLMOxqOKggDdgAgIrLMOxqOKggDxgAgIrLMOxqOKggEFgAgIrLMOxqOKggEZgAgIrLMOxqOKggEtgAgIrLMOxqOKggFBgAgIrLMOxqOKggFVgAgIrLMOxqOKggFpgAgIrLMOxqOKggF9gAgIrLMOxqOKggGRgAgIrLMOxqOKggGlgAgIrLMOxqOKggG5gAgIrLMOxqOKggHNgAgIrLMOxqOKggHhgAgIrLMOxqOKggH1gAgIrLMOxqOKggIJgAgIrLMOxqOKggIdgAgIrLMOxqOKggIxgAgIrLMOxqOKggJFgAgIrLMOxqOKggJZgAgIrLMOxqOKggJtgAgIrLMOxqOKggKBgAgIrLMOxqOKggKVgAgIrLMOxqOKggKpgAgIrLMOxqOKggK9gAgIrLMOxqOKggLRgAgIrLMOxqOKggLlgAgIrLMOxqOKggL5gAgIrLMOxqOKggMNgAgIrLMOxqOKggMhgAgIrLMOxqOKggM1gAgIrLMOxqOKggNJgAgIrLMOxqOKggNdgAgIrLMOxqOKggNxgAgIrLMOxqOKggOFgAgIrLMOxqOKggOZgAgIrLMOxqOKggOtgAgIrLMOxqOKggPBgAgIrLMOxqOKggPVgAgIrLMOxqOKggPpgAgIrLMOxqOZgQPoALEBAAEQEAAYADA/9AwAAAD+/6tQgKOKggP9gAgIrLMOxqOKggQRgAgIrLMOxqOKggQlgAgIrLMOxqOKggQ5gAgIrLMOxqOKggRNgAgIrLMOxqOKggRhgAgIrLMOxqOKggR1gAgIrLMOxqOKggSJgAgIrLMOxqOKggSdgAgIrLMOxqOKggSxgAgIrLMOxqOKggTFgAgIrLMOxqOKggTZgAgIrLMOxqOKggTtgAgIrLMOxqOKggUBgAgIrLMOxqOKggUVgAgIrLMOxqOKggUpgAgIrLMOxqOKggU9gAgIrLMOxqOKggVRgAgIrLMOxqOKggVlgAgIrLMOxqOKggV5gAgIrLMOxqOKggWNgAgIrLMOxqOKggWhgAgIrLMOxqOKggW1gAgIrLMOxqOKggXJgAgIrLMOxqOKggXdgAgIrLMOxqOKggXxgAgIrLMOxqOKggYFgAgIrLMOxqOKggYZgAgIrLMOxqOKggYtgAgIrLMOxqOKggZBgAgIrLMOxqOKggZVgAgIrLMOxqOKggZpgAgIrLMOxqOKggZ9gAgIrLMOxqOKggaRgAgIrLMOxqOKggalgAgIrLMOxqOKgga5gAgIrLMOxqOKggbNgAgIrLMOxqOKggbhgAgIrLMOxqOKggb1gAgIrLMOxqOKggcJgAgIrLMOxqOKggcdgAgIrLMOxqOKggcxgAgIrLMOxqOKggdFgAgIrLMOxqOKggdZgAgIrLMOxqOKggdtgAgIrLMOxqOKggeBgAgIrLMOxqOKggeVgAgIrLMOxqOKggepgAgIrLMOxqOKgge9gAgIrLMOxqCToYqCB9EACAissw7GdaKEAM3+YBxTu2uRu4+zgQC3iveBAfGCAmDwgRA=" }));
+      wakeVideo.appendChild(el("source", { type: "video/mp4", src: "data:video/mp4;base64,AAAAIGZ0eXBpc29tAAACAGlzb21pc28yYXZjMW1wNDEAAAXAbW9vdgAAAGxtdmhkAAAAAAAAAAAAAAAAAAAD6AAAB9AAAQAAAQAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAwAAAll0cmFrAAAAXHRraGQAAAADAAAAAAAAAAAAAAABAAAAAAAAB9AAAAAAAAAAAAAAAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAABAAAAAAAAAAAAAAAAAABAAAAAABAAAAAQAAAAAAAkZWR0cwAAABxlbHN0AAAAAAAAAAEAAAfQAAAAAAABAAAAAAHRbWRpYQAAACBtZGhkAAAAAAAAAAAAAAAAAABAAAAAgABVxAAAAAAALWhkbHIAAAAAAAAAAHZpZGUAAAAAAAAAAAAAAABWaWRlb0hhbmRsZXIAAAABfG1pbmYAAAAUdm1oZAAAAAEAAAAAAAAAAAAAACRkaW5mAAAAHGRyZWYAAAAAAAAAAQAAAAx1cmwgAAAAAQAAATxzdGJsAAAAuHN0c2QAAAAAAAAAAQAAAKhhdmMxAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAAAABAAEABIAAAASAAAAAAAAAABFUxhdmM2MC4zMS4xMDIgbGlieDI2NAAAAAAAAAAAAAAAGP//AAAALmF2Y0MBQsAK/+EAFmdCwArZHsBEAAADAAQAAAMACDxImSABAAVoy4PEyAAAABBwYXNwAAAAAQAAAAEAAAAUYnRydAAAAAAAAApQAAAKUAAAABhzdHRzAAAAAAAAAAEAAAACAABAAAAAABRzdHNzAAAAAAAAAAEAAAABAAAAHHN0c2MAAAAAAAAAAQAAAAEAAAABAAAAAQAAABxzdHN6AAAAAAAAAAAAAAACAAACiQAAAAsAAAAYc3RjbwAAAAAAAAACAAAGBQAACK4AAAKRdHJhawAAAFx0a2hkAAAAAwAAAAAAAAAAAAAAAgAAAAAAAAfQAAAAAAAAAAAAAAABAQAAAAABAAAAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAQAAAAAAAAAAAAAAAAAAAJGVkdHMAAAAcZWxzdAAAAAAAAAABAAAH0AAABAAAAQAAAAACCW1kaWEAAAAgbWRoZAAAAAAAAAAAAAAAAAAAH0AAAEKAVcQAAAAAAC1oZGxyAAAAAAAAAABzb3VuAAAAAAAAAAAAAAAAU291bmRIYW5kbGVyAAAAAbRtaW5mAAAAEHNtaGQAAAAAAAAAAAAAACRkaW5mAAAAHGRyZWYAAAAAAAAAAQAAAAx1cmwgAAAAAQAAAXhzdGJsAAAAfnN0c2QAAAAAAAAAAQAAAG5tcDRhAAAAAAAAAAEAAAAAAAAAAAABABAAAAAAH0AAAAAAADZlc2RzAAAAAAOAgIAlAAIABICAgBdAFQAAAAAAH0AAAAE/BYCAgAUViFblAAaAgIABAgAAABRidHJ0AAAAAAAAH0AAAAE/AAAAIHN0dHMAAAAAAAAAAgAAABAAAAQAAAAAAQAAAoAAAAAoc3RzYwAAAAAAAAACAAAAAQAAAAEAAAABAAAAAgAAAAgAAAABAAAAWHN0c3oAAAAAAAAAAAAAABEAAAAVAAAABAAAAAQAAAAEAAAABAAAAAQAAAAEAAAABAAAAAQAAAAEAAAABAAAAAQAAAAEAAAABAAAAAQAAAAEAAAABAAAABxzdGNvAAAAAAAAAAMAAAXwAAAIjgAACLkAAAAac2dwZAEAAAByb2xsAAAAAgAAAAH//wAAABxzYmdwAAAAAHJvbGwAAAABAAAAEQAAAAEAAABidWR0YQAAAFptZXRhAAAAAAAAACFoZGxyAAAAAAAAAABtZGlyYXBwbAAAAAAAAAAAAAAAAC1pbHN0AAAAJal0b28AAAAdZGF0YQAAAAEAAAAATGF2ZjYwLjE2LjEwMAAAAAhmcmVlAAAC8W1kYXTeAgBMYXZjNjAuMzEuMTAyAAIwQA4AAAJyBgX//27cRem95tlIt5Ys2CDZI+7veDI2NCAtIGNvcmUgMTY0IHIzMTA4IDMxZTE5ZjkgLSBILjI2NC9NUEVHLTQgQVZDIGNvZGVjIC0gQ29weWxlZnQgMjAwMy0yMDIzIC0gaHR0cDovL3d3dy52aWRlb2xhbi5vcmcveDI2NC5odG1sIC0gb3B0aW9uczogY2FiYWM9MCByZWY9MyBkZWJsb2NrPTE6LTM6LTMgYW5hbHlzZT0weDE6MHgxMTEgbWU9aGV4IHN1Ym1lPTcgcHN5PTEgcHN5X3JkPTIuMDA6MC43MCBtaXhlZF9yZWY9MSBtZV9yYW5nZT0xNiBjaHJvbWFfbWU9MSB0cmVsbGlzPTEgOHg4ZGN0PTAgY3FtPTAgZGVhZHpvbmU9MjEsMTEgZmFzdF9wc2tpcD0xIGNocm9tYV9xcF9vZmZzZXQ9LTQgdGhyZWFkcz0xIGxvb2thaGVhZF90aHJlYWRzPTEgc2xpY2VkX3RocmVhZHM9MCBucj0wIGRlY2ltYXRlPTEgaW50ZXJsYWNlZD0wIGJsdXJheV9jb21wYXQ9MCBjb25zdHJhaW5lZF9pbnRyYT0wIGJmcmFtZXM9MCB3ZWlnaHRwPTAga2V5aW50PTI1MCBrZXlpbnRfbWluPTEgc2NlbmVjdXQ9NDAgaW50cmFfcmVmcmVzaD0wIHJjX2xvb2thaGVhZD00MCByYz1jcmYgbWJ0cmVlPTEgY3JmPTIzLjAgcWNvbXA9MC42MCBxcG1pbj0wIHFwbWF4PTY5IHFwc3RlcD00IGlwX3JhdGlvPTEuNDAgYXE9MToxLjIwAIAAAAAPZYiEBfOf//8PRQABV5+AARggBwEYIAcBGCAHARggBwEYIAcBGCAHARggBwEYIAcAAAAHQZo4C+c6gAEYIAcBGCAHARggBwEYIAcBGCAHARggBwEYIAcBGCAH" }));
+      document.body.appendChild(wakeVideo);
+    }
+    if (wakeVideo.paused) await wakeVideo.play();
+  } catch (e) { /* not allowed yet: the next press tries again */ }
+}
+function beep() {
+  if (!audio || audio.state !== "running") return;
+  try {
+    const o = audio.createOscillator(), g = audio.createGain(), t = audio.currentTime;
+    o.frequency.value = 1000;
+    // ADSR, soft on the ear: attack 10 ms, no decay, sustain 140 ms, release 50 ms
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(0.3, t + 0.01);
+    g.gain.setValueAtTime(0.3, t + 0.15);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.2);
+    o.connect(g).connect(audio.destination);
+    o.start(t);
+    o.stop(t + 0.21);
+  } catch (e) { /* no sound: the card still shows */ }
+}
+// the plucks so far, on the green card: the newest one big, and the count (or, in a free tune, the target)
+let cueLiveSig = "";
+function cueLive(key, st) {
+  const box = $("cueLive");
+  if (key === "tap") {             // the setup taps: a check mark or an X for each, a circle for each still needed
+    const taps = st.tap_live || [], good = taps.filter((x) => x.ok).length;
+    const need = (st.measurement || {}).expected || 3;
+    const marks = taps.map((x) => x.ok ? "\u2713" : "\u2717").join("") + "\u25CB".repeat(Math.max(0, need - good));
+    const sig = "tap|" + marks;
+    if (sig === cueLiveSig) return;
+    cueLiveSig = sig;
+    box.textContent = "";
+    box.appendChild(el("div", { class: "marks", "aria-label": good + " of " + need + " taps counted" }, marks));
+    return;
+  }
+  if (!key.startsWith("pluck:")) { if (cueLiveSig) { box.textContent = ""; cueLiveSig = ""; } return; }
+  const b = st.belts || {}, plucks = st.belt_live || [], free = key === "pluck:free";
+  const shown = free ? plucks.filter((p) => p.ok && p.freq != null) : plucks;
+  const last = shown.length ? shown[shown.length - 1] : null;
+  const okN = plucks.filter((p) => p.ok).length, need = b.plucks || 5;
+  let sub;
+  if (free) {
+    const d = last ? last.freq - b.target : null, tol = b.tol || 0.25;
+    sub = d == null ? "Target " + Number(b.target || 0).toFixed(0) + " Hz"
+      : Math.abs(d) <= tol ? "On target" : (d < 0 ? "-" : "+") + Math.abs(d).toFixed(1) + " Hz, " + (d < 0 ? "tighten" : "loosen");
+  } else {
+    sub = plucks.length ? Math.min(okN, need) + " of " + need + " counted" + (last && !last.ok ? " (last: " + (last.why || "not counted") + ")" : "")
+      : "Listening";
+  }
+  const a = key === "pluck:B" && b.A && b.A.freq != null ? "Belt A: " + fmtHz(b.A.freq) + " Hz" : "";
+  const hum = humText(st);
+  const sig = [key, last && last.freq, last && last.ok, sub, a, hum, accepting].join("|");
+  if (sig === cueLiveSig) return;
+  cueLiveSig = sig;
+  box.textContent = "";
+  box.appendChild(el("div", { class: "lhz" }, last && last.freq != null ? fmtHz(last.freq) + " Hz" : "..."));
+  box.appendChild(el("div", { class: "lsub" }, sub));
+  if (a) box.appendChild(el("div", { class: "lsub" }, a));
+  if (hum) box.appendChild(el("div", { class: "lsub" }, hum));
+  if (free) {
+    const done = el("button", { type: "button" }, accepting ? "Stopping..." : "Done");
+    done.disabled = accepting;
+    done.onclick = freeDone;
+    box.appendChild(done);
+  }
+}
+function cueUpdate() {
+  const st = pt(), m = st.measurement || {};
+  if (st.state !== "listening") accepting = false;
+  const kind = m.belt, phase = m.phase;
+  let key = "";
+  if (st.state === "listening" && phase === "background") key = "background";
+  else if (kind === "tap" && (phase === "listening" || phase === "analysing")) key = "tap";
+  else if (st.state === "listening" && phase === "listening" && kind === "both")
+    key = m.step === "tap" ? "switch" : "pluck:" + (m.step === "B" ? "B" : "A");
+  else if (st.state === "listening" && phase === "listening" && ["A", "B", "free"].includes(kind)) key = "pluck:" + kind;
+  // the tap that switches to belt B was heard: a buzz, so the user knows without looking
+  if (cueLast === "switch" && key === "pluck:B" && navigator.vibrate) { try { navigator.vibrate(200); } catch (e) {} }
+  cueLast = key;
+  cueSet(key);
+  cueLive(key, st);
+}
+// ending a free tune (Done) is not G-code: G-code is busy with the listen, so it goes to
+// the plugin through Moonraker directly
+let accepting = false;
+function freeDone() {
+  if (accepting) return;
+  accepting = true;
+  render();
+  rpc("server.chordata.accept", {}).catch((e) => { accepting = false; toast(errText(e)); render(); });
+}
 function pt() { return obj("chordata"); }
 function isPrinting() { return ["printing", "paused"].includes(obj("print_stats").state || ""); }
 function merge(dst, src) {
@@ -827,29 +1266,53 @@ function renderPrompt() {
   if (!prompt) return;
   if (promptRendered !== promptSeq) {
     promptRendered = promptSeq;
-    $("pTitle").textContent = prompt.title || "Chordata";
+    // "Chordata - ..." titles are for Mainsail's pop-up; on this page the cards and numbers say it
+    const title = prompt.title || "";
+    $("pTitle").textContent = title;
+    $("pTitle").hidden = !title || (!isPc() && /^Chordata\b/i.test(title));   // the PC title bar always shows it
     const body = $("pBody");
     body.textContent = "";
     let solo = null;
-    for (const it of prompt.items) {
+    // After a belt is measured the next step's buttons go first, so they sit right under the numbers, no scrolling
+    const items = /^Chordata - belt/i.test(prompt.title || "")
+      ? prompt.items.filter((it) => it.type !== "text").concat(prompt.items.filter((it) => it.type === "text"))
+      : prompt.items;
+    for (const it of items) {
+      if (it.type === "button" && /STEP=start\b/.test(it.btn.gcode)) { howButton(body); solo = null; }
+      if (it.type === "button" && /STEP=save\b/.test(it.btn.gcode) && !demo) {
+        body.appendChild(jogPad());            // Set Target Frequency: the pad sits between Go and Save
+        solo = null;
+      }
       if (it.type === "button") {
         if (!solo) { solo = el("div", { class: "pbuttons" }); body.appendChild(solo); }
         solo.appendChild(promptButton(it.btn));
         continue;
       }
       solo = null;
-      if (it.type === "text") body.appendChild(el("p", { class: "ptext" }, it.text));
+      if (it.type === "text" && /^Target Frequency:/.test(it.text)) body.appendChild(targetBox(it.text));
+      else if (it.type === "text" && /^Error:/.test(it.text)) {
+        body.appendChild(el("p", { class: "ptext perr" }, it.text));
+        errorFlash(it.text.replace(/^Error:\s*/, "Error: "));
+      }
+      else if (it.type === "text") body.appendChild(el("p", { class: "ptext" }, it.text));
+      else if (it.type === "group" && it.list.some((b) => /\bDT=/.test(b.gcode))) continue;   // the box replaces them
       else if (it.type === "group") {
         const g = el("div", { class: "pgroup" });
         for (const b of it.list) g.appendChild(promptButton(b));
         body.appendChild(g);
       }
     }
+    if (prompt.title === "Set Target Frequency" && !body.querySelector(".howlink")) howButton(body);
     const foot = $("pFooter");
     foot.textContent = "";
-    for (const b of prompt.footer) foot.appendChild(promptButton(b));
+    // Close Chordata (all Mainsail shows) gets a Back beside it here: back to Chordata's start page
+    for (const b of prompt.footer) {
+      if (b.label === "Close Chordata") foot.appendChild(promptButton({ label: "Back", gcode: b.gcode, style: "secondary" }));
+      foot.appendChild(promptButton(b));
+    }
     foot.hidden = !prompt.footer.length;
   }
+  jogUpdate();
   renderBelts();
 }
 
@@ -861,14 +1324,6 @@ function renderHome() {
   show("notXY", known && tools.accel && !tools.corexy);
   $("kinName").textContent = tools.kinematics || "unknown";
   $("startBtn").disabled = demo || !connected || klippyState !== "ready" || isPrinting() || (known && !(tools.accel && tools.corexy));
-  const box = $("homeJog");
-  const open = !!(box.querySelector(".jog") || {}).open;
-  box.textContent = "";
-  box.id = "homeJog";
-  const wrap = el("div", { id: "beltViewHome" });
-  wrap.appendChild(jogPad(open));
-  box.appendChild(wrap);
-  show("homeJog", !isPrinting() && known && tools.accel && tools.corexy);
 }
 
 function render() {
@@ -881,10 +1336,16 @@ function render() {
   $("dot").className = "dot " + (connected && klippyState === "ready" ? "ok" : "bad");
   const missing = connected && klippyState === "ready" && !S.chordata;
   $("hdrState").textContent = missing ? "Chordata plugin not loaded" : (pt().state === "listening" ? "Listening" : "");
-  show("home", !prompt);
-  if (!prompt) renderHome();
+  // How it works is its own page (#how), so the phone's back button returns
+  const how = location.hash === "#how";
+  show("how", how);
+  if (how && pt().belt_tol) $("howTol").textContent = String(pt().belt_tol);
+  show("home", !prompt && !how);
+  if (!prompt && !how) renderHome();
   renderPrompt();
+  if (how) $("prompt").hidden = true;
   renderMeasurements();
+  cueUpdate();
 }
 
 function measurementRows() {
@@ -895,36 +1356,30 @@ function measurementRows() {
   }
   return rows;
 }
-const STAR_HZ = 0.1;      // a pluck this close to the target is drawn as a star
-function star(cx, cy, r) {
-  const pts = [];
-  for (let i = 0; i < 10; i++) {
-    const a = -Math.PI / 2 + i * Math.PI / 5, q = i % 2 ? r * 0.45 : r;
-    pts.push((cx + q * Math.cos(a)).toFixed(1) + ',' + (cy + q * Math.sin(a)).toFixed(1));
-  }
-  return pts.join(' ');
+// The graph only while a belt is measured and on the result right after it, never on the
+// start page, the setup or the toolhead taps
+function measuring() {
+  const s=pt();
+  const t=(prompt && prompt.title) || '';
+  // (Tuner Mode has its own card for its plucks: the graph would show an earlier Guided run)
+  if(s.state==='listening') return ['A','B'].includes(s.belt_now);
+  return /^Chordata - (belt \S+: |belts [\d.]+ \/ |belt results)/.test(t);
 }
 function renderMeasurements() {
-  const rows=measurementRows(); show('measurePanel',rows.length>0);
+  const rows=measurementRows(); show('measurePanel',rows.length>0 && measuring() && location.hash!=='#how');
   const body=$('measureRows'); body.replaceChildren();
   for(const r of rows) { const tr=el('tr'); for(const value of [r.belt,r.index,fmtHz(r.freq),r.ok?'Counted':'Rejected',r.why || '—']) tr.appendChild(el('td',{},value)); body.appendChild(tr); }
   const holder=$('trend'); holder.replaceChildren(); if(!rows.length) return;
   const svg=document.createElementNS('http://www.w3.org/2000/svg','svg');
   svg.setAttribute('viewBox','0 0 660 240'); svg.setAttribute('class','trend'); svg.setAttribute('role','img'); svg.setAttribute('aria-label','Frequency by pluck number for belts A and B. Exact values follow in Measurement data.');
   const add=(tag,attrs,text)=>{ const n=document.createElementNS(svg.namespaceURI,tag); for(const k in attrs)n.setAttribute(k,attrs[k]); if(text)n.textContent=text; svg.appendChild(n); };
-  const tol=Number((pt().belts || {}).tol) || 0.25;
   const target=Number((pt().belts || {}).target), values=rows.filter(r=>r.freq!=null && Number.isFinite(Number(r.freq))).map(r=>Number(r.freq));
   if(target>0)values.push(target); if(!values.length) { holder.appendChild(el('p',{},'No frequency detected yet.')); return; }
   const low=Math.floor(Math.min(...values)-5), high=Math.ceil(Math.max(...values)+5), maxN=Math.max(2,...rows.map(r=>r.index));
   const y=f=>200-(f-low)/(high-low)*170, x=i=>90+(i-1)/(maxN-1)*530;
   for(let n=0;n<3;n++) { const f=low+(high-low)*n/2; add('line',{x1:90,y1:y(f),x2:620,y2:y(f),stroke:'var(--line)'}); add('text',{x:0,y:y(f)+5},f.toFixed(0)+' Hz'); }
   if(target>0)add('line',{x1:90,y1:y(target),x2:620,y2:y(target),stroke:'var(--muted)','stroke-dasharray':'6 5'});
-  for(const r of rows) { if(r.freq==null || !Number.isFinite(Number(r.freq)))continue; const px=x(r.index),py=y(Number(r.freq)),color=r.belt==='A'?'var(--primary)':'var(--warn)',attrs={stroke:color,'stroke-width':2}; const mate=rows.find(m=>m.belt!==r.belt && m.index===r.index && m.ok && m.freq!=null && Number.isFinite(Number(m.freq))), off=mate?Math.abs(Number(r.freq)-Number(mate.freq)):Infinity;
-    // belt A and B matched at the same pluck number: within 0.1 Hz a green star, within the
-    // tolerance a green dot (ringed in the belt's colour)
-    if(r.ok && off<STAR_HZ) add('polygon',{...attrs,points:star(px,py,11),fill:'var(--ok)','stroke-width':1.5});
-    else if(r.ok && off<=tol) add('circle',{...attrs,cx:px,cy:py,r:6,fill:'var(--ok)'});
-    else if(r.ok)add('circle',{...attrs,cx:px,cy:py,r:5,fill:color}); else add('path',{...attrs,d:`M${px-5},${py-5}l10,10m0,-10l-10,10`,fill:'none'}); }
+  for(const r of rows) { if(r.freq==null || !Number.isFinite(Number(r.freq)))continue; const px=x(r.index),py=y(Number(r.freq)),color=r.belt==='A'?'var(--primary)':'var(--warn)',attrs={stroke:color,'stroke-width':2}; if(r.ok)add('circle',{...attrs,cx:px,cy:py,r:5,fill:color}); else add('path',{...attrs,d:`M${px-5},${py-5}l10,10m0,-10l-10,10`,fill:'none'}); }
   add('text',{x:90,y:228},'Pluck 1'); add('text',{x:530,y:228},'Pluck '+maxN); holder.appendChild(svg); holder.appendChild(el('p',{class:'small muted'},'Belt A: blue · Belt B: amber'));
 }
 function csvMeasurements() {
@@ -937,12 +1392,57 @@ function initPage() {
   $('exportBtn').onclick=()=>{ const url=URL.createObjectURL(new Blob([csvMeasurements()],{type:'text/csv;charset=utf-8'})); const link=el('a',{href:url,download:'chordata-measurements.csv'}); link.click(); setTimeout(()=>URL.revokeObjectURL(url),1000); };
 }
 
+function isPc() { return document.documentElement.classList.contains("pc"); }
+// The PC layout puts the graph inside the pop-up, above its footer; the phone layout keeps it below
+function placeLayout() {
+  const pc = pcLayout();
+  const changed = pc !== isPc();
+  document.documentElement.classList.toggle("pc", pc);
+  document.documentElement.style.setProperty("--hdr", $("hdrTop").offsetHeight + "px");
+  const panel = $("measurePanel");
+  if (pc && panel.parentNode !== $("prompt")) $("prompt").insertBefore(panel, $("pFooter"));
+  if (!pc && panel.parentNode === $("prompt")) $("authPanel").before(panel);
+  return changed;
+}
+
 function init() {
   initPage();
+  placeLayout();
+  if (pcQuery) {
+    const again = () => {
+      const typed = $("targetHz") && $("targetHz").value;
+      if (!placeLayout()) return;
+      promptRendered = -1;           // the title bar and buttons differ: draw the step again, keeping a typed target
+      render();
+      if (typed && $("targetHz")) $("targetHz").value = typed;
+    };
+    if (pcQuery.addEventListener) pcQuery.addEventListener("change", again); else if (pcQuery.addListener) pcQuery.addListener(again);
+  }
+  // the pop-up's X: what Close Chordata does (Mainsail's X closes its pop-up the same way)
+  $("pClose").onclick = () => {
+    const close = [...$("pFooter").querySelectorAll("button")].find((b) => b.textContent === "Close Chordata");
+    if (close && !close.disabled) close.click();
+    else { runGcode("RESPOND TYPE=command MSG=action:prompt_end").catch(() => {}); setTimeout(() => { location.href = $("backUi").href; }, 300); }
+  };
   $("startBtn").onclick = () => runGcode("CHORDATA").catch(() => {});
+  $("howBtn").onclick = openHow;
+  $("exitBtn").onclick = () => { location.href = $("backUi").href; };   // back to Mainsail or Fluidd
+  $("howBack").onclick = () => { if (howFromPage) history.back(); else location.hash = ""; };
+  window.addEventListener("hashchange", () => {
+    if (location.hash !== "#how") howFromPage = false;
+    render(); window.scrollTo(0, 0);
+  });
+  // the beep needs a sound context started by a press on the page (browsers block sound until then)
+  for (const ev of ["pointerdown", "pointerup", "touchend", "click", "keydown"])
+    document.addEventListener(ev, beepUnlock, { capture: true });
+  // the screen stays on (keepAwake): started by a press, again whenever the page comes back into view
+  for (const ev of ["pointerup", "touchend", "click", "keydown"])
+    document.addEventListener(ev, () => { if (!demo) keepAwake(); }, { capture: true });
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && (wakeLock || wakeVideo)) { wakeLock = null; keepAwake(); } });
+
   render();
   if (demo) {
-    S.chordata={state:"idle",belts:{target:110,plucks:3,A:{freq:109.9,used:3,heard:4,plucks:[{freq:109.5,ok:true},{freq:110.2,ok:true},{freq:145,ok:false,why:"Off target"},{freq:110,ok:true}]},B:{freq:108.9,used:3,heard:3,plucks:[{freq:109.55,ok:true},{freq:110,ok:true},{freq:107.1,ok:true}]}},tools:{}};
+    S.chordata={state:"idle",belts:{target:110,plucks:3,A:{freq:109.9,used:3,heard:4,plucks:[{freq:109.5,ok:true},{freq:110.2,ok:true},{freq:145,ok:false,why:"Off target"},{freq:110,ok:true}]},B:{freq:106.8,used:3,heard:3,plucks:[{freq:107,ok:true},{freq:106.5,ok:true},{freq:107.1,ok:true}]}},tools:{}};
     prompt={title:"Chordata - belt results",items:[],footer:[]}; promptSeq++; render();
     $("connBanner").textContent="Demo · illustrative data · printer commands disabled";
     $("authForm").hidden=true;
@@ -951,6 +1451,17 @@ function init() {
 }
 
 init();
+// Back: to the page that opened Chordata (Mainsail or Fluidd on this printer), else the
+// printer's web interface at the root of this address
+(function () {
+  try {
+    const r = document.referrer && new URL(document.referrer);
+    // same printer (Mainsail or Fluidd may be served on another port than Moonraker)
+    if (r && r.hostname === location.hostname && !r.pathname.startsWith("/server/chordata")) {
+      document.getElementById("backUi").href = r.href;
+    }
+  } catch (e) { /* keep "/" */ }
+})();
 </script>
 </body>
 </html>

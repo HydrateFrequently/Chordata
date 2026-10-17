@@ -124,6 +124,19 @@ def synthetic():
     qf = quiet(fan=137.0)
     r = belts.analyse(*rec(series([91.0] * 5), fan=137.0), quiet=qf)
     check("fan at 137 Hz", r["verdict"] == "good" and abs(r["freq"] - 91.0) < 0.4, r)
+    # a fan that comes on after the background was recorded (the background is recorded once
+    # per session): off the belt's note it is masked, on it there is no reading and a hum note
+    def fan_later(fan, gain):
+        t, ax, ay, az = rec(series([91.0] * 5))
+        for a in (ax, ay, az):
+            a += gain * 90.0 * np.sin(2 * np.pi * fan * (t - t[0]))
+        return belts.analyse(t, ax, ay, az, quiet=q, target=90.0)
+    r = fan_later(137.0, 1)
+    check("fan on later at 137 Hz", near(r, 91.0) and r["hum"] == [], r)
+    r = fan_later(96.0, 3)
+    check("fan on later at 96 Hz, 5 Hz from the belt", near(r, 91.0), r)
+    r = fan_later(91.3, 5)
+    check("fan on later on the belt's note", r["freq"] is None and len(r["hum"]) == 1 and abs(r["hum"][0] - 91.3) < 0.3 and "hum" in r["note"], r)
     # nothing plucked
     r = belts.analyse(*rec([]), quiet=q)
     check("no plucks", r["freq"] is None and r["verdict"] in ("none", "again"), r)
@@ -144,6 +157,91 @@ def synthetic():
     knocks(q)
     toolheads(q)
     series_rules(q)
+    fingerprint(q)
+    fans()
+
+
+def real_fan(t, fr, amp, start=0.0, seed=3):
+    """A real fan: its speed wanders slowly (+-0.2 Hz), its level wobbles a few %, and it
+    has a weaker line at twice its note. Returns what it adds to (x, y, z)."""
+    g = np.random.default_rng(seed)
+    walk = np.convolve(np.cumsum(g.normal(0, 1, len(t))), np.ones(800) / 800, "same")
+    walk = 0.2 * walk / max(1e-9, np.abs(walk).max())
+    ph = 2 * np.pi * np.cumsum(fr + walk) / FS + g.uniform(0, 6.28)
+    a = amp * (1 + 0.03 * np.sin(2 * np.pi * 0.7 * t))
+    s = np.where(t >= start, a * np.sin(ph) + 0.3 * a * np.sin(2 * ph + 1.0), 0.0)
+    return s, 0.8 * s, 0.5 * s
+
+
+def with_fan(r, fr, amp, start=0.0, seed=3):
+    t, ax, ay, az = r
+    fx, fy, fz = real_fan(t - t[0], fr, amp, start, seed)
+    return t, ax + fx, ay + fy, az + fz
+
+
+def fans():
+    """Fans with a wandering speed, near the belt's or the toolhead's note: in the background
+    recording, or switched on after it. A fan never gives a wrong reading or a wrong toolhead
+    note; on the note itself there is no reading and the user is told to turn fans off.
+    Levels are against a pluck: -30 dB is far louder than the fans on a real Nebula 370 (-59 dB)."""
+    def ok(name, cond, res):
+        print("%-4s %-46s %s" % ("ok" if cond else "FAIL", name, res))
+        if not cond:
+            FAILS.append(name)
+    fan_q = lambda fr, amp: with_fan(rec([], 1.5), fr, amp)[1:]
+    # a background fan 3 Hz from the belt: the belt is still read
+    for off in (-3.0, 3.0):
+        r = belts.analyse(*with_fan(rec(series([91.0] * 5)), 91.0 + off, 47), quiet=fan_q(91.0 + off, 47), target=110.0)
+        check("background fan %+.0f Hz from the belt" % off, near(r, 91.0), r)
+    # on the belt's note (in the background, or on later and loud): no reading, the fan named
+    r = belts.analyse(*with_fan(rec(series([91.0] * 5)), 91.0, 150), quiet=fan_q(91.0, 150), target=110.0)
+    check("background fan on the belt's note", r["freq"] is None and r["hum"] and "fans off" in r["note"], r)
+    r = belts.analyse(*with_fan(rec(series([91.0] * 5)), 91.4, 300, 0.3), quiet=quiet(), target=110.0)
+    check("loud fan on later on the belt's note", r["freq"] is None and r["hum"] and "fans off" in r["note"], r)
+    # the toolhead's note: a fan beside it that came on after the background
+    main = {"freq": 104.5, "guard": 2.0, "width": 3.7}
+    tap = lambda t0, fr=104.5, tau=0.15: (t0, "tap", fr, 3000.0, 0.0, tau)
+    for off in (-1.5, 0.0, 0.7):
+        t, ax, ay, az = with_fan(rec([(1.0, "pluck", 118.0, 1500.0, 3.0), tap(3.0)], 5.0), 104.5 + off, 47, 0.3)
+        kp = belts.toolhead_knock(t, ax, ay, az, 1.0, main, 120.0, quiet=quiet())
+        kt = belts.toolhead_knock(t, ax, ay, az, 3.0, main, 120.0, quiet=quiet())
+        ok("P-T-P switch, fan %+.1f Hz from the toolhead" % off, not kp[0] and kt[0], (kp, kt))
+    # the tap step: the fan's line at twice the toolhead's note doesn't make it a belt
+    for off in (0.0, 0.3):
+        r = belts.analyse_taps(*with_fan(rec([tap(1.0), tap(2.5), tap(4.0)], 6.0), 104.5 + off, 15, 0.3), quiet=quiet())
+        ok("taps, quiet fan %+.1f Hz from the toolhead" % off, r["good"] == 3 and abs(r["main"]["freq"] - 104.5) < 0.6, r["main"])
+    # a rigid toolhead (160 Hz, rings long) and a loud fan right beside it
+    for off in (-0.7, 0.7):
+        r = belts.analyse_taps(*with_fan(rec([tap(1.0, 160.0, 0.5), tap(2.5, 160.0, 0.5), tap(4.0, 160.0, 0.5)], 6.0),
+                                         160.0 + off, 300, 0.3), quiet=quiet())
+        ok("rigid toolhead, loud fan %+.1f Hz" % off, r["good"] == 3 and abs(r["main"]["freq"] - 160.0) < 0.6, r["main"])
+    # a loud background fan on a briefly ringing toolhead's note: the taps are hidden, and said so
+    r = belts.analyse_taps(*with_fan(rec([tap(1.0), tap(2.5), tap(4.0)], 6.0), 105.0, 300), quiet=fan_q(105.0, 300))
+    ok("taps hidden by a loud fan on the toolhead's note", r["good"] == 0 and all(
+        x["why"].startswith("hidden by a steady hum") for x in r["taps"]), [x["why"] for x in r["taps"]])
+
+
+def fingerprint(q):
+    """The setup taps: three good ones on the same spot make the fingerprint; a double tap
+    and a tap on another spot (ringing loudest at another note) are bad. Then the switch:
+    a knock at the toolhead's note is a tap, a pluck isn't."""
+    def ok(name, cond, res):
+        print("%-4s %-46s %s" % ("ok" if cond else "FAIL", name, res))
+        if not cond:
+            FAILS.append(name)
+    tap = lambda t0, fr=104.5: (t0, "tap", fr, 3000.0, 0.0)
+    r = belts.analyse_taps(*rec([tap(1.0), tap(2.5), tap(4.0)], 6.0), quiet=q)
+    ok("3 good taps: fingerprint 104.5", r["good"] == 3 and r["bad"] == 0 and abs(r["main"]["freq"] - 104.5) < 0.5, r)
+    r = belts.analyse_taps(*rec([tap(1.0), tap(1.5), tap(3.0, 163.0), tap(4.5), tap(6.0)], 8.0), quiet=q)
+    whys = [x["why"] for x in r["taps"]]
+    ok("double tap and another spot rejected", r["good"] == 3 and whys == ["", "two taps at once", "another spot", "", ""], r)
+    r = belts.analyse_taps(*rec([tap(1.0), tap(2.5)], 4.0), quiet=q)
+    ok("2 taps: not done yet", r["good"] == 2, r)
+    main = {"freq": 104.5, "guard": 2.0, "width": 3.7}
+    t, ax, ay, az = rec([(1.0, "pluck", 110.0, 1500.0, 3.0), tap(3.0)], 5.0)
+    yes_p = belts.toolhead_knock(t, ax, ay, az, 1.0, main, 110.0, quiet=q)
+    yes_t = belts.toolhead_knock(t, ax, ay, az, 3.0, main, 110.0, quiet=q)
+    ok("switch: pluck no, toolhead knock yes", not yes_p[0] and yes_t[0], (yes_p, yes_t))
 
 
 def near(r, fr, tol=0.4):
@@ -267,6 +365,12 @@ def series_rules(q):
     r = belts.analyse(*rec(ev), quiet=q, target=110.0)
     check("4 of 6 agree: 72 and 60 left out", near(r, 90.5) and r["used"] == 4
           and sum(p["why"].startswith("rang at") for p in r["plucks"]) == 2, r)
+    # free tune: every clear pluck counts on its own, the last one is the reading
+    r = belts.analyse(*rec(series([100.0, 105.0, 110.0])), quiet=q, target=110.0, free=True)
+    check("free tune: 3 different plucks, last read", r["verdict"] == "free" and abs(r["freq"] - 110.0) < 0.4
+          and r["used"] == 3, r)
+    r = belts.analyse(*rec([]), quiet=q, target=110.0, free=True)
+    check("free tune: silence, no reading", r["freq"] is None and r["verdict"] == "none", r)
     # all plucks on the same wrong stretch: a reading all the same (the judge can't know)
     r = belts.analyse(*rec(series([72.0] * 5)), quiet=q, target=110.0)
     check("5 plucks at 72 Hz: a reading", near(r, 72.0), r)

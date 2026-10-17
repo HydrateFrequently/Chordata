@@ -58,11 +58,104 @@ def status(**values):
 class SafetyTests(unittest.TestCase):
     def test_all_direct_commands_reject_printing_and_paused(self):
         for state in ("printing", "paused"):
-            for command in ("START", "LISTEN", "TAP", "POS", "RECORD"):
+            for command in ("START", "LISTEN", "BOTH", "FREE", "TAP", "POS", "RECORD"):
                 with self.subTest(state=state, command=command):
                     obj = plugin({"print_stats": status(state=state)})
                     with self.assertRaisesRegex(ValueError, "finish or cancel"):
                         getattr(obj, "cmd_CHORDATA_" + command)(Command())
+
+    def test_free_tune_needs_the_tap_and_leaves_belts_alone(self):
+        obj = plugin({"print_stats": status(state="standby")})
+        obj.belts["tap_done"] = False
+        before = json.dumps(obj.belts, sort_keys=True)
+        with self.assertRaisesRegex(ValueError, "tap the toolhead"):
+            obj.cmd_CHORDATA_FREE(Command())
+        self.assertEqual(json.dumps(obj.belts, sort_keys=True), before)
+        self.assertEqual(obj.state, "idle")
+
+    def test_both_needs_the_tap(self):
+        obj = plugin({"print_stats": status(state="standby")})
+        obj.belts["tap_done"] = False
+        with self.assertRaisesRegex(ValueError, "tap the toolhead"):
+            obj.cmd_CHORDATA_BOTH(Command())
+        self.assertEqual(obj.state, "idle")
+
+    def test_free_tune_ends_by_itself_after_a_minute_without_plucks(self):
+        chip = object()
+        obj = plugin({"print_stats": status(state="standby"),
+                      "resonance_tester": SimpleNamespace(accel_chips=[("adxl345", chip)]),
+                      "toolhead": SimpleNamespace(wait_moves=lambda: None)})
+        obj._record_quiet = lambda *args, **kw: [(0., 0., 0., 0.)] * 10
+        pieces = []
+
+        def record(chip, toolhead, secs, live=None, stop=None):
+            t0 = 8. * len(pieces)
+            pieces.append(secs)
+            return [(t0, 0., 0., 0.), (t0 + 8., 0., 0., 0.)]
+        obj._record = record
+        saved = []
+        obj._save_recording = lambda name, samples, append=False: saved.append((name, append))
+        first = {"plucks": [{"t": 1., "ok": True, "freq": 110., "why": ""}]}
+        calls = []
+
+        def analyse(*args, **kw):
+            calls.append(1)
+            return first if len(calls) == 1 else {"plucks": []}
+        with patch.object(belts, "analyse", analyse):
+            obj.cmd_CHORDATA_FREE(Command())
+        # the last pluck at 1 s: it stops at the first piece that ends 60 s or more after it
+        self.assertEqual(len(pieces), 8)
+        self.assertEqual(obj.state, "idle")
+        # every piece goes into one file
+        self.assertEqual(len(saved), 8)
+        self.assertEqual(len({n for n, _ in saved}), 1)
+        self.assertTrue(all(a for _, a in saved))
+
+    def _tap_plugin(self, result):
+        obj = plugin({"print_stats": status(state="standby"),
+                      "resonance_tester": SimpleNamespace(accel_chips=[("adxl345", object())]),
+                      "toolhead": SimpleNamespace(wait_moves=lambda: None)})
+        obj._record_quiet = lambda *args, **kw: [(0., 0., 0., 0.)] * 10
+        stops = []
+
+        def record(chip, toolhead, secs, live=None, stop=None):
+            live([(0., 0., 0., 0.)] * 300)
+            stops.append(stop())
+            return [(0., 0., 0., 0.)] * 300
+        obj._record = record
+        obj._save_recording = lambda *args, **kw: None
+        with patch.object(belts, "analyse_taps", lambda *a, **k: result):
+            obj.cmd_CHORDATA_TAP(Command())
+        return obj, stops
+
+    def test_three_good_taps_make_the_fingerprint(self):
+        main = {"freq": 105.8, "tau": .1, "width": 4., "guard": 2.}
+        taps = [{"t": 1., "ok": True, "why": "", "freq": 105.8}, {"t": 2., "ok": False, "why": "another spot", "freq": 80.},
+                {"t": 3., "ok": True, "why": "", "freq": 105.7}, {"t": 4., "ok": True, "why": "", "freq": 105.8}]
+        obj, stops = self._tap_plugin({"taps": taps, "good": 3, "bad": 1, "main": main, "modes": [105.8],
+                                       "ring": [main], "tau": .1, "note": ""})
+        self.assertEqual(stops, [True])                  # it stops by itself at 3 good taps
+        self.assertTrue(obj.belts["tap_done"])
+        self.assertEqual(obj.belts["tap_main"], main)
+        self.assertEqual(obj.belts["tap_bad"], 1)
+        self.assertEqual(obj.tap_live, taps)
+
+    def test_nine_bad_taps_stop_with_advice(self):
+        taps = [{"t": float(i), "ok": False, "why": "two taps at once", "freq": None} for i in range(9)]
+        obj, stops = self._tap_plugin({"taps": taps, "good": 0, "bad": 9, "main": None, "modes": [],
+                                       "ring": [], "tau": None, "note": "no good tap"})
+        self.assertEqual(stops, [True])
+        self.assertFalse(obj.belts["tap_done"])
+        self.assertEqual(obj.belts["tap_note"], "too many bad taps")
+
+    def test_nine_taps_on_another_spot_say_so(self):
+        taps = [{"t": 1., "ok": True, "why": "", "freq": 105.8}] + [
+            {"t": float(i + 2), "ok": False, "why": "another spot", "freq": 80.} for i in range(9)]
+        obj, stops = self._tap_plugin({"taps": taps, "good": 1, "bad": 9, "main": None, "modes": [],
+                                       "ring": [], "tau": None, "note": "1 of 3 good taps"})
+        self.assertEqual(stops, [True])
+        self.assertFalse(obj.belts["tap_done"])
+        self.assertEqual(obj.belts["tap_note"], "taps on another spot")
 
     def test_active_sd_and_pause_interlocks_without_print_stats(self):
         for name, value in (("virtual_sdcard", status(is_active=True)),
@@ -75,6 +168,14 @@ class SafetyTests(unittest.TestCase):
     def test_manual_idle_allowed_with_standby_print_stats(self):
         plugin({"print_stats": status(state="standby"),
                 "idle_timeout": status(state="Printing")})._require_idle(Command())
+
+    def test_printune_measuring_blocks_chordata(self):
+        for state in ("listening", "shaper", "soaking"):
+            with self.subTest(state=state):
+                obj = plugin({"printune": SimpleNamespace(state=state)})
+                with self.assertRaisesRegex(ValueError, "Printune is using the printer"):
+                    obj.cmd_CHORDATA_START(Command())
+        plugin({"printune": SimpleNamespace(state="idle")})._require_idle(Command())
 
     def test_measurement_excludes_other_direct_commands(self):
         obj = plugin()
@@ -161,6 +262,55 @@ class SafetyTests(unittest.TestCase):
         self.assertEqual(obj.measurement["accepted"], 5)
         self.assertEqual(obj.measurement["phase"], "complete")
         self.assertGreater(obj.belts["B"]["measured_at"], 0.)
+
+    def test_background_is_recorded_once_per_session(self):
+        obj = plugin({"resonance_tester": SimpleNamespace(accel_chips=[("xy", object())]),
+                      "toolhead": SimpleNamespace(wait_moves=lambda: None)})
+        obj.belts["heard"] = []
+        obj._quiet = None
+        lengths, quiets = [], []
+        def record(chip, toolhead, secs, **kw):
+            lengths.append(secs)
+            return [(i / 3200., float(len(lengths)), 0., 0.) for i in range(100)]
+        obj._record = record
+        obj._save_recording = lambda *args: None
+        def analysis(*args, **kwargs):
+            quiets.append(kwargs["quiet"])
+            return {"freq": 110., "used": 5, "heard": 5, "note": "", "hum": [],
+                    "plucks": [{"t": i, "ok": True, "why": "", "freq": 110.} for i in range(5)]}
+        with patch("chordata_belts.analyse", side_effect=analysis):
+            obj.cmd_CHORDATA_LISTEN(Command(BELT="A"))
+            obj.cmd_CHORDATA_LISTEN(Command(BELT="B"))
+        self.assertEqual(lengths.count(1.5), 1)          # one background, then only the plucks
+        self.assertEqual(quiets[0], quiets[1])
+
+    def _accel_plugin(self, settings):
+        cf = SimpleNamespace(get_status=lambda now: {"settings": settings})
+        obj = plugin({"configfile": cf, "resonance_tester": object()})
+        obj._accel_cfg = None
+        return obj
+
+    def test_accelerometer_from_the_config(self):
+        cases = [({"resonance_tester": {"accel_chip": "adxl345"}, "adxl345": {}}, None, ("ADXL345", 1440)),
+                 ({"resonance_tester": {"accel_chip": "adxl345 tool"}, "adxl345 tool": {"rate": 1600}}, None, ("ADXL345", 720)),
+                 ({"resonance_tester": {"accel_chip_x": "lis3dh", "accel_chip_y": "adxl345"}}, None, ("LIS3DH", 149)),
+                 ({"resonance_tester": {"accel_chip": "mpu9250"}}, 4000., ("MPU-9250", 1130)),
+                 ({"resonance_tester": {"accel_chip": "mpu9250"}}, 1000., ("MPU-6050", 184)),
+                 ({"resonance_tester": {"accel_chip": "beacon"}}, None, ("Beacon", None)),
+                 ({"resonance_tester": {"accel_chip": "beacon"}}, 3083.4, ("Beacon", 1387))]
+        for settings, fs, want in cases:
+            obj = self._accel_plugin(settings)
+            obj._accel_fs = fs
+            a = obj._accel()
+            self.assertEqual((a["name"], a["hi"]), want, settings)
+            self.assertEqual(a["lo"], 0)
+        self.assertIsNone(self._accel_plugin({})._accel())
+
+    def test_target_out_of_the_accelerometers_range_is_refused(self):
+        obj = self._accel_plugin({"resonance_tester": {"accel_chip": "lis3dh"}, "printer": {"kinematics": "corexy"}})
+        obj._tool_info = None
+        with self.assertRaisesRegex(ValueError, "out of range"):
+            obj.cmd_CHORDATA_START(Command(TARGET=160.))
 
     def test_position_file_rejects_nonfinite_coordinates(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -312,3 +462,15 @@ class AnalysisValidationTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class MacroRecursionTest(unittest.TestCase):
+    """Klipper refuses a macro that runs itself ("called recursively"), e.g. after Go/Save in the setup prompt."""
+
+    def test_no_macro_runs_itself(self):
+        import re
+        text = open(os.path.join(os.path.dirname(__file__), "..", "chordata.cfg")).read()
+        for name, body in re.findall(r"^\[gcode_macro (\S+)\]\n(.*?)(?=^\[|\Z)", text, re.M | re.S):
+            for line in body.splitlines():
+                cmd = line.strip().split(" ")[0]
+                self.assertNotEqual(cmd, name, "%s runs itself: %s" % (name, line.strip()))

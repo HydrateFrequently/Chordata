@@ -48,6 +48,65 @@ class InstallerTests(unittest.TestCase):
         self.assertEqual(self.run_installer().returncode, 0)
         self.assertIn('belt_target: 95', settings.read_text())
 
+    def test_update_entry_follows_checked_out_branch(self):
+        branch = subprocess.run(['git', '-C', str(ROOT), 'symbolic-ref', '--quiet', '--short', 'HEAD'],
+                                text=True, capture_output=True).stdout.strip() or 'main'
+        conf = self.config / 'moonraker.conf'
+        conf.write_text('[server]\n\n[update_manager chordata]\ntype: git_repo\n'
+                        'primary_branch: some-old-branch\n\n[update_manager other]\nprimary_branch: keep\n')
+        result = self.run_installer()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        text = conf.read_text()
+        self.assertIn('[update_manager chordata]\ntype: git_repo\nprimary_branch: %s\n' % branch, text)
+        self.assertIn('[update_manager other]\nprimary_branch: keep\n', text)
+        self.assertIn('some-old-branch', (self.config / 'moonraker.conf.before-chordata-branch').read_text())
+        self.assertEqual(self.run_installer().returncode, 0)
+        self.assertEqual(conf.read_text(), text)
+
+    def test_uninstall_undoes_install(self):
+        theme = self.config / '.theme'
+        theme.mkdir()
+        nav = [{'title': 'Camera', 'href': '/camera'}]
+        (theme / 'navi.json').write_text(json.dumps(nav))
+        conf = self.config / 'moonraker.conf'
+        conf.write_text('[server]\nhost: 0.0.0.0\n\n[update_manager other]\nprimary_branch: keep\n')
+        before_printer, before_conf = self.printer.read_text(), conf.read_text()
+        self.assertEqual(self.run_installer().returncode, 0)
+        (self.base / 'klipper/klippy/extras/other.py').write_text('# not ours\n')
+        result = subprocess.run(['bash', str(ROOT / 'uninstall.sh')], env=self.env, text=True, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.printer.read_text(), before_printer)
+        self.assertNotIn('chordata', conf.read_text())
+        self.assertIn('[update_manager other]\nprimary_branch: keep\n', conf.read_text())
+        self.assertIn('host: 0.0.0.0', conf.read_text())
+        self.assertEqual(json.loads((theme / 'navi.json').read_text()), nav)
+        self.assertFalse((self.config / 'chordata.cfg').exists())
+        self.assertFalse((self.base / 'klipper/klippy/extras/chordata.py').exists())
+        self.assertFalse((self.base / 'moonraker/moonraker/components/chordata_web.py').exists())
+        self.assertTrue((self.base / 'klipper/klippy/extras/other.py').exists())
+        self.assertTrue((self.config / 'chordata_settings.cfg').exists())     # the user's settings stay
+        # a second run changes nothing and doesn't fail
+        self.assertEqual(subprocess.run(['bash', str(ROOT / 'uninstall.sh')], env=self.env).returncode, 0)
+        self.assertEqual(self.printer.read_text(), before_printer)
+
+    def test_uninstall_keeps_what_is_not_ours(self):
+        conf_real = self.base / 'real-moonraker.conf'
+        conf_real.write_text('[server]\n')
+        conf = self.config / 'moonraker.conf'
+        conf.unlink()
+        conf.symlink_to(conf_real)
+        self.assertEqual(self.run_installer().returncode, 0)
+        # the user edits: a comment on an include, Windows line endings, a comment and section after ours
+        text = self.printer.read_text().replace('[include chordata.cfg]', '[include chordata.cfg]  # belts')
+        self.printer.write_bytes(text.replace('\n', '\r\n').encode())
+        conf_real.write_text(conf_real.read_text() + '# Crowsnest webcam updates\n[update_manager crowsnest]\ntype: git_repo\n')
+        result = subprocess.run(['bash', str(ROOT / 'uninstall.sh')], env=self.env, text=True, capture_output=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.printer.read_bytes(), b'[printer]\r\nkinematics: corexy\r\n#*# SAVE_CONFIG\r\n')
+        self.assertFalse((self.config / 'chordata.cfg').exists())
+        self.assertTrue(conf.is_symlink())
+        self.assertEqual(conf_real.read_text(), '[server]\n# Crowsnest webcam updates\n[update_manager crowsnest]\ntype: git_repo\n')
+
     def test_invalid_navigation_fails_before_changes(self):
         (self.config / '.theme').mkdir()
         (self.config / '.theme/navi.json').write_text('{broken')
