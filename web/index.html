@@ -38,6 +38,11 @@ header.top {
   background: var(--card); border-bottom: 1px solid var(--line);
   position: sticky; top: 0; z-index: 5;
 }
+header.top a.back {
+  color: var(--primary); text-decoration: none; font-size: 17px; font-weight: 600;
+  padding: 8px 12px; margin: -8px 0 -8px -12px; border-radius: 8px; flex: none;
+}
+header.top a.back:hover, header.top a.back:focus-visible { background: var(--line); }
 header.top h1 { margin: 0; font-size: 22px; letter-spacing: .3px; }
 header.top .dot { width: 12px; height: 12px; border-radius: 50%; background: var(--muted); flex: none; }
 header.top .dot.ok { background: var(--ok); }
@@ -279,6 +284,7 @@ summary:focus-visible { outline:3px solid var(--primary); outline-offset:2px; }
 <body>
 <div id="cue" role="alert" aria-live="assertive" hidden><div class="cbig" id="cueBig"></div><div id="cueLive" aria-live="off"></div></div>
 <header class="top">
+  <a class="back" id="backUi" href="/" title="Back to Mainsail or Fluidd">&lsaquo; Back</a>
   <span class="dot" id="dot" aria-hidden="true"></span>
   <h1>Chordata</h1>
   <span class="state" id="hdrState"></span>
@@ -746,6 +752,8 @@ function promptButton(b) {
   const btn = el("button", { type: "button", class: cls, "data-g": "1" }, b.label);
   btn.disabled = buttonsLocked;
   btn.onclick = () => pressPromptButton(b.gcode);
+  // Close Chordata: the prompt ends, and the page goes back to Mainsail or Fluidd
+  if (b.label === "Close Chordata") btn.onclick = () => { pressPromptButton(b.gcode); setTimeout(() => { location.href = $("backUi").href; }, 300); };
   return btn;
 }
 
@@ -1173,7 +1181,11 @@ function renderPrompt() {
     if (prompt.title === "Set Target Frequency" && !body.querySelector(".howlink")) howButton(body);
     const foot = $("pFooter");
     foot.textContent = "";
-    for (const b of prompt.footer) foot.appendChild(promptButton(b));
+    // Close Chordata (all Mainsail shows) gets a Back beside it here: back to Chordata's start page
+    for (const b of prompt.footer) {
+      if (b.label === "Close Chordata") foot.appendChild(promptButton({ label: "Back", gcode: b.gcode, style: "secondary" }));
+      foot.appendChild(promptButton(b));
+    }
     foot.hidden = !prompt.footer.length;
   }
   jogUpdate();
@@ -1220,8 +1232,17 @@ function measurementRows() {
   }
   return rows;
 }
+// The graph only while a belt is measured and on the result right after it, never on the
+// start page, the setup or the toolhead taps
+function measuring() {
+  const s=pt();
+  const t=(prompt && prompt.title) || '';
+  // (Tuner Mode has its own card for its plucks: the graph would show an earlier Guided run)
+  if(s.state==='listening') return ['A','B'].includes(s.belt_now);
+  return /^Chordata - (belt \S+: |belts [\d.]+ \/ |belt results)/.test(t);
+}
 function renderMeasurements() {
-  const rows=measurementRows(); show('measurePanel',rows.length>0);
+  const rows=measurementRows(); show('measurePanel',rows.length>0 && measuring() && location.hash!=='#how');
   const body=$('measureRows'); body.replaceChildren();
   for(const r of rows) { const tr=el('tr'); for(const value of [r.belt,r.index,fmtHz(r.freq),r.ok?'Counted':'Rejected',r.why || '—']) tr.appendChild(el('td',{},value)); body.appendChild(tr); }
   const holder=$('trend'); holder.replaceChildren(); if(!rows.length) return;
@@ -1271,6 +1292,17 @@ function init() {
 }
 
 init();
+// Back: to the page that opened Chordata (Mainsail or Fluidd on this printer), else the
+// printer's web interface at the root of this address
+(function () {
+  try {
+    const r = document.referrer && new URL(document.referrer);
+    // same printer (Mainsail or Fluidd may be served on another port than Moonraker)
+    if (r && r.hostname === location.hostname && !r.pathname.startsWith("/server/chordata")) {
+      document.getElementById("backUi").href = r.href;
+    }
+  } catch (e) { /* keep "/" */ }
+})();
 </script>
 </body>
 </html>

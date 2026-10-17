@@ -201,10 +201,14 @@ flowchart TD
 4. Read the comparison. If you adjust either tensioner, measure **both** belts again: the
    belts interact mechanically.
 
-A fan that starts after the background was recorded is told from a belt by how it sounds:
-a pluck starts loud and dies away, a fan hums at one level. Its hum is left out. If it sits
-on the belt's note, the green card and the result say "steady hum at X Hz on the belt's
-note (a fan?)": turn that fan off and measure again.
+Fans are told from a belt by how they sound: a pluck or a tap starts its note and dies
+away, a fan hums at one level before and after. A fan's hum is left out, whether it was
+running when the background was recorded or started later. A belt a few Hz from a fan is
+still read. If a fan sits on the belt's note (within about 2 Hz), the green card and the
+result say "steady hum at X Hz on the belt's note (a fan?)": turn that fan off and measure
+again. The same goes for the toolhead taps: if a fan hides the toolhead's note, Measure
+Toolhead Frequency stops after three taps and says "Turn fans off". A fan on the toolhead's
+note never counts as the tap that switches Pluck - Tap - Pluck Mode to belt B.
 
 Cards never need a press on the phone (only Tuner Mode has a Done button): red means hands off, yellow means tap the
 toolhead, green means pluck, and each stays until that step is over.

@@ -86,12 +86,22 @@ const path = require('node:path');
     await live.evaluate(()=>{ for (const l of ['action:prompt_begin Set Target Frequency','action:prompt_text Target Frequency: 110 Hz',
       'action:prompt_button_group_start','action:prompt_button -5 Hz|_CHORDATA_BELTS DT=-5|secondary','action:prompt_button_group_end',
       'action:prompt_button Go to belt tensioning position|_CHORDATA_BELTS STEP=go|secondary',
-      'action:prompt_button Save belt tensioning position|_CHORDATA_BELTS STEP=save|secondary','action:prompt_show']) handleLine('// '+l); });
+      'action:prompt_button Save belt tensioning position|_CHORDATA_BELTS STEP=save|secondary',
+      'action:prompt_footer_button Close Chordata|RESPOND TYPE=command MSG=action:prompt_end|secondary','action:prompt_show']) handleLine('// '+l); });
     assert.equal(await live.locator('#pTitle').textContent(),'Set Target Frequency');
+    assert.deepEqual(await live.locator('#pFooter button').allTextContents(),['Back','Close Chordata']);
     assert.equal(await live.locator('#prompt h2.ptarget').textContent(),'Target Frequency: 110 Hz');
     const order=await live.evaluate(()=>[...document.querySelectorAll('#pBody > *')].map(e=>e.id||e.className||e.tagName));
     assert.deepEqual(order,['ptarget','pgroup','pbuttons','setupJog','pbuttons','pbuttons']);   // the last: How it works
     assert.equal(await live.locator('#prompt .howlink').count(),1);
+    // no graph on the setup, even with plucks from an earlier measurement; it shows while measuring
+    await live.evaluate(()=>{ S.chordata.state='idle'; S.chordata.belts=Object.assign(S.chordata.belts||{},{A:{plucks:[{freq:110,ok:true}]}}); render(); });
+    assert.equal(await live.locator('#measurePanel').isVisible(),false);
+    await live.evaluate(()=>{ S.chordata.state='listening'; S.chordata.belt_now='A'; S.chordata.belt_live=[{freq:110,ok:true}]; render(); });
+    assert.equal(await live.locator('#measurePanel').isVisible(),true);
+    await live.evaluate(()=>{ S.chordata.belt_now='free'; render(); });
+    assert.equal(await live.locator('#measurePanel').isVisible(),false);     // Tuner Mode has its own card
+    await live.evaluate(()=>{ S.chordata.state='idle'; S.chordata.belt_now=null; render(); });
     // a target the accelerometer can't hear: red text, and the screen flashes red with it
     await live.evaluate(()=>{ for (const l of ['action:prompt_begin Set Target Frequency','action:prompt_text Target Frequency: 160 Hz',
       'action:prompt_text Accelerometer: LIS3DH, frequency range 0-149 Hz','action:prompt_text Error: frequency target out of range',
@@ -129,6 +139,9 @@ const path = require('node:path');
     await live.locator('#setupJog input[name=y]').fill('112.5');
     await live.locator('#setupJog .xy button').click();
     await live.waitForFunction(()=>window.__calls.some(r=>r.method==='printer.gcode.script'&&/G90\nG1 X176.5 Y112.5/.test(r.params.script)));
+    // Back to Mainsail / Fluidd: the printer's web interface (no same-site page opened Chordata here)
+    assert.equal(await live.locator('#backUi').getAttribute('href'),'/');
+    assert.equal(await live.locator('#backUi').isVisible(),true);
     // How it works is its own page, and Back returns
     await live.evaluate(()=>{ handleLine('// action:prompt_end'); });
     await live.waitForTimeout(500);

@@ -158,6 +158,67 @@ def synthetic():
     toolheads(q)
     series_rules(q)
     fingerprint(q)
+    fans()
+
+
+def real_fan(t, fr, amp, start=0.0, seed=3):
+    """A real fan: its speed wanders slowly (+-0.2 Hz), its level wobbles a few %, and it
+    has a weaker line at twice its note. Returns what it adds to (x, y, z)."""
+    g = np.random.default_rng(seed)
+    walk = np.convolve(np.cumsum(g.normal(0, 1, len(t))), np.ones(800) / 800, "same")
+    walk = 0.2 * walk / max(1e-9, np.abs(walk).max())
+    ph = 2 * np.pi * np.cumsum(fr + walk) / FS + g.uniform(0, 6.28)
+    a = amp * (1 + 0.03 * np.sin(2 * np.pi * 0.7 * t))
+    s = np.where(t >= start, a * np.sin(ph) + 0.3 * a * np.sin(2 * ph + 1.0), 0.0)
+    return s, 0.8 * s, 0.5 * s
+
+
+def with_fan(r, fr, amp, start=0.0, seed=3):
+    t, ax, ay, az = r
+    fx, fy, fz = real_fan(t - t[0], fr, amp, start, seed)
+    return t, ax + fx, ay + fy, az + fz
+
+
+def fans():
+    """Fans with a wandering speed, near the belt's or the toolhead's note: in the background
+    recording, or switched on after it. A fan never gives a wrong reading or a wrong toolhead
+    note; on the note itself there is no reading and the user is told to turn fans off.
+    Levels are against a pluck: -30 dB is far louder than the fans on a real Nebula 370 (-59 dB)."""
+    def ok(name, cond, res):
+        print("%-4s %-46s %s" % ("ok" if cond else "FAIL", name, res))
+        if not cond:
+            FAILS.append(name)
+    fan_q = lambda fr, amp: with_fan(rec([], 1.5), fr, amp)[1:]
+    # a background fan 3 Hz from the belt: the belt is still read
+    for off in (-3.0, 3.0):
+        r = belts.analyse(*with_fan(rec(series([91.0] * 5)), 91.0 + off, 47), quiet=fan_q(91.0 + off, 47), target=110.0)
+        check("background fan %+.0f Hz from the belt" % off, near(r, 91.0), r)
+    # on the belt's note (in the background, or on later and loud): no reading, the fan named
+    r = belts.analyse(*with_fan(rec(series([91.0] * 5)), 91.0, 150), quiet=fan_q(91.0, 150), target=110.0)
+    check("background fan on the belt's note", r["freq"] is None and r["hum"] and "fans off" in r["note"], r)
+    r = belts.analyse(*with_fan(rec(series([91.0] * 5)), 91.4, 300, 0.3), quiet=quiet(), target=110.0)
+    check("loud fan on later on the belt's note", r["freq"] is None and r["hum"] and "fans off" in r["note"], r)
+    # the toolhead's note: a fan beside it that came on after the background
+    main = {"freq": 104.5, "guard": 2.0, "width": 3.7}
+    tap = lambda t0, fr=104.5, tau=0.15: (t0, "tap", fr, 3000.0, 0.0, tau)
+    for off in (-1.5, 0.0, 0.7):
+        t, ax, ay, az = with_fan(rec([(1.0, "pluck", 118.0, 1500.0, 3.0), tap(3.0)], 5.0), 104.5 + off, 47, 0.3)
+        kp = belts.toolhead_knock(t, ax, ay, az, 1.0, main, 120.0, quiet=quiet())
+        kt = belts.toolhead_knock(t, ax, ay, az, 3.0, main, 120.0, quiet=quiet())
+        ok("P-T-P switch, fan %+.1f Hz from the toolhead" % off, not kp[0] and kt[0], (kp, kt))
+    # the tap step: the fan's line at twice the toolhead's note doesn't make it a belt
+    for off in (0.0, 0.3):
+        r = belts.analyse_taps(*with_fan(rec([tap(1.0), tap(2.5), tap(4.0)], 6.0), 104.5 + off, 15, 0.3), quiet=quiet())
+        ok("taps, quiet fan %+.1f Hz from the toolhead" % off, r["good"] == 3 and abs(r["main"]["freq"] - 104.5) < 0.6, r["main"])
+    # a rigid toolhead (160 Hz, rings long) and a loud fan right beside it
+    for off in (-0.7, 0.7):
+        r = belts.analyse_taps(*with_fan(rec([tap(1.0, 160.0, 0.5), tap(2.5, 160.0, 0.5), tap(4.0, 160.0, 0.5)], 6.0),
+                                         160.0 + off, 300, 0.3), quiet=quiet())
+        ok("rigid toolhead, loud fan %+.1f Hz" % off, r["good"] == 3 and abs(r["main"]["freq"] - 160.0) < 0.6, r["main"])
+    # a loud background fan on a briefly ringing toolhead's note: the taps are hidden, and said so
+    r = belts.analyse_taps(*with_fan(rec([tap(1.0), tap(2.5), tap(4.0)], 6.0), 105.0, 300), quiet=fan_q(105.0, 300))
+    ok("taps hidden by a loud fan on the toolhead's note", r["good"] == 0 and all(
+        x["why"].startswith("hidden by a steady hum") for x in r["taps"]), [x["why"] for x in r["taps"]])
 
 
 def fingerprint(q):

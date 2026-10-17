@@ -65,7 +65,53 @@ def _background(axes, fs, n, nfft, pct):
 
 
 def steady_lines(axes, fs):
-    """Mask function for strong spectral lines in a recording without plucks."""
+    """Mask function for strong spectral lines in a recording without plucks (fans,
+    motors). Only each line's core is masked (within 6 dB of its top, +-1 Hz for a fan's
+    speed wandering): a line's skirt is in the noise level anyway, and a wide mask would
+    hide a belt a few Hz from a fan. Long windows (up to 1 s) keep the lines narrow."""
+    total = len(axes[0])
+    seg = min(int(1.0 * fs), int(total / 1.5))
+    if seg < int(0.25 * fs):
+        return None
+    nfft = 1 << int(math.ceil(math.log2(2 * seg)))
+    bg = _background(axes, fs, seg, nfft, 50)
+    if bg is None:
+        return None
+    f = np.fft.rfftfreq(nfft, 1.0 / fs)
+    df = f[1] - f[0]
+    d = max(1, int(0.5 / df))
+    floor = _running_median(bg[::d], int(40.0 / (d * df)) | 1)          # +-20 Hz
+    floor = np.interp(np.arange(len(bg)), np.arange(0, len(bg), d), floor)
+    tops = [k for k in np.flatnonzero(bg > 8.0 * floor)     # 9 dB: few windows, so noise bins scatter
+            if bg[k] >= bg[max(0, k - 1)] and bg[k] >= bg[min(len(bg) - 1, k + 1)]]
+    core = np.zeros(len(f), bool)
+    kept = []
+    for k in sorted(tops, key=lambda k: -bg[k]):
+        if any(abs(k - m) * df <= 4.0 and bg[k] * 30.0 < bg[m] for m in kept):
+            continue                      # the skirt of a loud line beside it (a fan's wandering speed)
+        kept.append(k)
+        i = k
+        while i > 0 and bg[i - 1] >= bg[k] / 4.0:
+            i -= 1
+        j = k
+        while j < len(bg) - 1 and bg[j + 1] >= bg[k] / 4.0:
+            j += 1
+        core[i:j + 1] = True
+    if not core.any():
+        return None
+    w = int(1.0 / df)
+    hot = np.convolve(core.astype(float), np.ones(2 * w + 1), mode="same") > 0
+
+    def mask(freqs):
+        return np.interp(freqs, f, hot.astype(float)) > 0.0
+    mask.lines = sorted(round(float(f[k]), 1) for k in kept)
+    mask.wide = _wide_lines(axes, fs)
+    return mask
+
+
+def _wide_lines(axes, fs):
+    """The strong lines as short windows see them (wide, with their skirts): for finding
+    plucks in the band level, which is measured in short windows too."""
     seg = 1 << int(math.ceil(math.log2(0.25 * fs)))
     nfft = 4 * seg
     bg = _background(axes, fs, seg, nfft, 50)
@@ -582,6 +628,13 @@ def _fresh(axes, fs, on, fr):
     return before is None or after is None or after >= 2.0 * before
 
 
+def _rises(axes, fs, on, fr, db=ATTACK_DB):
+    """The tone at fr starts at this onset: db louder just after it than just before (a
+    pluck hidden in a loud fan's line lifts it by less: 3 dB is asked there)."""
+    _, before, after = _levels(axes, fs, on, fr)
+    return before is None or after is None or after >= 10 ** (db / 10.0) * before
+
+
 def _hum(axes, fs, on, fr):
     """The tone at fr hums through this onset (a fan): no attack (a pluck starts its tone:
     real plucks 12-40 dB up) and no decay before it (the last pluck dying away). A fan
@@ -728,7 +781,7 @@ def analyse(t, ax, ay, az, target=None, expect=None, quiet=None, avoid=(), other
     st = _setup(t, ax, ay, az, quiet)
     metadata = {"sample_count": len(t), "sample_rate": None, "duration": 0.0}
 
-    hum_at = []
+    hum_at, quiet_at = [], []
 
     def out(verdict, note, plucks=(), freq=None, used=0):
         frequencies = [p["freq"] for p in plucks if p["ok"] and p["freq"] is not None]
@@ -738,7 +791,18 @@ def analyse(t, ax, ay, az, target=None, expect=None, quiet=None, avoid=(), other
         near = [x for x in (target, prev) if x]
         hum = [x for x in hum_at if any(abs(x - y) <= SPAN * y for y in near)] if near else \
             [x for x in hum_at if x <= F_MAX]
-        if 2 * len(frequencies) >= len(plucks) and plucks:
+        # a steady line (in the background too) that hid most plucks: the belt sits on it
+        hid = [pk.get("hidden") for pk in plucks if pk.get("hidden")]
+        for x in sorted(set(hid)):
+            if 2 * hid.count(x) >= len(plucks) and all(abs(x - y) > 1.0 for y in hum):
+                hum.append(x)
+        # or one right beside the few plucks that got through it (the rest were lost in it)
+        if freq is None and len(frequencies) < MIN_GOOD:
+            for x in quiet_at + list(hum_at):
+                if any(abs(y - x) <= 2.0 or abs(y - 2 * x) <= 2.0 for y in frequencies) \
+                        and all(abs(x - y) > 1.0 for y in hum):
+                    hum.append(x)
+        elif 2 * len(frequencies) >= len(plucks) and plucks:
             hum = []
         if hum and freq is None:
             note = "steady hum at %s Hz on the belt's note (a fan?): turn fans off, then measure again" % (
@@ -753,15 +817,18 @@ def analyse(t, ax, ay, az, target=None, expect=None, quiet=None, avoid=(), other
     metadata.update(sample_rate=round(float(fs), 3), duration=round(float(t[-1] - t[0]), 3))
     lo, hi = SEARCH[0], min(SEARCH[1], 0.45 * fs / 2.0)
     mask = steady_lines(q, fs) if q is not None else None
-    base = float(np.median(_band(q, fs, lo, hi, mask))) if q is not None else None
-    env = _band(axes, fs, lo, hi, mask)
-    onsets = find_plucks(axes, fs, lo, hi, mask, base, env)
+    quiet_at = list(getattr(mask, "lines", []))
+    bmask = getattr(mask, "wide", None)       # for the band level: short windows, wide lines
+    base = float(np.median(_band(q, fs, lo, hi, bmask))) if q is not None else None
+    env = _band(axes, fs, lo, hi, bmask)
+    onsets = find_plucks(axes, fs, lo, hi, bmask, base, env)
     # a hum that started after the background was recorded (a fan came on): never the belt
     hum, hum_at = steady_in(axes, fs, q, onsets)
     if hum is not None:
         mask = _either(mask, hum)
-        env = _band(axes, fs, lo, hi, mask)
-        onsets = find_plucks(axes, fs, lo, hi, mask, base, env)
+        bmask = _either(bmask, hum)
+        env = _band(axes, fs, lo, hi, bmask)
+        onsets = find_plucks(axes, fs, lo, hi, bmask, base, env)
     # a toolhead that rings long (stiff, all metal) may still ring from a knock when the
     # next pluck comes: look for plucks beside its own lines too
     longm = [(m, g) for m, g, tau in _modes(avoid, True) if tau >= KNOCK_TAU]
@@ -771,14 +838,17 @@ def analyse(t, ax, ay, az, target=None, expect=None, quiet=None, avoid=(), other
     pick_avoid = [dict(m, guard=0.3, guard2=m.get("guard", TAP_GUARD)) if isinstance(m, dict) and (m.get("tau") or 0) >= KNOCK_TAU else m
                   for m in (avoid or ())]
     if longm:
-        extra, _ = _onsets_beside(axes, fs, lo, hi, mask, longm, q)
+        extra, _ = _onsets_beside(axes, fs, lo, hi, bmask, longm, q)
         onsets = _merge_onsets(onsets, extra, fs, env)
     if not onsets:
         return out("none", "no pluck heard")
     if q is None and onsets[0] >= int(0.6 * fs):
         # no quiet recording: the stretch before the first pluck is the next best
         q = [a[:onsets[0] - int(0.05 * fs)] for a in axes]
-        mask = _either(steady_lines(q, fs), hum)
+        sl = steady_lines(q, fs)
+        quiet_at = list(getattr(sl, "lines", []))
+        mask = _either(sl, hum)
+        bmask = _either(getattr(sl, "wide", None), hum)
     nfft = _nfft(fs)
     f = np.fft.rfftfreq(nfft, 1.0 / fs)
     df = f[1] - f[0]
@@ -812,7 +882,7 @@ def analyse(t, ax, ay, az, target=None, expect=None, quiet=None, avoid=(), other
         pk = {"t": round(float(on / fs), 2), "freq": None if fr is None else round(fr, 2),
               "db": None if d1 is None else round(d1, 1), "db2": None if d2 is None else round(d2, 1),
               "ok": False, "why": ""}
-        if fr is not None and mask is not None and bool(mask(np.array([2 * fr]))[0]):
+        if fr is not None and bmask is not None and bool(bmask(np.array([2 * fr]))[0]):
             # twice the tone sits on a steady line (a fan, the sensor's own): it can't
             # be told from the noise there, so the tone alone decides
             d2 = None
@@ -840,6 +910,21 @@ def analyse(t, ax, ay, az, target=None, expect=None, quiet=None, avoid=(), other
             pk["why"] = "steady hum, not a pluck"
         else:
             pk["ok"] = True
+        if not pk["why"].startswith("a knock"):
+            # its tone hidden in a steady line (a fan on the belt's note): the pluck starts
+            # that line's level (a fan alone hums the same before and after). A thrown-out pluck
+            # that did is hidden, not missing; a reading just beside the line, where the
+            # spectrum still climbs towards it, is the hidden tone's skirt.
+            for x in quiet_at + list(hum_at):
+                if pk["ok"]:
+                    if not (SPREAD < abs(fr - x) <= 6.0) or \
+                            p[np.abs(f - x) <= 0.5].max() <= p[int(round(fr / df))]:
+                        continue
+                if _rises(axes, fs, on, x, 3.0):
+                    pk["ok"] = False
+                    pk["hidden"] = x
+                    pk["why"] = "hidden by a steady hum at %.0f Hz" % x
+                    break
         plucks.append(pk)
     ok = [x for x in plucks if x["ok"]]
     if other and ok:
@@ -942,7 +1027,7 @@ def analyse_tap(t, ax, ay, az, quiet=None):
             "note": "" if modes else "the tap rang nothing clearly"}
 
 
-def _tap_lines(f, sp, df, lo, hi):
+def _tap_lines(f, sp, df, lo, hi, rises=None):
     """The toolhead's own lines in one tap's window (see analyse_tap), strongest first."""
     p, nz, halves = sp
     snr = p / np.maximum(nz, 1e-30)
@@ -978,7 +1063,9 @@ def _tap_lines(f, sp, df, lo, hi):
         j2, jh = _near(f, p, 2 * fk, df), _near(f, p, fk / 2.0, df)
 
         def own(j):
-            return j is not None and _db(snr[j]) >= WEAK_DB and p[j] >= p[max(0, j - w):j + w + 1].max()
+            # (and it starts with the tap: a fan's line at twice the toolhead's note doesn't count)
+            return j is not None and _db(snr[j]) >= WEAK_DB and p[j] >= p[max(0, j - w):j + w + 1].max() \
+                and (rises is None or rises(float(f[j])))
         if own(j2):
             continue
         if fk / 2.0 >= lo and own(jh):
@@ -1023,6 +1110,13 @@ def analyse_taps(t, ax, ay, az, quiet=None, need=TAP_NEED):
     df = f[1] - f[0]
     n_all = len(axes[0])
     good, ref, prev, cache = [], None, None, {}
+    steady = []                           # steady lines (fans): looked for when a tap is too soft
+
+    def hum_lines():
+        if not steady:
+            sl = steady_lines(q, fs) if q is not None else None
+            steady.extend(list(getattr(sl, "lines", [])) + list(steady_in(axes, fs, q, onsets)[1]) or [None])
+        return [x for x in steady if x is not None]
     for i, on in enumerate(onsets):
         nxt = onsets[i + 1] if i + 1 < len(onsets) else None
         if nxt is None and on + int((SKIP + WINDOW) * fs) > n_all:
@@ -1037,9 +1131,18 @@ def analyse_taps(t, ax, ay, az, quiet=None, need=TAP_NEED):
         elif sp is None:
             tap["why"] = "not enough background"
         else:
-            modes, ring = _tap_lines(f, sp, df, lo, hi)
+            modes, ring = _tap_lines(f, sp, df, lo, hi, lambda fr, on=on: _rises(axes, fs, on, fr))
+            # a tap starts the toolhead's ringing: a line already there just before (a fan
+            # humming) is not the toolhead
+            ring = [r for r in ring if _rises(axes, fs, on, r["freq"])]
+            modes = [r["freq"] for r in ring]
             if not modes:
                 tap["why"] = "too soft"
+                # unless it rang a steady line (a fan on the toolhead's note): hidden by it
+                for x in hum_lines():
+                    if _rises(axes, fs, on, x, 3.0):
+                        tap["why"] = "hidden by a steady hum at %.0f Hz" % x
+                        break
             else:
                 tap["freq"] = ring[0]["freq"]
                 if ref is not None and abs(ring[0]["freq"] - ref["freq"]) > ref["width"] / 2.0:
@@ -1107,6 +1210,12 @@ def toolhead_knock(t, ax, ay, az, at, main, belt, quiet=None, until=None):
     if not np.any(near):
         return False, None, None
     dm = float(np.max(snr[near]))
+    # a knock starts the toolhead's note; a fan humming on (or beside) that note was there
+    # just before the event as well: no attack, no knock
+    _, before, after = _levels(axes, fs, on, main["freq"])
+    rise = None if before is None or after is None else _db(after / max(before, 1e-30))
+    if rise is not None and rise < ATTACK_DB:
+        return False, round(dm, 1), None
     # the belt rings as a line: a peak within SPREAD of its reading, not the slope of the
     # toolhead's broad note beside it. A belt inside the toolhead's guard can't be told apart.
     do = -99.0

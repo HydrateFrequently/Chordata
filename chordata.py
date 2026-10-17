@@ -729,8 +729,8 @@ class Chordata:
         b["tap_tau"] = res["tau"]
         b["taps"] = res["taps"]
         b["tap_good"], b["tap_bad"] = res["good"], res["bad"]
-        b["tap_note"] = ("the tap rang nothing clearly" if stiff else
-                         self._taps_failed(res) if res["bad"] >= belts.TAP_FAILS else res["note"])
+        b["tap_note"] = ("the tap rang nothing clearly" if stiff else self._taps_hum(res) or (
+                         self._taps_failed(res) if res["bad"] >= belts.TAP_FAILS else res["note"]))
         # three good taps on the same spot (a stiff toolhead rings nothing near the belts: that counts too)
         b["tap_done"] = res["good"] >= belts.TAP_NEED or stiff
         self.belts = b
@@ -748,6 +748,17 @@ class Chordata:
         import chordata_belts as belts
         return not r["good"] and sum(1 for x in r["taps"] if x["why"] == "too soft") >= belts.TAP_NEED
 
+    def _taps_hum(self, r):
+        """No good tap, and as many taps as needed heard but not ringing, at least two of them
+        hidden by a steady hum (a fan on or beside the toolhead's note): say so, the user turns
+        that fan off. None otherwise."""
+        import chordata_belts as belts
+        hid = [x["why"] for x in r["taps"] if x["why"].startswith("hidden by a steady hum")]
+        soft = sum(1 for x in r["taps"] if x["why"] == "too soft")
+        if r["good"] or len(hid) < 2 or len(hid) + soft < belts.TAP_NEED:
+            return None
+        return max(set(hid), key=hid.count).replace("hidden by a ", "")
+
     def _taps_failed(self, r):
         """Why the setup gave up: mostly taps on another note means another spot (or the first
         good tap was the odd one), anything else something shaking the printer."""
@@ -756,7 +767,8 @@ class Chordata:
 
     def _taps_over(self, r):
         import chordata_belts as belts
-        return r["good"] >= belts.TAP_NEED or r["bad"] >= belts.TAP_FAILS or self._taps_stiff(r)
+        return r["good"] >= belts.TAP_NEED or r["bad"] >= belts.TAP_FAILS or self._taps_stiff(r) \
+            or bool(self._taps_hum(r))
 
     # ---------------- the background (fans, motors): recorded once per session, at the tap step ----------------
     def _record_quiet(self, chip, toolhead, fresh=False):
