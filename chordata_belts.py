@@ -423,6 +423,11 @@ def pluck_freq(f, p, noise, df, lo, hi, avoid=(), target=None, prev=None, halves
     # at twice the tone a line keeps its full guard (see analyse: "pick_guard")
     modes2 = [(float(m["freq"]), float(m.get("guard2", m.get("guard", TAP_GUARD))))
               if isinstance(m, dict) else (float(m), TAP_GUARD) for m in (avoid or ())]
+    if halves is not None:
+        # at twice the tone, a toolhead line can't be told from its own skirt closer than
+        # the window resolves (a Hann window of T s spreads a line +-2/T Hz): guard that much
+        res = 1.0 / halves[3]
+        modes2 = [(fa, max(g, res)) for fa, g in modes2]
     ringing2 = [(float(m["freq"]), float(m["guard2"])) for m in (avoid or ()) if isinstance(m, dict) and "guard2" in m]
     bad2 = np.zeros(len(f), bool)
     for fa, g in modes2:
@@ -499,7 +504,9 @@ def pluck_freq(f, p, noise, df, lo, hi, avoid=(), target=None, prev=None, halves
         # up only on evidence at 4x: then the line near 2fk has its own 2F, and fk
         # isn't its tone (a frame mode near F/2 is seldom exactly half)
         f2 = _peak(f, p, _near(f, p, 2 * fk, df), df)
-        if (not guarded(f2) and line(f2) >= max(strong, line(fk)) and line(2 * f2) >= weak
+        # (only within where the tone is looked for: the tone itself could never be picked
+        # above fhi, so neither may a jump to it)
+        if (f2 <= fhi and not guarded(f2) and line(f2) >= max(strong, line(fk)) and line(2 * f2) >= weak
                 and harmonic(fk) is False):
             alt = f2
     if alt is None and harmonic(fk) is False:
@@ -854,6 +861,13 @@ def analyse(t, ax, ay, az, target=None, expect=None, quiet=None, avoid=(), other
     df = f[1] - f[0]
     cache = {}
     plucks = []
+    # a second attack in a pluck's window (the band level up 3x within 40 ms, the way
+    # find_plucks finds an onset, after this pluck's own attack has peaked): two plucks
+    # in one window don't ring like one, so its lines can't be judged
+    bk = max(1, int(0.04 * fs))
+    rise = np.zeros(len(env), bool)
+    rise[bk:] = (env[bk:] > max(5.0 * ((float(np.percentile(env, 10)) if base is None else base) or 1e-9), 0.03 * float(env.max()))) \
+        & (env[bk:] > 3.0 * env[:-bk])
     for on, a0, a1 in _windows(axes, fs, onsets):
         k = onsets.index(on)
         judge_hum = k == 0 or on - onsets[k - 1] >= HUM_GAP * fs
@@ -925,6 +939,22 @@ def analyse(t, ax, ay, az, target=None, expect=None, quiet=None, avoid=(), other
                     pk["hidden"] = x
                     pk["why"] = "hidden by a steady hum at %.0f Hz" % x
                     break
+        if pk["ok"]:
+            s0 = max(a0, on + int(np.argmax(env[on:on + int(0.1 * fs)]))) + bk
+            if s0 < a1:
+                # and it climbs above where this pluck already was, allowing for a slow decay
+                # (1 s): two belts beating (the other one ringing along) dip and come back, but
+                # never above the level before the dip, as both decay
+                b0 = min(on, a0)                  # from the attack, which a0 may skip
+                k = np.arange(a1 - b0) / fs
+                top = np.exp(-k) * np.maximum.accumulate(env[b0:a1] * np.exp(k))
+                # Only after the first 0.2 s: an attack still rising through the first beat
+                # makes that beat low, and the next one would look new (two plucks that close
+                # ring as one anyway)
+                s1 = max(s0, b0 + int(0.2 * fs))
+                hit = np.flatnonzero(rise[s1:a1]) + s1
+                if any(env[i] > 1.1 * top[i - bk - b0] for i in hit):
+                    pk["ok"], pk["why"] = False, "two plucks at once"
         plucks.append(pk)
     ok = [x for x in plucks if x["ok"]]
     if other and ok:
@@ -936,7 +966,15 @@ def analyse(t, ax, ay, az, target=None, expect=None, quiet=None, avoid=(), other
     if not plucks:
         return out("none", "no clear pluck heard")
     if free:
-        # free tune: the belts change between plucks on purpose, so each clear pluck stands alone
+        # free tune: the belts change between plucks on purpose, so each clear pluck stands alone.
+        # Nothing else checks it, so it must lie where the tone is looked for (F_BAND x target):
+        # an octave step (pluck_freq) may leave that band; there it is no reading of this belt
+        if target:
+            flo, fhi = F_BAND[0] * target, min(F_BAND[1] * target, max(F_MAX, 1.2 * target))
+            for x in ok:
+                if not flo <= x["freq"] <= fhi:
+                    x["ok"], x["why"] = False, "outside %.0f-%.0f Hz" % (flo, fhi)
+            ok = [x for x in plucks if x["ok"]]
         return out("free" if ok else "none", "%d of %d plucks clear" % (len(ok), len(plucks)), plucks,
                    freq=ok[-1]["freq"] if ok else None, used=len(ok))
     if len(ok) < MIN_GOOD:

@@ -471,6 +471,44 @@ class AnalysisValidationTests(unittest.TestCase):
         self.assertLess(result["spread"], 1.)
         self.assertLess(result["stddev"], .5)
 
+    @staticmethod
+    def _plucks(starts, other_hz=None, tau=0.8, attack=0., phase=2.):
+        """110 Hz plucks (1F across, 2F along the belt); other_hz: the other belt ringing along"""
+        fs, rng = 3200., np.random.default_rng(1)
+        t = np.arange(int(8 * fs)) / fs
+        ax, ay, az = (rng.normal(0, 30, len(t)) for _ in range(3))
+        lines = [(110., 1500., 0.)] + ([(other_hz, 1425., phase)] if other_hz else [])
+        for t0 in starts:
+            tt = t - t0
+            env = np.where(tt >= 0, np.exp(-np.clip(tt, 0, None) / tau), 0.)
+            if attack:
+                env = env * (1 - np.exp(-np.clip(tt, 0, None) / attack))
+            for fr, a, ph in lines:
+                side = a * env * np.sin(2 * np.pi * fr * tt + ph)
+                along = 3 * a * env * env * np.sin(4 * np.pi * fr * tt + 2 * ph)
+                ax += 0.7 * along + 0.3 * side
+                ay += 0.7 * along - 0.3 * side
+                az += 0.4 * side
+        quiet = [np.random.default_rng(9).normal(0, 30, int(1.5 * fs)) for _ in range(3)]
+        return (t, ax, ay, az), quiet
+
+    def test_belts_beating_are_not_two_plucks(self):
+        # the other belt rings along a few Hz off: the level dips and comes back, also while
+        # a soft attack is still rising
+        for off, attack, phase in ((8., 0., 2.), (4., 0.04, 5.), (6., 0.03, 4.), (8., 0.06, 2.)):
+            rec, quiet = self._plucks([1.0 + 1.2 * i for i in range(5)], other_hz=110. + off,
+                                      attack=attack, phase=phase)
+            for free in (False, True):
+                result = belts.analyse(*rec, target=110, quiet=quiet, free=free)
+                self.assertNotIn("two plucks at once", [x["why"] for x in result["plucks"]],
+                                 (off, attack, phase, free))
+
+    def test_a_second_pluck_in_the_window_is_refused(self):
+        rec, quiet = self._plucks([1.0, 1.3, 3.0, 4.5, 6.0], tau=0.3)
+        for free in (False, True):
+            result = belts.analyse(*rec, target=110, quiet=quiet, free=free)
+            self.assertEqual([x["why"] for x in result["plucks"]], ["two plucks at once", "", "", ""])
+
 
 if __name__ == "__main__":
     unittest.main()
