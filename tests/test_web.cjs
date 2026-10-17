@@ -17,6 +17,7 @@ const path = require('node:path');
     assert.equal(await page.locator('#trend circle').count(),6);
     assert.equal(await page.locator('#trend path').count(),1);
     assert.equal(await page.evaluate(()=>csvMeasurements().split('\r\n').length),8);
+    assert.equal(await page.evaluate(()=>document.documentElement.classList.contains('pc')),false);   // dev: the phone layout on a PC too
     for (const width of [390,1280]) {
       await page.setViewportSize({width,height:900});
       assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth <= innerWidth),true);
@@ -49,7 +50,7 @@ const path = require('node:path');
     assert.match(await shown(),/Pluck belt A/);
     await cue({belt:'both',phase:'listening',step:'tap'});
     await page.waitForTimeout(400);
-    assert.match(await shown(),/Tap your spot/);
+    assert.match(await shown(),/^Tap your toolhead$/);
     assert.equal(await liveText(),'');
     await cue({belt:'both',phase:'listening',step:'B'},{belts:{target:110,plucks:5,A:{freq:114.6}}});
     await page.waitForTimeout(400);
@@ -58,7 +59,7 @@ const path = require('node:path');
     await cue({belt:'tap',phase:'listening',expected:3},{tap_live:[{ok:true},{ok:false,why:'another spot'}]});
     await page.waitForTimeout(400);
     await page.locator('#cue').click();
-    assert.match(await shown(),/Tap your spot/);
+    assert.match(await shown(),/^Tap your toolhead$/);
     assert.equal(await liveText(),'\u2713\u2717\u25CB\u25CB');
     await cue({belt:'free',phase:'listening'},{belts:{target:110,tol:.25,plucks:5},belt_live:[{freq:111.0,ok:true}]});
     await page.waitForTimeout(400);
@@ -83,16 +84,27 @@ const path = require('node:path');
     await live.goto('file://'+path.resolve(__dirname,'../web/index.html'));
     // Set Target Frequency: the target big, then the Hz buttons, Go, the pad, Save; no "Chordata - " title on the page
     await live.waitForFunction(()=>typeof handleLine==='function' && connected);
-    await live.evaluate(()=>{ for (const l of ['action:prompt_begin Set Target Frequency','action:prompt_text Target Frequency: 110 Hz',
+    const showSetup=()=>live.evaluate(()=>{ for (const l of ['action:prompt_begin Set Target Frequency','action:prompt_text Target Frequency: 110 Hz',
       'action:prompt_button_group_start','action:prompt_button -5 Hz|_CHORDATA_BELTS DT=-5|secondary','action:prompt_button_group_end',
       'action:prompt_button Go to belt tensioning position|_CHORDATA_BELTS STEP=go|secondary',
       'action:prompt_button Save belt tensioning position|_CHORDATA_BELTS STEP=save|secondary',
       'action:prompt_footer_button Close Chordata|RESPOND TYPE=command MSG=action:prompt_end|secondary','action:prompt_show']) handleLine('// '+l); });
+    await showSetup();
+    // a target typed but not Set goes with the next setup button, so it isn't lost
+    await live.locator('#targetHz').fill('125');
+    await live.locator('#pBody button', {hasText:'Go to belt tensioning position'}).click();
+    await live.waitForFunction(()=>window.__calls.some(r=>r.method==='printer.gcode.script'&&/_CHORDATA_BELTS STEP=go HZ=125\b/.test(r.params.script)));
+    await live.evaluate(()=>{ handleLine('// action:prompt_end'); });
+    await showSetup();
     assert.equal(await live.locator('#pTitle').textContent(),'Set Target Frequency');
     assert.deepEqual(await live.locator('#pFooter button').allTextContents(),['Back','Close Chordata']);
-    assert.equal(await live.locator('#prompt h2.ptarget').textContent(),'Target Frequency: 110 Hz');
+    assert.equal(await live.locator('#targetHz').inputValue(),'110');
+    // a typed target goes to the printer as HZ=, rounded to whole Hz
+    await live.locator('#targetHz').fill('118.4');
+    await live.locator('#prompt form.ptarget button').click();
+    await live.waitForFunction(()=>window.__calls.some(r=>r.method==='printer.gcode.script'&&/_CHORDATA_BELTS HZ=118\b/.test(r.params.script)));
     const order=await live.evaluate(()=>[...document.querySelectorAll('#pBody > *')].map(e=>e.id||e.className||e.tagName));
-    assert.deepEqual(order,['ptarget','pgroup','pbuttons','setupJog','pbuttons','pbuttons']);   // the last: How it works
+    assert.deepEqual(order,['ptarget','pbuttons','setupJog','pbuttons','pbuttons']);   // no -5..+5 buttons: the box   // the last: How it works
     assert.equal(await live.locator('#prompt .howlink').count(),1);
     // no graph on the setup, even with plucks from an earlier measurement; it shows while measuring
     await live.evaluate(()=>{ S.chordata.state='idle'; S.chordata.belts=Object.assign(S.chordata.belts||{},{A:{plucks:[{freq:110,ok:true}]}}); render(); });
@@ -142,6 +154,7 @@ const path = require('node:path');
     // Back to Mainsail / Fluidd: the printer's web interface (no same-site page opened Chordata here)
     assert.equal(await live.locator('#backUi').getAttribute('href'),'/');
     assert.equal(await live.locator('#backUi').isVisible(),true);
+    assert.equal(await live.locator('#exitBtn').textContent(),'Close Chordata');
     // How it works is its own page, and Back returns
     await live.evaluate(()=>{ handleLine('// action:prompt_end'); });
     await live.waitForTimeout(500);
@@ -150,13 +163,36 @@ const path = require('node:path');
     assert.equal(await live.locator('#home').isVisible(),false);
     await live.locator('#howBack').click();
     await live.waitForFunction(()=>!document.getElementById('home').hidden);
-    await live.locator('#authPanel summary').click();
+    assert.equal(await live.locator('#authPanel').isVisible(),false);   // only when Moonraker refuses the page
+    await live.evaluate(()=>authBanner());
+    assert.equal(await live.locator('#authPanel').isVisible(),true);
     await live.locator('#moonrakerKey').fill('test-moonraker-placeholder');
     await live.locator('#authForm button').click();
     await live.waitForFunction(()=>window.__calls.some(r=>r.method==='server.connection.identify'));
     assert.equal(await live.locator('#moonrakerKey').inputValue(),'');
     assert.equal(await live.evaluate(()=>localStorage.getItem('moonrakerKey')),null);
+    // the PC layout (main on a PC, or ?layout=pc): Mainsail's pop-up look, title bar with an X, no sideways scrolling
+    const pc=await browser.newPage();
+    pc.on('pageerror',e=>errors.push(e.message));
+    await pc.addInitScript(()=>{ window.WebSocket=class { constructor(){throw Error('Demo must not connect');} }; });
+    await pc.setViewportSize({width:1280,height:900});
+    await pc.goto('file://'+path.resolve(__dirname,'../web/index.html')+'?demo&layout=pc');
+    assert.equal(await pc.evaluate(()=>document.documentElement.classList.contains('pc')),true);
+    assert.equal(await pc.locator('#pClose').isVisible(),true);
+    assert.equal(await pc.locator('#pTitle').textContent(),'Chordata - belt results');
+    assert.equal(await pc.locator('#pTitle').isVisible(),true);
+    assert.equal(await pc.evaluate(()=>document.getElementById('measurePanel').parentNode.id),'prompt');
+    assert.equal(await pc.evaluate(()=>document.documentElement.scrollWidth <= innerWidth),true);
+    await pc.screenshot({path:'/tmp/chordata-pc-1280.png',fullPage:true});
+    await pc.evaluate(()=>{ S.chordata.state='listening'; S.chordata.measurement={belt:'A',phase:'listening'}; cueUpdate(); });
+    await pc.waitForTimeout(400);
+    await pc.screenshot({path:'/tmp/chordata-pc-cue.png'});
+    await pc.close();
+    // the screen stays on: a press starts the keep-awake video on a plain-http page (no wake lock there)
+    await live.evaluate(()=>{ keepAwake(); });
+    await live.waitForTimeout(300);
+    assert.equal(await live.evaluate(()=>!!document.querySelector('video[aria-hidden=true]')),true);
     assert.deepEqual(errors,[]);
-    console.log('Web checks passed: offline demo, live replacement, rejected plucks, CSV escaping, mobile/desktop layout, no JS errors.');
+    console.log('Web checks passed: offline demo, live replacement, rejected plucks, CSV escaping, phone and PC layouts, keep-awake, no JS errors.');
   } finally { await browser.close(); }
 })().catch(e=>{console.error(e);process.exit(1);});

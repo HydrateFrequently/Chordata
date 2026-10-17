@@ -168,13 +168,13 @@ flowchart TD
 ```
 
 1. Select **Measure Belts** on the page or run `CHORDATA` from the console to open
-   **Set Target Frequency**. Set the target with the Hz buttons (Chordata does not choose a
-   manufacturer's target), move the toolhead with the arrows (0.5 to 50 mm steps) or by
+   **Set Target Frequency**. Type the target and press **Set** (Mainsail's own pop-up has
+   -5/-1/+1/+5 buttons instead; Chordata does not choose a manufacturer's target), move the toolhead with the arrows (0.5 to 50 mm steps) or by
    typing X and Y, and save the belt tensioning position. The screen shows the accelerometer
    `[resonance_tester]` uses and the range it hears reliably (for example ADXL345, 0-1440 Hz;
    LIS2DW12, 0-400 Hz); a target outside it flashes red and can't be started. The instructions and specs are on
    the page's **How it works**.
-2. Select **I've read and understood: Start**. This switches off the part-cooling fan (the
+2. Select **Start**. This switches off the part-cooling fan (the
    macro's `M106 S0`) and goes straight into the taps: keep your hands off while the red card
    records the background noise. This is the only background recording of the session.
    When the card turns yellow, tap one solid spot on the toolhead (the extruder is a good

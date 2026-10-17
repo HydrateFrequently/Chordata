@@ -37,7 +37,7 @@ class Chordata:
         self.out_dir = os.path.expanduser(
             config.get("path", os.path.join(self.cfg_dir, "chordata")))
         self.belt_tol = config.getfloat("belt_tolerance", 0.25, above=0.)   # Hz, average of 5 plucks
-        self.belt_target = config.getfloat("belt_target", 110., minval=20., maxval=400.)
+        self.belt_target = config.getfloat("belt_target", 110., minval=40., maxval=300.)  # as the setup prompt allows
         self.state, self.message = "idle", ""
         self.belts = {}           # the belt tension session, for the prompts
         self._quiet = None        # the background (fans, motors), recorded at the tap step

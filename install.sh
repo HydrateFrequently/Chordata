@@ -149,7 +149,7 @@ if [ -f "$CONFIG_DIR/moonraker.conf" ] && grep -q '^\[update_manager chordata\]'
 import os, re, shutil, sys, tempfile
 path, branch = sys.argv[1], sys.argv[2]
 text = open(path).read()
-head = re.search(r"^\[update_manager chordata\][ \t]*$", text, re.M)
+head = re.search(r"^\[update_manager chordata\][^\n]*$", text, re.M)   # same match as the grep above
 end = re.search(r"^\[", text[head.end():], re.M)
 stop = head.end() + end.start() if end else len(text)
 section = text[head.end():stop]

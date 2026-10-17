@@ -7,6 +7,20 @@
 <!-- Chordata web UI: belt tension by plucking. GPL-3.0. Self-contained: no external resources. -->
 <script>
 try { if (localStorage.getItem("chordata_theme") === "light") document.documentElement.dataset.theme = "light"; } catch (e) {}
+// Two layouts. Phones (and tablets): big buttons and full-screen cue cards, for a phone lying on the
+// bed while both hands pluck. A PC (wide screen and a mouse): the look of Mainsail's own pop-ups,
+// like PROBE_CALIBRATE's, which is what people expect there.
+// PHONE_EVERYWHERE: the dev branch shows the phone layout on every screen, for testing at a desk;
+// main sets it to false. ?layout=pc or ?layout=phone picks one on any branch and screen.
+const PHONE_EVERYWHERE = true;
+const pcQuery = window.matchMedia ? matchMedia("(min-width: 900px) and (pointer: fine)") : null;
+function pcLayout() {
+  let want = null;
+  try { want = new URLSearchParams(location.search).get("layout"); } catch (e) {}
+  if (want === "pc" || want === "phone") return want === "pc";
+  return !PHONE_EVERYWHERE && !!(pcQuery && pcQuery.matches);
+}
+document.documentElement.classList.toggle("pc", pcLayout());
 </script>
 <style>
 :root {
@@ -149,9 +163,11 @@ input[type=text], input[type=number], input[type=password] {
   border-radius: 10px; cursor: pointer; font-size: 16px; font-weight: 400 !important; }
 .check input { flex: none; width: 26px; height: 26px; margin: 2px 0 0; accent-color: var(--primary); }
 .how { margin: 8px 0; padding: 0 0 0 20px; }
-#howBtn { background: var(--card); color: var(--primary); border: 2px solid var(--primary); }
+#howBtn, #exitBtn { background: var(--card); color: var(--primary); border: 2px solid var(--primary); }
 #prompt .perr { color: var(--err); font-weight: 700; font-size: 18px; }
-#prompt h2.ptarget { font-size: 22px; margin: 4px 0 8px; }
+#prompt form.ptarget { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; margin: 4px 0 10px; font-size: 22px; font-weight: 700; }
+#prompt form.ptarget input { width: 5.5em; font-size: 22px; font-weight: 700; padding: 6px 10px; }
+#prompt form.ptarget button { min-width: 88px; }
 .jog .xy { display: grid; grid-template-columns: 1fr 1fr auto; gap: 6px; margin-top: 8px; align-items: end; }
 .jog .xy label { font-size: 14px; color: var(--muted); display: grid; gap: 2px; }
 .jog .xy input { min-height: 44px; font-size: 18px; width: 100%; box-sizing: border-box; }
@@ -257,6 +273,47 @@ th,td { padding:8px; border-bottom:1px solid var(--line); text-align:left; }
 .trend { display:block; width:100%; height:auto; margin:12px 0; }
 .trend text { fill:var(--muted); font:22px system-ui; }
 summary:focus-visible { outline:3px solid var(--primary); outline-offset:2px; }
+.ptitlebar { display: flex; align-items: center; gap: 8px; }
+.ptitlebar h2 { flex: 1 1 auto; min-width: 0; }
+.pclose { display: none; }
+/* ---------- PC layout: Mainsail's pop-up look (html.pc; see PHONE_EVERYWHERE) ---------- */
+html.pc { --bg: #0c0c0c; --radius: 4px; }
+html.pc[data-theme="light"] { --bg: #c9ccd1; }
+html.pc body { font-size: 15px; }
+html.pc header.top h1 { font-size: 18px; }
+html.pc main { max-width: 640px; padding-top: 40px; }
+html.pc .card, html.pc #home {
+  border-radius: 4px; box-shadow: 0 11px 15px -7px rgba(0,0,0,.2), 0 24px 38px 3px rgba(0,0,0,.14), 0 9px 46px 8px rgba(0,0,0,.12); }
+html.pc #home { background: var(--card); border: 1px solid var(--line); padding: 16px; display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
+html.pc #home > .card { flex: 1 1 100%; box-shadow: none; margin: 0 0 8px; }
+html.pc #home::before { content: "Chordata - belt tension"; flex: 1 1 100%; font-size: 18px; font-weight: 700; margin: -16px -16px 8px; padding: 12px 16px; background: var(--card2); border-bottom: 1px solid var(--line); }
+html.pc button, html.pc .btn { font-size: 14px; min-height: 36px; padding: 0 16px; border-radius: 4px; border-width: 1px;
+  text-transform: uppercase; letter-spacing: .09em; font-weight: 500; }
+html.pc .big { width: auto; min-height: 36px; font-size: 14px; font-weight: 500; padding: 0 16px; flex-direction: row; border-radius: 4px; }
+html.pc #howBtn, html.pc #exitBtn { border-width: 1px; }
+html.pc input[type=text], html.pc input[type=number], html.pc input[type=password] { font-size: 15px; min-height: 40px; border-radius: 4px; }
+html.pc #prompt .ptitlebar { margin: -16px -16px 12px; padding: 8px 8px 8px 16px; background: var(--card2); border-bottom: 1px solid var(--line); }
+html.pc #pTitle { font-size: 18px; margin: 0; }
+html.pc .pclose { display: inline-flex; flex: none; min-height: 36px; width: 36px; padding: 0; border: 0; font-size: 24px; color: var(--muted); letter-spacing: 0; }
+html.pc .pclose:hover { color: var(--text); background: var(--line); }
+html.pc #prompt .pbuttons { gap: 8px; margin: 10px 0; }
+html.pc #prompt .pgroup { gap: 8px; margin: 10px 0; }
+html.pc #prompt .pgroup button, html.pc #prompt .pbuttons button { min-height: 36px; font-weight: 500; }
+html.pc #prompt .pfooter { justify-content: flex-end; gap: 8px; }
+html.pc #prompt .pfooter button { flex: 0 0 auto; }
+html.pc #prompt .perr { font-size: 15px; }
+html.pc #prompt form.ptarget, html.pc #prompt form.ptarget input { font-size: 16px; }
+html.pc .jog .pad button, html.pc .jog .row button, html.pc .jog .steps button { min-height: 32px; font-size: 13px; letter-spacing: .03em; }
+html.pc #measurePanel { box-shadow: none; margin: 12px 0 0; }
+/* the cue: a band across the top of the window instead of the whole screen, still in the signal colours */
+html.pc #cue { inset: var(--hdr, 0px) 0 auto 0; flex-direction: row; flex-wrap: wrap; gap: 8px 24px; padding: 18px 24px;
+  box-shadow: 0 6px 20px rgba(0,0,0,.45); }
+html.pc #cue .cbig { font-size: 30px; max-width: none; }
+html.pc #cueLive { grid-auto-flow: column; align-items: center; gap: 16px; }
+html.pc #cueLive .lhz { font-size: 40px; }
+html.pc #cueLive .lsub { font-size: 16px; }
+html.pc #cueLive .marks { font-size: 36px; }
+html.pc #cueLive button { margin: 0; min-height: 36px; min-width: 0; font-size: 14px; }
 @media(prefers-reduced-motion:reduce) { * { scroll-behavior:auto!important; transition:none!important; } }
 /* Full-screen cue cards for what the hands do on the printer (hands off, tap, pluck): seen from the corner of an eye.
    Fixed colours on purpose, the same in both themes. */
@@ -283,7 +340,7 @@ summary:focus-visible { outline:3px solid var(--primary); outline-offset:2px; }
 </style></head>
 <body>
 <div id="cue" role="alert" aria-live="assertive" hidden><div class="cbig" id="cueBig"></div><div id="cueLive" aria-live="off"></div></div>
-<header class="top">
+<header class="top" id="hdrTop">
   <a class="back" id="backUi" href="/" title="Back to Mainsail or Fluidd">&lsaquo; Back</a>
   <span class="dot" id="dot" aria-hidden="true"></span>
   <h1>Chordata</h1>
@@ -295,7 +352,7 @@ summary:focus-visible { outline:3px solid var(--primary); outline-offset:2px; }
 <main>
   <!-- Prompt card: the belt steps, shown on top -->
   <section class="card" id="prompt" aria-live="polite" hidden>
-    <h2 id="pTitle"></h2>
+    <div class="ptitlebar"><h2 id="pTitle"></h2><button type="button" class="pclose" id="pClose" aria-label="Close Chordata" title="Close Chordata">&times;</button></div>
     <div id="beltView" aria-live="polite" hidden></div>
     <div id="pBody"></div>
     <div class="pfooter" id="pFooter"></div>
@@ -320,6 +377,7 @@ summary:focus-visible { outline:3px solid var(--primary); outline-offset:2px; }
         <span id="kinName"></span>.</p>
     </div>
     <button type="button" class="big" id="howBtn">How it works</button>
+    <button type="button" class="big" id="exitBtn">Close Chordata</button>
   </section>
 <!-- HOW IT WORKS: every instruction and spec, so the steps themselves only show their controls -->
 <section id="how" hidden>
@@ -388,7 +446,7 @@ summary:focus-visible { outline:3px solid var(--primary); outline-offset:2px; }
 <div id="trend"></div><p class="small muted">Circles: counted · Crosses: rejected · Dashed line: target. Updates after each detected pluck; not a raw accelerometer waveform.</p>
 <details><summary>Measurement data</summary><div class="measurements"><table><thead><tr><th scope="col">Belt</th><th scope="col">Pluck</th><th scope="col">Hz</th><th scope="col">Result</th><th scope="col">Reason</th></tr></thead><tbody id="measureRows"></tbody></table></div></details>
 <button type="button" id="exportBtn">Export CSV</button></section>
-<details class="card" id="authPanel"><summary>Printer connection</summary><form id="authForm"><div class="field"><label for="moonrakerKey">Moonraker API key</label><input id="moonrakerKey" type="password" autocomplete="off"></div><p class="help">Held in memory for this page only. Reload to forget it.</p><button type="submit">Authenticate</button></form></details>
+<details class="card" id="authPanel" hidden><summary>Printer connection</summary><form id="authForm"><div class="field"><label for="moonrakerKey">Moonraker API key</label><input id="moonrakerKey" type="password" autocomplete="off"></div><p class="help">Held in memory for this page only. Reload to forget it.</p><button type="submit">Authenticate</button></form></details>
   <p class="disclaimer">Chordata comes without any warranty. You use it at your own risk.</p>
 </main>
 <div id="toast" role="alert" hidden></div>
@@ -576,6 +634,7 @@ function runGcode(script, quiet) {
 
 function authBanner() {
   authRequired=true;
+  $("authPanel").hidden=false;     // shown only when Moonraker refuses the page (its trusted_clients leave this device out)
   $("authPanel").open=true;
   $("klippyBanner").textContent = "Moonraker requires authentication. Open Printer connection and enter its API key.";
   $("klippyBanner").hidden = false;
@@ -747,11 +806,43 @@ function pressPromptButton(gcode) {
   runGcode(gcode).catch(() => unlockButtons());
 }
 
+// Set Target Frequency: the target is typed (40-300 Hz, rounded to whole Hz): quicker than buttons.
+// Mainsail's pop-up can't hold a box, so the prompt keeps its -5..+5 buttons; this page leaves them out.
+function targetBox(text) {
+  const now = (text.match(/([\d.]+)\s*Hz/) || [])[1] || "";
+  const f = el("form", { class: "ptarget" });
+  f.appendChild(el("label", { for: "targetHz" }, "Target Frequency:"));
+  const inp = el("input", { id: "targetHz", type: "number", inputmode: "numeric", min: "40", max: "300", step: "any", value: now });
+  f.appendChild(inp);
+  f.appendChild(el("span", {}, "Hz"));
+  const set = el("button", { type: "submit", "data-g": "1" }, "Set");
+  set.disabled = buttonsLocked;
+  f.appendChild(set);
+  f.onsubmit = (e) => {
+    e.preventDefault();
+    const v = Math.round(Number(inp.value));
+    if (!Number.isFinite(v) || v < 40 || v > 300) { errorFlash("Error: target must be 40-300 Hz"); return; }
+    pressPromptButton("_CHORDATA_BELTS HZ=" + v);
+  };
+  return f;
+}
+
+// A target typed but not Set yet goes with whichever setup button is pressed (Start, Go, Save), so it isn't lost
+function withTypedTarget(gcode) {
+  const box = $("targetHz");
+  if (!box || !/^_CHORDATA_BELTS STEP=(start|go|save)\b/.test(gcode) || /\b(HZ|DT)=/.test(gcode)) return gcode;
+  const v = Math.round(Number(box.value)), was = Math.round(Number(box.defaultValue));
+  if (!Number.isFinite(v) || v < 40 || v > 300 || v === was) return gcode;
+  // Start: set it and show the step again, so a target the accelerometer can't hear is flagged
+  // before anything starts; Start is then pressed once more
+  return /STEP=start\b/.test(gcode) ? "_CHORDATA_BELTS HZ=" + v : gcode + " HZ=" + v;
+}
+
 function promptButton(b) {
   const cls = { primary: "primary", secondary: "", info: "info", warning: "warning", error: "error-btn" }[b.style] || "";
   const btn = el("button", { type: "button", class: cls, "data-g": "1" }, b.label);
   btn.disabled = buttonsLocked;
-  btn.onclick = () => pressPromptButton(b.gcode);
+  btn.onclick = () => pressPromptButton(withTypedTarget(b.gcode));
   // Close Chordata: the prompt ends, and the page goes back to Mainsail or Fluidd
   if (b.label === "Close Chordata") btn.onclick = () => { pressPromptButton(b.gcode); setTimeout(() => { location.href = $("backUi").href; }, 300); };
   return btn;
@@ -980,11 +1071,11 @@ function obj(name) { return S[name] || {}; }
 let cueKey = "", cueTimer = null, cueLast = "";
 const CUES = {     // the big text only: the card says one thing
   background: ["red", "Stand by: recording background noise"],
-  tap: ["yellow", "Tap your spot on the toolhead, lightly"],
+  tap: ["yellow", "Tap your toolhead"],
   "pluck:A": ["green", "Pluck belt A"],
   "pluck:B": ["green", "Pluck belt B"],
   "pluck:free": ["green", "Pluck either belt"],
-  switch: ["yellow", "Tap your spot on the toolhead"],
+  switch: ["yellow", "Tap your toolhead"],
 };
 // No card closes on a timer or needs a press on the phone: each stays until the printer is done
 // with that step (red until the quiet is recorded, yellow until the tap is heard, green until
@@ -1039,14 +1130,46 @@ function beepUnlock() {
     if (audio.state === "suspended") audio.resume();
   } catch (e) { audio = null; }
 }
+// Keep the screen on while the page is open: the phone lies on the bed while both hands pluck, and a
+// screen that goes dark hides the cue cards. The browser's wake lock where it is allowed (HTTPS or
+// localhost); a printer's plain-http page doesn't get it, so there a tiny silent black video loops
+// unseen, which phones also keep the screen on for. Both need a first press on the page.
+let wakeLock = null, wakeVideo = null;
+async function keepAwake() {
+  if (document.visibilityState !== "visible") return;
+  try {
+    if (navigator.wakeLock && window.isSecureContext) {
+      if (!wakeLock) {               // one press fires several events: they share one request
+        wakeLock = navigator.wakeLock.request("screen").then((lock) => {
+          lock.addEventListener("release", () => { wakeLock = null; });
+          return lock;
+        });
+      }
+      await wakeLock;
+      return;
+    }
+  } catch (e) { wakeLock = null; }
+  try {
+    if (!wakeVideo) {
+      wakeVideo = el("video", { muted: "", playsinline: "", loop: "", "aria-hidden": "true", tabindex: "-1",
+        style: "position:fixed;left:0;bottom:0;width:1px;height:1px;opacity:0.01;pointer-events:none" });
+      wakeVideo.muted = true; wakeVideo.playsInline = true; wakeVideo.loop = true;
+      wakeVideo.appendChild(el("source", { type: "video/webm", src: "data:video/webm;base64,GkXfo59ChoEBQveBAULygQRC84EIQoKEd2VibUKHgQRChYECGFOAZwEAAAAAAAeFEU2bdLpNu4tTq4QVSalmU6yBoU27i1OrhBZUrmtTrIHYTbuMU6uEElTDZ1OsggGETbuMU6uEHFO7a1Osggdv7AEAAAAAAABZAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAVSalmsirXsYMPQkBNgI1MYXZmNjAuMTYuMTAwV0GNTGF2ZjYwLjE2LjEwMESJiECfYAAAAAAAFlSua0CmrgEAAAAAAAA414EBc8WIqjsYWzqrv5KcgQAitZyDdW5kiIEAhoVWX1ZQOIOBASPjg4Q7msoA4ImwgRC6gRCagQKuAQAAAAAAAFzXgQJzxYiffT3T9Jf/R5yBACK1nIN1bmSIgQCGhkFfT1BVU1aqg2MuoFa7hATEtACDgQLhkZ+BAbWIQL9AAAAAAABiZIEQY6KTT3B1c0hlYWQBATgBQB8AAAAAABJUw2dA1nNzoGPAgGfImkWjh0VOQ09ERVJEh41MYXZmNjAuMTYuMTAwc3PWY8CLY8WIqjsYWzqrv5JnyKFFo4dFTkNPREVSRIeUTGF2YzYwLjMxLjEwMiBsaWJ2cHhnyKFFo4hEVVJBVElPTkSHkzAwOjAwOjAyLjAwMDAwMDAwMABzc9djwItjxYiffT3T9Jf/R2fIokWjh0VOQ09ERVJEh5VMYXZjNjAuMzEuMTAyIGxpYm9wdXNnyKFFo4hEVVJBVElPTkSHkzAwOjAwOjAyLjAwODAwMDAwMAAfQ7Z1RQnngQCji4IAAIAIC+Y7I6tgo6OBAACAEAIAnQEqEAAQAABHCIWFiJmEiAICAAwNYAD+/6tQgKOKggAVgAgIrLMOxqOKggApgAgIrLMOxqOKggA9gAgIrLMOxqOKggBRgAgIrLMOxqOKggBlgAgIrLMOxqOKggB5gAgIrLMOxqOKggCNgAgIrLMOxqOKggChgAgIrLMOxqOKggC1gAgIrLMOxqOKggDJgAgIrLMOxqOKggDdgAgIrLMOxqOKggDxgAgIrLMOxqOKggEFgAgIrLMOxqOKggEZgAgIrLMOxqOKggEtgAgIrLMOxqOKggFBgAgIrLMOxqOKggFVgAgIrLMOxqOKggFpgAgIrLMOxqOKggF9gAgIrLMOxqOKggGRgAgIrLMOxqOKggGlgAgIrLMOxqOKggG5gAgIrLMOxqOKggHNgAgIrLMOxqOKggHhgAgIrLMOxqOKggH1gAgIrLMOxqOKggIJgAgIrLMOxqOKggIdgAgIrLMOxqOKggIxgAgIrLMOxqOKggJFgAgIrLMOxqOKggJZgAgIrLMOxqOKggJtgAgIrLMOxqOKggKBgAgIrLMOxqOKggKVgAgIrLMOxqOKggKpgAgIrLMOxqOKggK9gAgIrLMOxqOKggLRgAgIrLMOxqOKggLlgAgIrLMOxqOKggL5gAgIrLMOxqOKggMNgAgIrLMOxqOKggMhgAgIrLMOxqOKggM1gAgIrLMOxqOKggNJgAgIrLMOxqOKggNdgAgIrLMOxqOKggNxgAgIrLMOxqOKggOFgAgIrLMOxqOKggOZgAgIrLMOxqOKggOtgAgIrLMOxqOKggPBgAgIrLMOxqOKggPVgAgIrLMOxqOKggPpgAgIrLMOxqOZgQPoALEBAAEQEAAYADA/9AwAAAD+/6tQgKOKggP9gAgIrLMOxqOKggQRgAgIrLMOxqOKggQlgAgIrLMOxqOKggQ5gAgIrLMOxqOKggRNgAgIrLMOxqOKggRhgAgIrLMOxqOKggR1gAgIrLMOxqOKggSJgAgIrLMOxqOKggSdgAgIrLMOxqOKggSxgAgIrLMOxqOKggTFgAgIrLMOxqOKggTZgAgIrLMOxqOKggTtgAgIrLMOxqOKggUBgAgIrLMOxqOKggUVgAgIrLMOxqOKggUpgAgIrLMOxqOKggU9gAgIrLMOxqOKggVRgAgIrLMOxqOKggVlgAgIrLMOxqOKggV5gAgIrLMOxqOKggWNgAgIrLMOxqOKggWhgAgIrLMOxqOKggW1gAgIrLMOxqOKggXJgAgIrLMOxqOKggXdgAgIrLMOxqOKggXxgAgIrLMOxqOKggYFgAgIrLMOxqOKggYZgAgIrLMOxqOKggYtgAgIrLMOxqOKggZBgAgIrLMOxqOKggZVgAgIrLMOxqOKggZpgAgIrLMOxqOKggZ9gAgIrLMOxqOKggaRgAgIrLMOxqOKggalgAgIrLMOxqOKgga5gAgIrLMOxqOKggbNgAgIrLMOxqOKggbhgAgIrLMOxqOKggb1gAgIrLMOxqOKggcJgAgIrLMOxqOKggcdgAgIrLMOxqOKggcxgAgIrLMOxqOKggdFgAgIrLMOxqOKggdZgAgIrLMOxqOKggdtgAgIrLMOxqOKggeBgAgIrLMOxqOKggeVgAgIrLMOxqOKggepgAgIrLMOxqOKgge9gAgIrLMOxqCToYqCB9EACAissw7GdaKEAM3+YBxTu2uRu4+zgQC3iveBAfGCAmDwgRA=" }));
+      wakeVideo.appendChild(el("source", { type: "video/mp4", src: "data:video/mp4;base64,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aHJvbWFfbWU9MSB0cmVsbGlzPTEgOHg4ZGN0PTAgY3FtPTAgZGVhZHpvbmU9MjEsMTEgZmFzdF9wc2tpcD0xIGNocm9tYV9xcF9vZmZzZXQ9LTQgdGhyZWFkcz0xIGxvb2thaGVhZF90aHJlYWRzPTEgc2xpY2VkX3RocmVhZHM9MCBucj0wIGRlY2ltYXRlPTEgaW50ZXJsYWNlZD0wIGJsdXJheV9jb21wYXQ9MCBjb25zdHJhaW5lZF9pbnRyYT0wIGJmcmFtZXM9MCB3ZWlnaHRwPTAga2V5aW50PTI1MCBrZXlpbnRfbWluPTEgc2NlbmVjdXQ9NDAgaW50cmFfcmVmcmVzaD0wIHJjX2xvb2thaGVhZD00MCByYz1jcmYgbWJ0cmVlPTEgY3JmPTIzLjAgcWNvbXA9MC42MCBxcG1pbj0wIHFwbWF4PTY5IHFwc3RlcD00IGlwX3JhdGlvPTEuNDAgYXE9MToxLjIwAIAAAAAPZYiEBfOf//8PRQABV5+AARggBwEYIAcBGCAHARggBwEYIAcBGCAHARggBwEYIAcAAAAHQZo4C+c6gAEYIAcBGCAHARggBwEYIAcBGCAHARggBwEYIAcBGCAH" }));
+      document.body.appendChild(wakeVideo);
+    }
+    if (wakeVideo.paused) await wakeVideo.play();
+  } catch (e) { /* not allowed yet: the next press tries again */ }
+}
 function beep() {
   if (!audio || audio.state !== "running") return;
   try {
     const o = audio.createOscillator(), g = audio.createGain(), t = audio.currentTime;
     o.frequency.value = 1000;
-    g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(0.3, t + 0.01);      // short ramps: no click
-    g.gain.setValueAtTime(0.3, t + 0.19);
+    // ADSR, soft on the ear: attack 10 ms, no decay, sustain 140 ms, release 50 ms
+    g.gain.setValueAtTime(0, t);
+    g.gain.linearRampToValueAtTime(0.3, t + 0.01);
+    g.gain.setValueAtTime(0.3, t + 0.15);
     g.gain.exponentialRampToValueAtTime(0.0001, t + 0.2);
     o.connect(g).connect(audio.destination);
     o.start(t);
@@ -1146,7 +1269,7 @@ function renderPrompt() {
     // "Chordata - ..." titles are for Mainsail's pop-up; on this page the cards and numbers say it
     const title = prompt.title || "";
     $("pTitle").textContent = title;
-    $("pTitle").hidden = !title || /^Chordata\b/i.test(title);
+    $("pTitle").hidden = !title || (!isPc() && /^Chordata\b/i.test(title));   // the PC title bar always shows it
     const body = $("pBody");
     body.textContent = "";
     let solo = null;
@@ -1166,12 +1289,13 @@ function renderPrompt() {
         continue;
       }
       solo = null;
-      if (it.type === "text" && /^Target Frequency:/.test(it.text)) body.appendChild(el("h2", { class: "ptarget" }, it.text));
+      if (it.type === "text" && /^Target Frequency:/.test(it.text)) body.appendChild(targetBox(it.text));
       else if (it.type === "text" && /^Error:/.test(it.text)) {
         body.appendChild(el("p", { class: "ptext perr" }, it.text));
         errorFlash(it.text.replace(/^Error:\s*/, "Error: "));
       }
       else if (it.type === "text") body.appendChild(el("p", { class: "ptext" }, it.text));
+      else if (it.type === "group" && it.list.some((b) => /\bDT=/.test(b.gcode))) continue;   // the box replaces them
       else if (it.type === "group") {
         const g = el("div", { class: "pgroup" });
         for (const b of it.list) g.appendChild(promptButton(b));
@@ -1268,10 +1392,41 @@ function initPage() {
   $('exportBtn').onclick=()=>{ const url=URL.createObjectURL(new Blob([csvMeasurements()],{type:'text/csv;charset=utf-8'})); const link=el('a',{href:url,download:'chordata-measurements.csv'}); link.click(); setTimeout(()=>URL.revokeObjectURL(url),1000); };
 }
 
+function isPc() { return document.documentElement.classList.contains("pc"); }
+// The PC layout puts the graph inside the pop-up, above its footer; the phone layout keeps it below
+function placeLayout() {
+  const pc = pcLayout();
+  const changed = pc !== isPc();
+  document.documentElement.classList.toggle("pc", pc);
+  document.documentElement.style.setProperty("--hdr", $("hdrTop").offsetHeight + "px");
+  const panel = $("measurePanel");
+  if (pc && panel.parentNode !== $("prompt")) $("prompt").insertBefore(panel, $("pFooter"));
+  if (!pc && panel.parentNode === $("prompt")) $("authPanel").before(panel);
+  return changed;
+}
+
 function init() {
   initPage();
+  placeLayout();
+  if (pcQuery) {
+    const again = () => {
+      const typed = $("targetHz") && $("targetHz").value;
+      if (!placeLayout()) return;
+      promptRendered = -1;           // the title bar and buttons differ: draw the step again, keeping a typed target
+      render();
+      if (typed && $("targetHz")) $("targetHz").value = typed;
+    };
+    if (pcQuery.addEventListener) pcQuery.addEventListener("change", again); else if (pcQuery.addListener) pcQuery.addListener(again);
+  }
+  // the pop-up's X: what Close Chordata does (Mainsail's X closes its pop-up the same way)
+  $("pClose").onclick = () => {
+    const close = [...$("pFooter").querySelectorAll("button")].find((b) => b.textContent === "Close Chordata");
+    if (close && !close.disabled) close.click();
+    else { runGcode("RESPOND TYPE=command MSG=action:prompt_end").catch(() => {}); setTimeout(() => { location.href = $("backUi").href; }, 300); }
+  };
   $("startBtn").onclick = () => runGcode("CHORDATA").catch(() => {});
   $("howBtn").onclick = openHow;
+  $("exitBtn").onclick = () => { location.href = $("backUi").href; };   // back to Mainsail or Fluidd
   $("howBack").onclick = () => { if (howFromPage) history.back(); else location.hash = ""; };
   window.addEventListener("hashchange", () => {
     if (location.hash !== "#how") howFromPage = false;
@@ -1280,6 +1435,10 @@ function init() {
   // the beep needs a sound context started by a press on the page (browsers block sound until then)
   for (const ev of ["pointerdown", "pointerup", "touchend", "click", "keydown"])
     document.addEventListener(ev, beepUnlock, { capture: true });
+  // the screen stays on (keepAwake): started by a press, again whenever the page comes back into view
+  for (const ev of ["pointerup", "touchend", "click", "keydown"])
+    document.addEventListener(ev, () => { if (!demo) keepAwake(); }, { capture: true });
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && (wakeLock || wakeVideo)) { wakeLock = null; keepAwake(); } });
 
   render();
   if (demo) {
