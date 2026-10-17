@@ -325,7 +325,14 @@ The user settings file and saved recordings remain in the printer config directo
 
 ### Remove Chordata
 
-Remove its two include lines from `printer.cfg`, `[chordata_web]` and its update
+```sh
+~/Chordata/uninstall.sh
+sudo systemctl restart moonraker klipper
+rm -rf ~/Chordata
+```
+
+`uninstall.sh` does the steps below and backs up each file it changes
+(`*.before-chordata-uninstall`). By hand: remove its two include lines from `printer.cfg`, `[chordata_web]` and its update
 entry from `moonraker.conf`, and the Chordata item from `.theme/navi.json`. Remove
 only the Chordata symlinks installed in Klipper/Kalico, Moonraker and the config
 directory after confirming their targets. Restart the affected services. Preserve

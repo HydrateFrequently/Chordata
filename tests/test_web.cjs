@@ -17,7 +17,9 @@ const path = require('node:path');
     assert.equal(await page.locator('#trend circle').count(),6);
     assert.equal(await page.locator('#trend path').count(),1);
     assert.equal(await page.evaluate(()=>csvMeasurements().split('\r\n').length),8);
-    assert.equal(await page.evaluate(()=>document.documentElement.classList.contains('pc')),false);   // dev: the phone layout on a PC too
+    // dev shows the phone layout on a PC too (PHONE_EVERYWHERE); main shows its PC layout on a wide screen with a mouse
+    await page.setViewportSize({width:1280,height:900});
+    assert.equal(await page.evaluate(()=>{ placeLayout(); return document.documentElement.classList.contains('pc') === (!PHONE_EVERYWHERE && pcQuery.matches); }),true);
     for (const width of [390,1280]) {
       await page.setViewportSize({width,height:900});
       assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth <= innerWidth),true);

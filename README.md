@@ -56,8 +56,10 @@ The installer links the plugin into Klipper (`klippy/extras`, or Kalico's `klipp
 `[include chordata.cfg]` and `[include chordata_settings.cfg]` at the top of printer.cfg (with a backup), and
 an update entry for Mainsail's update manager. It also adds the **Chordata page**, served by Moonraker (a small
 component, `[chordata_web]`), with a link in Mainsail's sidebar. Open it on a phone at
-`http://<printer>/server/chordata`: it shows each pluck live in big numbers, both belts against the target, and a
-pad to move the toolhead to your belt tensioning position. A chart and a table show every pluck heard, counted or
+`http://<printer>/server/chordata` and lay the phone near the printer: it shows big signal-colour cards for what
+your hands do, each pluck live in big numbers, both belts against the target, and a pad to move the toolhead to
+your belt tensioning position. The screen stays on while the page is open. On a PC the page looks like Mainsail's
+own pop-ups. A chart and a table show every pluck heard, counted or
 left out with its reason, and **Export CSV** saves them. The same steps also run as prompts from the
 **CHORDATA** macro in Mainsail or Fluidd.
 
@@ -65,6 +67,23 @@ Settings (`chordata_settings.cfg`): `belt_target` (Hz, default 110; you can also
 and `belt_tolerance` (Hz, default 0.25). Every recording is saved in `chordata/recordings/` in the config
 folder, so you can download it from Mainsail. `CHORDATA_RECORD SECONDS=10 NAME=test` records any accelerometer
 (`CHIP=` as in Klipper's own commands) into the same folder.
+
+## Update
+
+Mainsail's (or Fluidd's) update manager shows Chordata next to Klipper and Moonraker; update it there. By hand:
+`cd ~/Chordata && git pull && ./install.sh`, then restart Moonraker and Klipper.
+
+## Uninstall
+
+```
+~/Chordata/uninstall.sh
+sudo systemctl restart moonraker klipper
+rm -rf ~/Chordata
+```
+
+The uninstaller removes the plugin links, the two includes in printer.cfg, the Chordata page and the update entry
+in moonraker.conf, and the sidebar link, backing up each file it changes (`*.before-chordata-uninstall`). Your
+`chordata_settings.cfg` and the recordings in `chordata/` stay; delete them by hand if you don't want them.
 
 ## How it was tested
 
@@ -78,8 +97,8 @@ Interesting detail: the accelerometer mostly hears the belt at twice its frequen
   mixed in on purpose. **It has not yet been run on a physical printer as a standalone plugin.** However, printunes belt tension module has been tested on my own printer.
 - `tests/test_belts.py` checks the pluck judge on synthetic recordings (and on real ones, if you have them).
 - `python3 -m unittest discover -s tests` checks the printer interlocks (no measuring during a print or while
-  another measurement runs), input checks, cleanup after errors and installer reruns. `npm test` checks the page
-  in a browser (demo, live updates, CSV export, phone and desktop layout). GitHub Actions runs both.
+  another measurement runs), input checks, cleanup after errors, installer reruns and the uninstaller. `npm test` checks the page
+  in a browser (demo, live updates, CSV export, phone and PC layouts). GitHub Actions runs both.
 
 ## Branches
 
