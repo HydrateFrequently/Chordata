@@ -726,6 +726,11 @@ class Chordata:
         b["tap"] = res["modes"]
         b["tap_ring"] = res["ring"]          # per line: how long it rings and how wide it is
         b["tap_main"] = res["main"]          # the toolhead's own note: a knock there switches to belt B
+        # A note above the accelerometer's listed range is still learned and guarded (the chip damps
+        # it, it doesn't go deaf, so it can still show up), but its reading is less sure: say so
+        acc = self._accel() or {}
+        b["tap_range"] = ("above what the %s hears well" % acc["name"]
+                          if res["main"] and acc.get("hi") and res["main"]["freq"] > acc["hi"] else "")
         b["tap_tau"] = res["tau"]
         b["taps"] = res["taps"]
         b["tap_good"], b["tap_bad"] = res["good"], res["bad"]

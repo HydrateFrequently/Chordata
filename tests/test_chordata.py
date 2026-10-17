@@ -140,6 +140,18 @@ class SafetyTests(unittest.TestCase):
         self.assertEqual(obj.belts["tap_bad"], 1)
         self.assertEqual(obj.tap_live, taps)
 
+    def test_note_above_the_chip_range_is_kept_and_flagged(self):
+        main = {"freq": 403.2, "tau": .1, "width": 4., "guard": 2.}
+        taps = [{"t": float(i), "ok": True, "why": "", "freq": 403.2} for i in (1, 2, 3)]
+        result = {"taps": taps, "good": 3, "bad": 0, "main": main, "modes": [403.2], "ring": [main], "tau": .1, "note": ""}
+        with patch.object(Chordata, "_accel", lambda self: {"name": "BMI160", "lo": 0, "hi": 353}):
+            obj, _ = self._tap_plugin(result)
+        self.assertEqual(obj.belts["tap_main"], main)     # still learned and guarded
+        self.assertEqual(obj.belts["tap_range"], "above what the BMI160 hears well")
+        with patch.object(Chordata, "_accel", lambda self: {"name": "ADXL345", "lo": 0, "hi": 1440}):
+            obj, _ = self._tap_plugin(result)
+        self.assertEqual(obj.belts["tap_range"], "")
+
     def test_nine_bad_taps_stop_with_advice(self):
         taps = [{"t": float(i), "ok": False, "why": "two taps at once", "freq": None} for i in range(9)]
         obj, stops = self._tap_plugin({"taps": taps, "good": 0, "bad": 9, "main": None, "modes": [],
