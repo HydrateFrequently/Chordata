@@ -80,15 +80,82 @@ class SafetyTests(unittest.TestCase):
             obj.cmd_CHORDATA_BOTH(Command())
         self.assertEqual(obj.state, "idle")
 
-    def test_quiet_recorded_again_when_a_fan_changes(self):
-        fan = {"speed": 0.}
-        obj = plugin()
-        obj.printer.lookup_objects = lambda: [("fan", status(**fan)), ("toolhead", object())]
-        obj._quiet_rec = (obj._fans(), [(0., 1., 2., 3.)])
-        self.assertIsNotNone(obj._quiet_cached())
-        fan["speed"] = .5
-        obj.printer.lookup_objects = lambda: [("fan", status(**fan))]
-        self.assertIsNone(obj._quiet_cached())
+    def test_free_tune_ends_by_itself_after_a_minute_without_plucks(self):
+        chip = object()
+        obj = plugin({"print_stats": status(state="standby"),
+                      "resonance_tester": SimpleNamespace(accel_chips=[("adxl345", chip)]),
+                      "toolhead": SimpleNamespace(wait_moves=lambda: None)})
+        obj._record_quiet = lambda *args, **kw: [(0., 0., 0., 0.)] * 10
+        pieces = []
+
+        def record(chip, toolhead, secs, live=None, stop=None):
+            t0 = 8. * len(pieces)
+            pieces.append(secs)
+            return [(t0, 0., 0., 0.), (t0 + 8., 0., 0., 0.)]
+        obj._record = record
+        saved = []
+        obj._save_recording = lambda name, samples, append=False: saved.append((name, append))
+        first = {"plucks": [{"t": 1., "ok": True, "freq": 110., "why": ""}]}
+        calls = []
+
+        def analyse(*args, **kw):
+            calls.append(1)
+            return first if len(calls) == 1 else {"plucks": []}
+        with patch.object(belts, "analyse", analyse):
+            obj.cmd_CHORDATA_FREE(Command())
+        # the last pluck at 1 s: it stops at the first piece that ends 60 s or more after it
+        self.assertEqual(len(pieces), 8)
+        self.assertEqual(obj.state, "idle")
+        # every piece goes into one file
+        self.assertEqual(len(saved), 8)
+        self.assertEqual(len({n for n, _ in saved}), 1)
+        self.assertTrue(all(a for _, a in saved))
+
+    def _tap_plugin(self, result):
+        obj = plugin({"print_stats": status(state="standby"),
+                      "resonance_tester": SimpleNamespace(accel_chips=[("adxl345", object())]),
+                      "toolhead": SimpleNamespace(wait_moves=lambda: None)})
+        obj._record_quiet = lambda *args, **kw: [(0., 0., 0., 0.)] * 10
+        stops = []
+
+        def record(chip, toolhead, secs, live=None, stop=None):
+            live([(0., 0., 0., 0.)] * 300)
+            stops.append(stop())
+            return [(0., 0., 0., 0.)] * 300
+        obj._record = record
+        obj._save_recording = lambda *args, **kw: None
+        with patch.object(belts, "analyse_taps", lambda *a, **k: result):
+            obj.cmd_CHORDATA_TAP(Command())
+        return obj, stops
+
+    def test_three_good_taps_make_the_fingerprint(self):
+        main = {"freq": 105.8, "tau": .1, "width": 4., "guard": 2.}
+        taps = [{"t": 1., "ok": True, "why": "", "freq": 105.8}, {"t": 2., "ok": False, "why": "another spot", "freq": 80.},
+                {"t": 3., "ok": True, "why": "", "freq": 105.7}, {"t": 4., "ok": True, "why": "", "freq": 105.8}]
+        obj, stops = self._tap_plugin({"taps": taps, "good": 3, "bad": 1, "main": main, "modes": [105.8],
+                                       "ring": [main], "tau": .1, "note": ""})
+        self.assertEqual(stops, [True])                  # it stops by itself at 3 good taps
+        self.assertTrue(obj.belts["tap_done"])
+        self.assertEqual(obj.belts["tap_main"], main)
+        self.assertEqual(obj.belts["tap_bad"], 1)
+        self.assertEqual(obj.tap_live, taps)
+
+    def test_nine_bad_taps_stop_with_advice(self):
+        taps = [{"t": float(i), "ok": False, "why": "two taps at once", "freq": None} for i in range(9)]
+        obj, stops = self._tap_plugin({"taps": taps, "good": 0, "bad": 9, "main": None, "modes": [],
+                                       "ring": [], "tau": None, "note": "no good tap"})
+        self.assertEqual(stops, [True])
+        self.assertFalse(obj.belts["tap_done"])
+        self.assertEqual(obj.belts["tap_note"], "too many bad taps")
+
+    def test_nine_taps_on_another_spot_say_so(self):
+        taps = [{"t": 1., "ok": True, "why": "", "freq": 105.8}] + [
+            {"t": float(i + 2), "ok": False, "why": "another spot", "freq": 80.} for i in range(9)]
+        obj, stops = self._tap_plugin({"taps": taps, "good": 1, "bad": 9, "main": None, "modes": [],
+                                       "ring": [], "tau": None, "note": "1 of 3 good taps"})
+        self.assertEqual(stops, [True])
+        self.assertFalse(obj.belts["tap_done"])
+        self.assertEqual(obj.belts["tap_note"], "taps on another spot")
 
     def test_active_sd_and_pause_interlocks_without_print_stats(self):
         for name, value in (("virtual_sdcard", status(is_active=True)),

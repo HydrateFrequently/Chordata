@@ -212,7 +212,6 @@ OTHER_GUARD = 1.0         # Hz: a pluck this close to the other belt is that bel
 SPREAD = 1.0              # Hz: accepted plucks must all be this close to their median
 SPAN = 0.05               # share: plucks this far from the rest rang on another stretch of belt
 MIN_GOOD = 3              # fewer accepted plucks than this: no reading
-EARLY_SPREAD = 0.1        # Hz: the first MIN_GOOD plucks this close together are enough (no need for all)
 # How long a line rings tells a belt from the toolhead or the frame: a knocked toolhead
 # rings out within ~0.15-0.3 s, a belt much longer. The pull at twice the tone goes
 # with the swing squared, so it dies twice as fast as the tone itself.
@@ -757,17 +756,7 @@ def analyse(t, ax, ay, az, target=None, expect=None, quiet=None, avoid=(), other
         fr = [x["freq"] for x in ok]
     res = out("good", "%d of %d plucks counted" % (len(ok), len(plucks)), plucks,
               freq=round(float(np.mean(fr)), 1), used=len(ok))
-    res["enough"] = early_enough(fr, expect)
     return res
-
-
-def early_enough(fr, expect):
-    """Enough plucks for a final reading: all that were asked for, or the first MIN_GOOD
-    of them within EARLY_SPREAD of each other (a steady hand: the rest wouldn't change it)."""
-    if not expect or len(fr) >= expect:
-        return True
-    first = fr[:MIN_GOOD]
-    return len(first) >= MIN_GOOD and max(first) - min(first) <= EARLY_SPREAD
 
 
 def _width(f, p, k, df):
@@ -812,6 +801,14 @@ def analyse_tap(t, ax, ay, az, quiet=None):
     sp = _spectra(axes, q, fs, nfft, f, None, a0, a1, {})
     if sp is None:
         return {"modes": [], "ring": [], "tau": None, "note": "not enough background data for the tap"}
+    modes, ring = _tap_lines(f, sp, df, lo, hi)
+    longest = max((r["tau"] for r in ring), default=None)
+    return {"modes": modes, "ring": ring, "tau": longest,
+            "note": "" if modes else "the tap rang nothing clearly"}
+
+
+def _tap_lines(f, sp, df, lo, hi):
+    """The toolhead's own lines in one tap's window (see analyse_tap), strongest first."""
     p, nz, halves = sp
     snr = p / np.maximum(nz, 1e-30)
     sel = np.flatnonzero((f >= lo) & (f <= hi))
@@ -858,9 +855,132 @@ def analyse_tap(t, ax, ay, az, quiet=None):
         modes.append(round(fk, 1))
         ring.append({"freq": round(fk, 1), "tau": round(float(tau), 2), "width": round(float(wd), 1),
                      "guard": round(float(min(GUARD_MAX, max(TAP_GUARD, wd / 2.0))), 1)})
-    longest = max((r["tau"] for r in ring), default=None)
-    return {"modes": modes, "ring": ring, "tau": longest,
-            "note": "" if modes else "the tap rang nothing clearly"}
+    return modes, ring
+
+
+# ---------------- the toolhead's fingerprint: three light taps on the same spot ----------------
+# One tap finds the toolhead's note; three that agree show it is steady and that it is the
+# toolhead, not something else that happened to ring. A tap only counts when it is heard,
+# alone (not inside the last tap's window: a double tap muddles the ringing) and rings
+# loudest at the same note as the first good tap, within that note's own width (the same
+# spot: another spot brings out other notes). No fixed numbers: each toolhead sets its own. How hard is not judged: even a light finger tap on
+# a stiff extruder hits a +-16 g sensor's limit for an instant (seen on a Nebula 370), and
+# the ringing after it, which is all that is used, is fine.
+TAP_NEED = 3              # good taps for a fingerprint
+TAP_FAILS = 9             # bad taps: stop and tell the user to look for what shakes the printer
+
+
+def analyse_taps(t, ax, ay, az, quiet=None, need=TAP_NEED):
+    """Judge each tap in a recording and learn the toolhead's fingerprint from the first
+    `need` good ones. Returns taps (each: t, ok, why, freq = its loudest note), good (count),
+    bad (count), main (the toolhead's note: freq, guard, ...), modes, ring and tau (as
+    analyse_tap), and note. A tap whose window is not complete yet is left for later."""
+    out = {"taps": [], "good": 0, "bad": 0, "main": None, "modes": [], "ring": [], "tau": None, "note": ""}
+    st = _setup(t, ax, ay, az, quiet)
+    if st is None:
+        return out
+    axes, fs, q = st
+    t0 = float(t[0])
+    lo, hi = SEARCH[0], min(SEARCH[1], 0.45 * fs)
+    onsets = find_plucks(axes, fs, lo, hi, None, None)
+    nfft = _nfft(fs)
+    f = np.fft.rfftfreq(nfft, 1.0 / fs)
+    df = f[1] - f[0]
+    n_all = len(axes[0])
+    good, ref, prev, cache = [], None, None, {}
+    for i, on in enumerate(onsets):
+        nxt = onsets[i + 1] if i + 1 < len(onsets) else None
+        if nxt is None and on + int((SKIP + WINDOW) * fs) > n_all:
+            break                         # still ringing at the end: judged on the next look
+        tap = {"t": round(float(t[on]) - t0, 2), "ok": False, "why": "", "freq": None}
+        w = next(_windows(axes, fs, [on] + ([nxt] if nxt is not None else [])), None)
+        sp = None if w is None else _spectra(axes, q, fs, nfft, f, None, w[1], w[2], cache)
+        if prev is not None and on - prev < (SKIP + WINDOW) * fs:
+            tap["why"] = "two taps at once"
+        elif w is None:
+            tap["why"] = "two taps at once"
+        elif sp is None:
+            tap["why"] = "not enough background"
+        else:
+            modes, ring = _tap_lines(f, sp, df, lo, hi)
+            if not modes:
+                tap["why"] = "too soft"
+            else:
+                tap["freq"] = ring[0]["freq"]
+                if ref is not None and abs(ring[0]["freq"] - ref["freq"]) > ref["width"] / 2.0:
+                    tap["why"] = "another spot"
+                else:
+                    ref = ref or ring[0]
+                    good.append(ring)
+                    tap["ok"] = True
+        prev = on
+        out["taps"].append(tap)
+        if len(good) >= need:
+            break
+    out["good"] = len(good)
+    out["bad"] = sum(1 for x in out["taps"] if not x["ok"])
+    if not good:
+        out["note"] = "no tap heard" if not out["taps"] else "no good tap"
+        return out
+    # the fingerprint: the main note, and the other lines that rang in at least two good taps
+    rings = sorted(((r, k) for k, g in enumerate(good) for r in g), key=lambda x: x[0]["freq"])
+    groups = []
+    for r, k in rings:
+        if groups and r["freq"] - groups[-1][-1][0]["freq"] <= 2 * TAP_GUARD:
+            groups[-1].append((r, k))
+        else:
+            groups.append([(r, k)])
+    ring = []
+    for g in groups:
+        has_main = any(r is gd[0] for r, k in g for gd in good)
+        if len({k for _, k in g}) < min(2, len(good)) and not has_main:
+            continue
+        fr = float(np.median([r["freq"] for r, _ in g]))
+        ring.append({"freq": round(fr, 1), "tau": max(r["tau"] for r, _ in g),
+                     "width": max(r["width"] for r, _ in g), "guard": max(r["guard"] for r, _ in g)})
+    mains = [g[0]["freq"] for g in good]
+    mf = float(np.median(mains))
+    main = min(ring, key=lambda r: abs(r["freq"] - mf))
+    ring.sort(key=lambda r: r is not main)
+    out.update(main=main, ring=ring, modes=[r["freq"] for r in ring],
+               tau=max(r["tau"] for r in ring))
+    return out
+
+
+def toolhead_knock(t, ax, ay, az, at, main, belt, quiet=None, until=None):
+    """Was the event at `at` (s after t[0]) a knock on the toolhead rather than a pluck? Its
+    note (main, from the setup taps) must be clearly heard (STRONG_DB over the noise) and
+    louder than the belt's note (belt: Hz, belt A's reading). until: when the next event
+    starts (s), so a double tap's second knock isn't heard in the first one's window.
+    Returns (yes, dB of the toolhead note, dB of the belt note)."""
+    st = _setup(t, ax, ay, az, quiet)
+    if st is None or not main:
+        return False, None, None
+    axes, fs, q = st
+    on = int(round(at * fs))
+    w = next(_windows(axes, fs, [on] + ([int(round(until * fs))] if until is not None else [])), None)
+    if w is None:
+        return False, None, None
+    nfft = _nfft(fs)
+    f = np.fft.rfftfreq(nfft, 1.0 / fs)
+    sp = _spectra(axes, q, fs, nfft, f, None, w[1], w[2], {})
+    if sp is None:
+        return False, None, None
+    p, nz, _ = sp
+    snr = 10.0 * np.log10(np.maximum(p / np.maximum(nz, 1e-30), 1e-30))
+    near = np.abs(f - main["freq"]) <= main["guard"]
+    if not np.any(near):
+        return False, None, None
+    dm = float(np.max(snr[near]))
+    # the belt rings as a line: a peak within SPREAD of its reading, not the slope of the
+    # toolhead's broad note beside it. A belt inside the toolhead's guard can't be told apart.
+    do = -99.0
+    if belt and abs(belt - main["freq"]) > main["guard"] + SPREAD:
+        k1 = max(1, int(1.0 / (f[1] - f[0])))
+        for k in np.flatnonzero(np.abs(f - belt) <= SPREAD):
+            if k1 <= k < len(p) - k1 and p[k] >= p[k - k1:k + k1 + 1].max():
+                do = max(do, float(snr[k]))
+    return dm >= STRONG_DB and dm > do, round(dm, 1), round(do, 1)
 
 
 def plan(b):

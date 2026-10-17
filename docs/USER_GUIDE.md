@@ -156,9 +156,10 @@ or the physical measurement setup. Do not copy another printer's saved coordinat
 
 ```mermaid
 flowchart TD
-    setup[Set the manufacturer's target and measurement position] --> tap[Optional toolhead tap calibration]
-    tap --> a[Record belt A]
-    a --> b[Record belt B]
+    setup[Set the manufacturer's target and measurement position] --> tap[Start: tap the toolhead]
+    tap --> a[Pluck belt A]
+    a --> sw[Tap the toolhead]
+    sw --> b[Pluck belt B]
     b --> inspect[Inspect frequencies and rejected plucks]
     inspect --> decision{Both belts complete and on target?}
     decision -->|Yes| finish[Finish or repeat to confirm]
@@ -167,21 +168,34 @@ flowchart TD
 ```
 
 1. Select **Belt tension** on the page or run `CHORDATA` from the console to open
-   setup. Select **Start** in that prompt when ready; this also switches off the
-   part-cooling fan through the macro's `M106 S0` command.
-2. Confirm the target and position. Chordata does not choose a manufacturer's target.
-3. Select **Listen for the tap**, keep your hands off while
-   background noise is recorded, then lightly tap the toolhead when prompted. This
-   identifies toolhead frequencies, ring duration and line width to help distinguish
-   a knock from a belt. The learned width sets a per-mode guard; long-ringing
-   toolheads also use onset detection outside those modes. This step is required:
-   the belts can only be measured once a tap was heard.
-4. Select **Listen to belt A**. Wait through the initial background recording, then
-   pluck the documented belt span evenly, about once a second.
-5. Inspect the counted and rejected plucks. When recording finishes, continue to B.
-6. Repeat for **belt B**, using the same measurement method and position.
-7. Read the comparison. If you adjust either tensioner, measure **both** belts again:
-   the belts interact mechanically.
+   setup. Confirm the target and position. Chordata does not choose a manufacturer's target.
+2. Read the tap instructions and select **I've read and understood: Start**. This switches
+   off the part-cooling fan (the macro's `M106 S0`) and goes straight into the taps: keep
+   your hands off while the red card records the background. When the card turns yellow,
+   tap one solid spot on the toolhead (the extruder is a good one) lightly, one tap at a
+   time. Each tap shows a check mark or an X; keep tapping until 3 check marks. It stops by
+   itself. A tap counts when it is heard, alone (not a double tap) and rings loudest at the
+   same note as the first good tap: another spot rings differently. After 9 taps that
+   don't count, Chordata stops and suggests turning off fans and anything else that
+   vibrates, and checking that the toolhead is tight. The good taps teach Chordata the
+   toolhead's own note, ring time and line width: knocks there are never taken for a
+   belt. This step is required: the belts can only be measured once it is done.
+3. Select **Listen: belt A, tap, belt B**. Hands off while the red card records the
+   background (before every listen), then pluck belt A
+   while the green card shows each pluck. When 5 are counted the card turns yellow:
+   tap your spot on the toolhead once, then pluck belt B the same way. It stops by itself.
+   Only a knock whose toolhead note is clearly heard and louder than belt A's note switches
+   to belt B, so a dropped tool or a slap on the frame doesn't.
+   **Listen to belt A only** measures one belt at a time instead.
+4. Read the comparison. If you adjust either tensioner, select **Listen** again to
+   measure **both** belts: the belts interact mechanically.
+
+**Free tune** shows every clear pluck of either belt, with no counting: pluck,
+and turn a tensioner between plucks. It stops by itself a minute after the last pluck,
+or select **Done** on the Chordata page (Mainsail's prompt can't end it while it listens).
+
+Cards never need a press on the phone (only free tune has a Done button): red means hands off, yellow means tap the
+toolhead, green means pluck, and each stays until that step is over.
 
 A recording can continue for a bounded extra interval to collect enough accepted
 plucks. If a pluck is weak or rejected, wait for the prompt and pluck again rather

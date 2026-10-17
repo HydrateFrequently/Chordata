@@ -13,12 +13,14 @@ next to the belt: the sensor is already on the printer, and you keep both hands 
 
 ## What it does
 
-1. **Tap.** You tap the toolhead once. Chordata learns how the toolhead rings by itself: at which frequencies,
+1. **Tap.** You tap one solid spot on the toolhead lightly until 3 taps count (each shows a check mark or an X).
+   Chordata learns how the toolhead rings by itself: at which frequencies,
    how long and how broad each line is. Toolheads differ a lot (a plastic one rings briefly in broad lines,
    a stiff all-metal one rings long in sharp lines), so each line is guarded as wide as it is, and plucks
    that come while a long-ringing toolhead still rings from a knock are still found. A knock is never taken
-   for a belt. The tap can't be skipped: the belts are only measured once a tap was heard.
-2. **Pluck.** You pluck belt A, then belt B, about once a second. Each pluck is judged: loud enough, not a
+   for a belt, and only a knock at the toolhead's own note switches from belt A to belt B. The taps can't be
+   skipped: the belts are only measured once 3 good taps were heard.
+2. **Pluck.** You pluck belt A, then belt B. Each pluck is judged: loud enough, not a
    knock, not the other belt ringing along. Bad plucks are left out, and Chordata keeps listening until
    5 good plucks are counted ("3 of 5 counted").
 3. **Read and adjust.** For each belt you get its frequency, how far it is from your target, and which way to

@@ -144,6 +144,30 @@ def synthetic():
     knocks(q)
     toolheads(q)
     series_rules(q)
+    fingerprint(q)
+
+
+def fingerprint(q):
+    """The setup taps: three good ones on the same spot make the fingerprint; a double tap
+    and a tap on another spot (ringing loudest at another note) are bad. Then the switch:
+    a knock at the toolhead's note is a tap, a pluck isn't."""
+    def ok(name, cond, res):
+        print("%-4s %-46s %s" % ("ok" if cond else "FAIL", name, res))
+        if not cond:
+            FAILS.append(name)
+    tap = lambda t0, fr=104.5: (t0, "tap", fr, 3000.0, 0.0)
+    r = belts.analyse_taps(*rec([tap(1.0), tap(2.5), tap(4.0)], 6.0), quiet=q)
+    ok("3 good taps: fingerprint 104.5", r["good"] == 3 and r["bad"] == 0 and abs(r["main"]["freq"] - 104.5) < 0.5, r)
+    r = belts.analyse_taps(*rec([tap(1.0), tap(1.5), tap(3.0, 163.0), tap(4.5), tap(6.0)], 8.0), quiet=q)
+    whys = [x["why"] for x in r["taps"]]
+    ok("double tap and another spot rejected", r["good"] == 3 and whys == ["", "two taps at once", "another spot", "", ""], r)
+    r = belts.analyse_taps(*rec([tap(1.0), tap(2.5)], 4.0), quiet=q)
+    ok("2 taps: not done yet", r["good"] == 2, r)
+    main = {"freq": 104.5, "guard": 2.0, "width": 3.7}
+    t, ax, ay, az = rec([(1.0, "pluck", 110.0, 1500.0, 3.0), tap(3.0)], 5.0)
+    yes_p = belts.toolhead_knock(t, ax, ay, az, 1.0, main, 110.0, quiet=q)
+    yes_t = belts.toolhead_knock(t, ax, ay, az, 3.0, main, 110.0, quiet=q)
+    ok("switch: pluck no, toolhead knock yes", not yes_p[0] and yes_t[0], (yes_p, yes_t))
 
 
 def near(r, fr, tol=0.4):
@@ -273,9 +297,6 @@ def series_rules(q):
           and r["used"] == 3, r)
     r = belts.analyse(*rec([]), quiet=q, target=110.0, free=True)
     check("free tune: silence, no reading", r["freq"] is None and r["verdict"] == "none", r)
-    # three plucks within 0.1 Hz are enough; three spread wider need all five
-    check("early: 3 within 0.1 Hz enough", belts.early_enough([110.0, 110.05, 110.1], 5), {"freq": None, "verdict": "", "used": 3, "heard": 3, "note": "", "plucks": []})
-    check("early: 3 within 0.3 Hz not enough", not belts.early_enough([110.0, 110.3, 110.1], 5), {"freq": None, "verdict": "", "used": 3, "heard": 3, "note": "", "plucks": []})
     # all plucks on the same wrong stretch: a reading all the same (the judge can't know)
     r = belts.analyse(*rec(series([72.0] * 5)), quiet=q, target=110.0)
     check("5 plucks at 72 Hz: a reading", near(r, 72.0), r)

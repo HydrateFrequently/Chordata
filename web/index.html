@@ -247,11 +247,11 @@ th,td { padding:8px; border-bottom:1px solid var(--line); text-align:left; }
 .trend text { fill:var(--muted); font:22px system-ui; }
 summary:focus-visible { outline:3px solid var(--primary); outline-offset:2px; }
 @media(prefers-reduced-motion:reduce) { * { scroll-behavior:auto!important; transition:none!important; } }
-/* Full-screen cue cards for the steps that matter (hands off, tap, ready): seen from the corner of an eye.
+/* Full-screen cue cards for what the hands do on the printer (hands off, tap, pluck): seen from the corner of an eye.
    Fixed colours on purpose, the same in both themes. */
 #cue {
   position: fixed; inset: 0; z-index: 50; display: flex; flex-direction: column; align-items: center;
-  justify-content: center; gap: 18px; text-align: center; cursor: pointer;
+  justify-content: center; gap: 18px; text-align: center;
   padding: max(24px, env(safe-area-inset-top, 0px)) max(20px, env(safe-area-inset-right, 0px))
            max(24px, env(safe-area-inset-bottom, 0px)) max(20px, env(safe-area-inset-left, 0px));
   --cbg: #d32f2f; --cfg: #ffffff; background: var(--cbg); color: var(--cfg);
@@ -262,10 +262,16 @@ summary:focus-visible { outline:3px solid var(--primary); outline-offset:2px; }
 #cue .cbig {
   font-size: clamp(30px, 10vw, 64px); font-weight: 900; line-height: 1.1; letter-spacing: .02em;
   text-transform: uppercase; text-wrap: balance; max-width: 14em; }
-#cue .sub { font-size: clamp(16px, 4.5vw, 22px); font-weight: 600; opacity: .85; max-width: 26em; }
+#cueLive:empty { display: none; }
+#cueLive { display: grid; gap: 6px; justify-items: center; }
+#cueLive .lhz { font-size: clamp(40px, 16vw, 96px); font-weight: 900; font-variant-numeric: tabular-nums; line-height: 1; }
+#cueLive .lsub { font-size: clamp(16px, 4.5vw, 22px); font-weight: 700; }
+#cueLive .marks { font-size: clamp(40px, 14vw, 80px); font-weight: 900; letter-spacing: .15em; line-height: 1; }
+#cueLive button { margin-top: 14px; min-width: 12em; min-height: 56px; font-size: 20px; font-weight: 800;
+  background: var(--cfg); color: var(--cbg); border: 0; }
 </style></head>
 <body>
-<div id="cue" role="alert" aria-live="assertive" hidden><div class="cbig" id="cueBig"></div><div class="sub" id="cueSub"></div></div>
+<div id="cue" role="alert" aria-live="assertive" hidden><div class="cbig" id="cueBig"></div><div id="cueLive" aria-live="off"></div></div>
 <header class="top">
   <span class="dot" id="dot" aria-hidden="true"></span>
   <h1>Chordata</h1>
@@ -308,8 +314,8 @@ summary:focus-visible { outline:3px solid var(--primary); outline-offset:2px; }
       <ol class="how">
         <li>Set the target frequency your printer's guide gives.</li>
         <li>Move the toolhead where the guide says (the pad above), and save that spot for next time.</li>
-        <li>Tap the toolhead once: Chordata learns how it rings by itself, so a knock is never taken for a belt.</li>
-        <li>Pluck belt A about once a second until 5 good plucks are counted, then belt B.</li>
+        <li>Tap one solid spot on the toolhead lightly until 3 taps count: Chordata learns how it rings by itself, so a knock is never taken for a belt.</li>
+        <li>Pluck belt A until 5 good plucks are counted, then belt B.</li>
         <li>Turn one tensioner a little as advised and measure both again, until both are on target.</li>
       </ol>
       <p class="small muted">Which belt you call A doesn't matter: the goal is equal tension. Chordata only
@@ -786,8 +792,7 @@ function renderFree(box, b) {
   if (listening && pt().measurement && pt().measurement.phase === "listening") {
     const done = el("button", { class: "primary", type: "button", style: "width:100%;margin-top:12px" }, accepting ? "Stopping..." : "Done");
     done.disabled = accepting;
-    done.onclick = () => { accepting = true; done.disabled = true;
-      rpc("server.chordata.accept", {}).catch((e) => { accepting = false; toast(errText(e)); }); };
+    done.onclick = freeDone;
     box.appendChild(done);
   }
 }
@@ -873,19 +878,19 @@ const S = {};             // merged printer status
 let klippyState = "";     // "ready", "startup", "shutdown", "error", "disconnected"
 let connected = false;
 function obj(name) { return S[name] || {}; }
-// ---------- cue cards: red = hands off (recording the quiet), yellow = do it now, green = ready ----------
-let cueKey = "", cueTimer = null, cueHide = null, cueSawTap = false, cueLast = "";
-const CUES = {
-  silence: ["red", "Stand by: recording silence", "Hands off the printer. Chordata is listening to how quiet it is."],
-  tap: ["yellow", "Tap the toolhead lightly with a finger or tool", "Once. Don't touch the belts."],
-  ready: ["green", "Ready to listen for plucks", "Tap to close"],
-  "pluck:A": ["green", "Pluck belt A", "Like a guitar string, evenly."],
-  "pluck:B": ["green", "Pluck belt B", "Like a guitar string, evenly."],
-  "pluck:free": ["green", "Pluck either belt", "As often as you like."],
-  switch: ["yellow", "Tap the toolhead", "Belt A is counted. Tap the toolhead once, then pluck belt B."],
-  enough: ["green", "3 plucks agree", "Tap here to accept them, or keep plucking to 5."],
+// ---------- cue cards: red = hands off (recording the quiet), yellow = tap the toolhead, green = pluck ----------
+let cueKey = "", cueTimer = null, cueLast = "";
+const CUES = {     // the big text only: the card says one thing
+  silence: ["red", "Stand by: recording silence"],
+  tap: ["yellow", "Tap your spot on the toolhead, lightly"],
+  "pluck:A": ["green", "Pluck belt A"],
+  "pluck:B": ["green", "Pluck belt B"],
+  "pluck:free": ["green", "Pluck either belt"],
+  switch: ["yellow", "Tap your spot on the toolhead"],
 };
-const CUE_BRIEF = ["ready", "pluck:A", "pluck:B", "pluck:free"];   // green: close by themselves
+// No card closes on a timer or needs a press on the phone: each stays until the printer is done
+// with that step (red until the quiet is recorded, yellow until the tap is heard, green until
+// the plucking is over). The green ones show each pluck as it is heard.
 function cueFlash(times, ms, done) {
   const box = $("cue");
   clearInterval(cueTimer);
@@ -901,43 +906,82 @@ function cueSet(key) {
   if (key === cueKey) return;
   const was = cueKey, box = $("cue");
   cueKey = key;
-  clearTimeout(cueHide);
-  if (!key) { clearInterval(cueTimer); box.hidden = true; return; }
-  const [colour, big, sub] = CUES[key];
-  const paint = () => { box.className = colour; $("cueBig").textContent = big; $("cueSub").textContent = sub; };
+  if (!key) { clearInterval(cueTimer); box.hidden = true; $("cueLive").textContent = ""; return; }
+  const [colour, big] = CUES[key];
+  const paint = () => { box.className = colour; $("cueBig").textContent = big; };
   if (key === "silence") { paint(); box.hidden = false; cueFlash(3, 110); }
-  else if (key === "tap") { box.hidden = false; cueFlash(2, 55, () => { paint(); }); }
-  else { box.hidden = false; cueFlash(1, 110, () => { paint(); if (CUE_BRIEF.includes(key)) cueHide = setTimeout(() => cueSet(""), key === "ready" ? 4000 : 2500); }); }
+  else if (key === "tap" || key === "switch") { box.hidden = false; cueFlash(2, 55, () => { paint(); }); }
+  else { box.hidden = false; cueFlash(1, 110, () => { paint(); }); }
   if (!was && key !== "silence") paint();
+}
+// the plucks so far, on the green card: the newest one big, and the count (or, in a free tune, the target)
+let cueLiveSig = "";
+function cueLive(key, st) {
+  const box = $("cueLive");
+  if (key === "tap") {             // the setup taps: a check mark or an X for each, a circle for each still needed
+    const taps = st.tap_live || [], good = taps.filter((x) => x.ok).length;
+    const need = (st.measurement || {}).expected || 3;
+    const marks = taps.map((x) => x.ok ? "\u2713" : "\u2717").join("") + "\u25CB".repeat(Math.max(0, need - good));
+    const sig = "tap|" + marks;
+    if (sig === cueLiveSig) return;
+    cueLiveSig = sig;
+    box.textContent = "";
+    box.appendChild(el("div", { class: "marks", "aria-label": good + " of " + need + " taps counted" }, marks));
+    return;
+  }
+  if (!key.startsWith("pluck:")) { if (cueLiveSig) { box.textContent = ""; cueLiveSig = ""; } return; }
+  const b = st.belts || {}, plucks = st.belt_live || [], free = key === "pluck:free";
+  const shown = free ? plucks.filter((p) => p.ok && p.freq != null) : plucks;
+  const last = shown.length ? shown[shown.length - 1] : null;
+  const okN = plucks.filter((p) => p.ok).length, need = b.plucks || 5;
+  let sub;
+  if (free) {
+    const d = last ? last.freq - b.target : null, tol = b.tol || 0.25;
+    sub = d == null ? "Target " + Number(b.target || 0).toFixed(0) + " Hz"
+      : Math.abs(d) <= tol ? "On target" : (d < 0 ? "-" : "+") + Math.abs(d).toFixed(1) + " Hz, " + (d < 0 ? "tighten" : "loosen");
+  } else {
+    sub = plucks.length ? Math.min(okN, need) + " of " + need + " counted" + (last && !last.ok ? " (last: " + (last.why || "not counted") + ")" : "")
+      : "Listening";
+  }
+  const a = key === "pluck:B" && b.A && b.A.freq != null ? "Belt A: " + fmtHz(b.A.freq) + " Hz" : "";
+  const sig = [key, last && last.freq, last && last.ok, sub, a, accepting].join("|");
+  if (sig === cueLiveSig) return;
+  cueLiveSig = sig;
+  box.textContent = "";
+  box.appendChild(el("div", { class: "lhz" }, last && last.freq != null ? fmtHz(last.freq) + " Hz" : "..."));
+  box.appendChild(el("div", { class: "lsub" }, sub));
+  if (a) box.appendChild(el("div", { class: "lsub" }, a));
+  if (free) {
+    const done = el("button", { type: "button" }, accepting ? "Stopping..." : "Done");
+    done.disabled = accepting;
+    done.onclick = freeDone;
+    box.appendChild(done);
+  }
 }
 function cueUpdate() {
   const st = pt(), m = st.measurement || {};
-  if (!m.early || st.state !== "listening") accepting = false;
+  if (st.state !== "listening") accepting = false;
   const kind = m.belt, phase = m.phase;
   let key = "";
   if (st.state === "listening" && phase === "background") key = "silence";
-  else if (st.state === "listening" && phase === "listening" && m.early && !accepting
-           && (["A", "B"].includes(kind) || (kind === "both" && m.step !== "tap"))) key = "enough";
-  else if (kind === "tap" && (phase === "listening" || phase === "analysing")) { key = "tap"; cueSawTap = true; }
-  else if (kind === "tap" && phase === "complete" && cueSawTap && (st.belts || {}).tap_done) key = "ready";
+  else if (kind === "tap" && (phase === "listening" || phase === "analysing")) key = "tap";
   else if (st.state === "listening" && phase === "listening" && kind === "both")
     key = m.step === "tap" ? "switch" : "pluck:" + (m.step === "B" ? "B" : "A");
   else if (st.state === "listening" && phase === "listening" && ["A", "B", "free"].includes(kind)) key = "pluck:" + kind;
   // the tap that switches to belt B was heard: a buzz, so the user knows without looking
   if (cueLast === "switch" && key === "pluck:B" && navigator.vibrate) { try { navigator.vibrate(200); } catch (e) {} }
-  if (key === "ready") cueSawTap = false;
-  if (key === cueLast) return;                     // same step: a closed or timed-out card stays away
   cueLast = key;
-  if (!key && CUE_BRIEF.includes(cueKey)) return;  // green cards close by themselves (or by a tap)
   cueSet(key);
+  cueLive(key, st);
 }
-// accept the plucks so far (three that agree), or end a free tune. Not G-code: G-code is
-// busy with the listen, so this goes to the plugin through Moonraker directly.
-let accepting = false, acceptNext = false;
-function accept() {
+// ending a free tune (Done) is not G-code: G-code is busy with the listen, so it goes to
+// the plugin through Moonraker directly
+let accepting = false;
+function freeDone() {
+  if (accepting) return;
   accepting = true;
-  if (pt().measurement && ["A", "B"].includes(pt().measurement.belt)) acceptNext = true;
-  rpc("server.chordata.accept", {}).catch((e) => { accepting = false; acceptNext = false; toast(errText(e)); });
+  render();
+  rpc("server.chordata.accept", {}).catch((e) => { accepting = false; toast(errText(e)); render(); });
 }
 function pt() { return obj("chordata"); }
 function isPrinting() { return ["printing", "paused"].includes(obj("print_stats").state || ""); }
@@ -984,12 +1028,6 @@ function renderPrompt() {
     foot.textContent = "";
     for (const b of prompt.footer) foot.appendChild(promptButton(b));
     foot.hidden = !prompt.footer.length;
-    // plucks accepted with a tap: on to the next belt (or the result) without another tap
-    if (acceptNext && pt().state !== "listening") {
-      const next = [...body.querySelectorAll("button")].find((x) => /^Listen to belt/.test(x.textContent));
-      if (next) { acceptNext = false; next.click(); }
-      else if (/^Chordata - belts/.test(prompt.title || "")) acceptNext = false;   // both done: the result
-    }
   }
   renderBelts();
 }
@@ -1067,7 +1105,7 @@ function initPage() {
 function init() {
   initPage();
   $("startBtn").onclick = () => runGcode("CHORDATA").catch(() => {});
-  $("cue").onclick = () => { if (cueKey === "enough") accept(); cueSet(""); };
+
   render();
   if (demo) {
     S.chordata={state:"idle",belts:{target:110,plucks:3,A:{freq:109.9,used:3,heard:4,plucks:[{freq:109.5,ok:true},{freq:110.2,ok:true},{freq:145,ok:false,why:"Off target"},{freq:110,ok:true}]},B:{freq:106.8,used:3,heard:3,plucks:[{freq:107,ok:true},{freq:106.5,ok:true},{freq:107.1,ok:true}]}},tools:{}};
