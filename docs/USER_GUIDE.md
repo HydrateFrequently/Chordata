@@ -156,7 +156,7 @@ or the physical measurement setup. Do not copy another printer's saved coordinat
 
 ```mermaid
 flowchart TD
-    setup[Set the manufacturer's target and measurement position] --> tap[Start: tap the toolhead]
+    setup[Set Target Frequency and position] --> tap[Start: background noise, then tap the toolhead]
     tap --> a[Pluck belt A]
     a --> sw[Tap the toolhead]
     sw --> b[Pluck belt B]
@@ -167,34 +167,46 @@ flowchart TD
     adjust --> a
 ```
 
-1. Select **Belt tension** on the page or run `CHORDATA` from the console to open
-   setup. Confirm the target and position. Chordata does not choose a manufacturer's target.
-2. Read the tap instructions and select **I've read and understood: Start**. This switches
-   off the part-cooling fan (the macro's `M106 S0`) and goes straight into the taps: keep
-   your hands off while the red card records the background. When the card turns yellow,
-   tap one solid spot on the toolhead (the extruder is a good one) lightly, one tap at a
-   time. Each tap shows a check mark or an X; keep tapping until 3 check marks. It stops by
-   itself. A tap counts when it is heard, alone (not a double tap) and rings loudest at the
-   same note as the first good tap: another spot rings differently. After 9 taps that
-   don't count, Chordata stops and suggests turning off fans and anything else that
-   vibrates, and checking that the toolhead is tight. The good taps teach Chordata the
-   toolhead's own note, ring time and line width: knocks there are never taken for a
-   belt. This step is required: the belts can only be measured once it is done.
-3. Select **Listen: belt A, tap, belt B**. Hands off while the red card records the
-   background (before every listen), then pluck belt A
-   while the green card shows each pluck. When 5 are counted the card turns yellow:
-   tap your spot on the toolhead once, then pluck belt B the same way. It stops by itself.
-   Only a knock whose toolhead note is clearly heard and louder than belt A's note switches
-   to belt B, so a dropped tool or a slap on the frame doesn't.
-   **Listen to belt A only** measures one belt at a time instead.
-4. Read the comparison. If you adjust either tensioner, select **Listen** again to
-   measure **both** belts: the belts interact mechanically.
+1. Select **Measure Belts** on the page or run `CHORDATA` from the console to open
+   **Set Target Frequency**. Set the target with the Hz buttons (Chordata does not choose a
+   manufacturer's target), move the toolhead with the arrows (0.5 to 50 mm steps) or by
+   typing X and Y, and save the belt tensioning position. The screen shows the accelerometer
+   `[resonance_tester]` uses and the range it hears reliably (for example ADXL345, 0-1440 Hz;
+   LIS2DW12, 0-400 Hz); a target outside it flashes red and can't be started. The instructions and specs are on
+   the page's **How it works**.
+2. Select **I've read and understood: Start**. This switches off the part-cooling fan (the
+   macro's `M106 S0`) and goes straight into the taps: keep your hands off while the red card
+   records the background noise. This is the only background recording of the session.
+   When the card turns yellow, tap one solid spot on the toolhead (the extruder is a good
+   one) lightly, one tap at a time. Each tap shows a check mark or an X; keep tapping until
+   3 check marks. It stops by itself. A tap counts when it is heard, alone (not a double
+   tap) and rings loudest at the same note as the first good tap: another spot rings
+   differently. After 9 taps that don't count, Chordata stops and suggests turning off fans
+   and anything else that vibrates, and checking that the toolhead is tight. The good taps
+   teach Chordata the toolhead's own note, ring time and line width: knocks there are never
+   taken for a belt. This step is required: the belts can only be measured once it is done.
+   **Measure Toolhead Frequency** repeats it (and records the background again).
+3. Pick a mode:
+   - **Guided Mode**: pluck belt A while the green card shows each pluck until 5 are
+     counted, then select **Measure belt B** and pluck belt B the same way.
+   - **Pluck - Tap - Pluck Mode**: the same, but when belt A is done the card turns yellow:
+     tap your spot on the toolhead once, then pluck belt B. No press on the phone. Only a
+     knock whose toolhead note is clearly heard and louder than belt A's note switches to
+     belt B, so a dropped tool or a slap on the frame doesn't. Not offered when the toolhead
+     rang nothing near the belts (a stiff toolhead): a tap can't be told from a pluck there.
+   - **Tuner Mode**: every clear pluck of either belt, with no counting: pluck, and turn a
+     tensioner between plucks. It stops by itself a minute after the last pluck, or select
+     **Done** on the Chordata page (Mainsail's prompt can't end it while it listens).
+   The phone beeps (1000 Hz, 200 ms) when a green card appears: ready to measure.
+4. Read the comparison. If you adjust either tensioner, measure **both** belts again: the
+   belts interact mechanically.
 
-**Free tune** shows every clear pluck of either belt, with no counting: pluck,
-and turn a tensioner between plucks. It stops by itself a minute after the last pluck,
-or select **Done** on the Chordata page (Mainsail's prompt can't end it while it listens).
+A fan that starts after the background was recorded is told from a belt by how it sounds:
+a pluck starts loud and dies away, a fan hums at one level. Its hum is left out. If it sits
+on the belt's note, the green card and the result say "steady hum at X Hz on the belt's
+note (a fan?)": turn that fan off and measure again.
 
-Cards never need a press on the phone (only free tune has a Done button): red means hands off, yellow means tap the
+Cards never need a press on the phone (only Tuner Mode has a Done button): red means hands off, yellow means tap the
 toolhead, green means pluck, and each stays until that step is over.
 
 A recording can continue for a bounded extra interval to collect enough accepted
@@ -241,7 +253,7 @@ the latest displayed A/B series. Columns are `belt`, `pluck`, `frequency_hz`,
 This export is a frequency summary, not raw accelerometer samples.
 
 Raw recordings appear under `chordata/recordings/` in the config file browser.
-Belt captures and background captures have separate names. Chordata retains the
+Belt captures and the session's background capture (saved with the taps) have separate names. Chordata retains the
 latest 40 CSV files; save important captures elsewhere before continuing.
 
 For a standalone capture:

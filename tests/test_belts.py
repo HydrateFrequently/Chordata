@@ -124,6 +124,19 @@ def synthetic():
     qf = quiet(fan=137.0)
     r = belts.analyse(*rec(series([91.0] * 5), fan=137.0), quiet=qf)
     check("fan at 137 Hz", r["verdict"] == "good" and abs(r["freq"] - 91.0) < 0.4, r)
+    # a fan that comes on after the background was recorded (the background is recorded once
+    # per session): off the belt's note it is masked, on it there is no reading and a hum note
+    def fan_later(fan, gain):
+        t, ax, ay, az = rec(series([91.0] * 5))
+        for a in (ax, ay, az):
+            a += gain * 90.0 * np.sin(2 * np.pi * fan * (t - t[0]))
+        return belts.analyse(t, ax, ay, az, quiet=q, target=90.0)
+    r = fan_later(137.0, 1)
+    check("fan on later at 137 Hz", near(r, 91.0) and r["hum"] == [], r)
+    r = fan_later(96.0, 3)
+    check("fan on later at 96 Hz, 5 Hz from the belt", near(r, 91.0), r)
+    r = fan_later(91.3, 5)
+    check("fan on later on the belt's note", r["freq"] is None and len(r["hum"]) == 1 and abs(r["hum"][0] - 91.3) < 0.3 and "hum" in r["note"], r)
     # nothing plucked
     r = belts.analyse(*rec([]), quiet=q)
     check("no plucks", r["freq"] is None and r["verdict"] in ("none", "again"), r)

@@ -38,7 +38,7 @@ const path = require('node:path');
     await cue({belt:'A',phase:'background'});
     await page.locator('#cue').click();
     await page.waitForTimeout(3500);
-    assert.match(await shown(),/silence/i);
+    assert.match(await shown(),/background noise/i);
     await cue({belt:'A',phase:'listening',heard:0});
     await page.waitForTimeout(3500);
     assert.match(await shown(),/Pluck belt A/);
@@ -81,22 +81,62 @@ const path = require('node:path');
       };
     });
     await live.goto('file://'+path.resolve(__dirname,'../web/index.html'));
+    // Set Target Frequency: the target big, then the Hz buttons, Go, the pad, Save; no "Chordata - " title on the page
+    await live.waitForFunction(()=>typeof handleLine==='function' && connected);
+    await live.evaluate(()=>{ for (const l of ['action:prompt_begin Set Target Frequency','action:prompt_text Target Frequency: 110 Hz',
+      'action:prompt_button_group_start','action:prompt_button -5 Hz|_CHORDATA_BELTS DT=-5|secondary','action:prompt_button_group_end',
+      'action:prompt_button Go to belt tensioning position|_CHORDATA_BELTS STEP=go|secondary',
+      'action:prompt_button Save belt tensioning position|_CHORDATA_BELTS STEP=save|secondary','action:prompt_show']) handleLine('// '+l); });
+    assert.equal(await live.locator('#pTitle').textContent(),'Set Target Frequency');
+    assert.equal(await live.locator('#prompt h2.ptarget').textContent(),'Target Frequency: 110 Hz');
+    const order=await live.evaluate(()=>[...document.querySelectorAll('#pBody > *')].map(e=>e.id||e.className||e.tagName));
+    assert.deepEqual(order,['ptarget','pgroup','pbuttons','setupJog','pbuttons','pbuttons']);   // the last: How it works
+    assert.equal(await live.locator('#prompt .howlink').count(),1);
+    // a target the accelerometer can't hear: red text, and the screen flashes red with it
+    await live.evaluate(()=>{ for (const l of ['action:prompt_begin Set Target Frequency','action:prompt_text Target Frequency: 160 Hz',
+      'action:prompt_text Accelerometer: LIS3DH, frequency range 0-149 Hz','action:prompt_text Error: frequency target out of range',
+      'action:prompt_button Save belt tensioning position|_CHORDATA_BELTS STEP=save|secondary','action:prompt_show']) handleLine('// '+l); });
+    assert.equal(await live.locator('#prompt .perr').textContent(),'Error: frequency target out of range');
+    assert.equal(await live.locator('#cue').isVisible(),true);
+    assert.match(await live.locator('#cueBig').textContent(),/frequency target out of range/);
+    assert.equal(await live.locator('#prompt .howlink').count(),1);    // still there without Start
+    await live.waitForFunction(()=>document.getElementById('cue').hidden,null,{timeout:5000});
+    await live.evaluate(()=>{ for (const l of ['action:prompt_begin Set Target Frequency','action:prompt_text Target Frequency: 110 Hz',
+      'action:prompt_button Go to belt tensioning position|_CHORDATA_BELTS STEP=go|secondary',
+      'action:prompt_button Save belt tensioning position|_CHORDATA_BELTS STEP=save|secondary','action:prompt_show']) handleLine('// '+l); });
     // A long homing: no request timeout, and no jog pad until our G28 returns (X/Y report homed before Z)
-    await live.locator('#homeJog summary').click();   // the landing page keeps the pad closed
-    const homeBtn=live.locator('#homeJog button',{hasText:/^Home$/});
+    const homeBtn=live.locator('#setupJog button',{hasText:/^Home$/});
     await homeBtn.click();
     await live.waitForFunction(()=>typeof window.__releaseHome==='function');
     assert.equal(await live.evaluate(()=>[...pending.values()].every(p=>p.timer===null)),true);
     await live.evaluate(()=>{ S.toolhead={homed_axes:'xy',position:[10,20,0,0]}; render(); });
-    assert.match(await live.locator('#homeJog').textContent(),/Stand by, homing\./);
-    assert.equal(await live.locator('#homeJog .pad').count(),0);
+    assert.match(await live.locator('#setupJog').textContent(),/Stand by, homing\./);
+    assert.equal(await live.locator('#setupJog .pad').isVisible(),false);
     await live.evaluate(()=>window.__releaseHome());
-    await live.waitForFunction(()=>document.querySelector('#homeJog .pad'));
+    await live.waitForFunction(()=>document.querySelector('#setupJog .pad').offsetParent!==null);
     // Reloaded mid-homing: the printer is busy and Z is not homed yet
     await live.evaluate(()=>{ S.idle_timeout={state:'Printing'}; S.toolhead={homed_axes:'xy',position:[10,20,0,0]}; render(); });
-    assert.match(await live.locator('#homeJog').textContent(),/Stand by, homing\./);
+    assert.match(await live.locator('#setupJog').textContent(),/Stand by, homing\./);
     await live.evaluate(()=>{ S.idle_timeout={state:'Ready'}; S.toolhead={homed_axes:'xyz',position:[10,20,0,0]}; render(); });
-    assert.equal(await live.locator('#homeJog .pad').count(),1);
+    assert.equal(await live.locator('#setupJog .pad').isVisible(),true);
+    // a typed coordinate survives status updates, and Move sends an absolute move
+    await live.locator('#setupJog input[name=x]').fill('176.5');
+    await live.evaluate(()=>{ S.toolhead={homed_axes:'xyz',position:[11,20,0,0]}; render(); });
+    assert.equal(await live.locator('#setupJog input[name=x]').inputValue(),'176.5');
+    await live.evaluate(()=>{ for (const l of ['action:prompt_begin Set Target Frequency','action:prompt_text Target Frequency: 111 Hz',
+      'action:prompt_button Save belt tensioning position|_CHORDATA_BELTS STEP=save|secondary','action:prompt_show']) handleLine('// '+l); });
+    assert.equal(await live.locator('#setupJog input[name=x]').inputValue(),'176.5');   // kept when the step is shown again
+    await live.locator('#setupJog input[name=y]').fill('112.5');
+    await live.locator('#setupJog .xy button').click();
+    await live.waitForFunction(()=>window.__calls.some(r=>r.method==='printer.gcode.script'&&/G90\nG1 X176.5 Y112.5/.test(r.params.script)));
+    // How it works is its own page, and Back returns
+    await live.evaluate(()=>{ handleLine('// action:prompt_end'); });
+    await live.waitForTimeout(500);
+    await live.locator('#howBtn').click();
+    await live.waitForFunction(()=>!document.getElementById('how').hidden);
+    assert.equal(await live.locator('#home').isVisible(),false);
+    await live.locator('#howBack').click();
+    await live.waitForFunction(()=>!document.getElementById('home').hidden);
     await live.locator('#authPanel summary').click();
     await live.locator('#moonrakerKey').fill('test-moonraker-placeholder');
     await live.locator('#authForm button').click();

@@ -40,9 +40,11 @@ class Chordata:
         self.belt_target = config.getfloat("belt_target", 110., minval=20., maxval=400.)
         self.state, self.message = "idle", ""
         self.belts = {}           # the belt tension session, for the prompts
+        self._quiet = None        # the background (fans, motors), recorded at the tap step
         self.belt_now = None      # the belt being listened to ("tap" while learning the toolhead)
         self.belt_plucks = 5
         self.belt_live = []       # plucks heard so far while listening
+        self.belt_hum = []        # a fan humming on the belt's note in the newest analysis (Hz)
         self.tap_live = []        # the setup taps so far, each good or not
         self.measurement = {"phase": "idle", "belt": None}
         self._tool_info = None
@@ -58,14 +60,14 @@ class Chordata:
                                     desc=self.cmd_CHORDATA_RECORD_help)
 
     def get_status(self, eventtime):
-        return {"state": self.state, "message": self.message, "tools": self._tools(),
+        return {"state": self.state, "message": self.message, "tools": self._tools(), "accel": self._accel(),
                 "belts": self.belts, "belt_target": self.belt_target, "belt_tol": self.belt_tol,
                 "belt_now": self.belt_now if self.belt_now in ("A", "B", "free") else None,
-                "belt_live": self.belt_live, "tap_live": getattr(self, "tap_live", []),
+                "belt_live": self.belt_live, "belt_hum": getattr(self, "belt_hum", []), "tap_live": getattr(self, "tap_live", []),
                 "belt_pos": self._belt_pos(),
                 "measurement": dict(self.measurement, elapsed=round(max(
                     0., eventtime - self.measurement["started_at"]), 1))
-                if self.measurement.get("phase") in ("background", "listening", "analysing", "recording")
+                if self.measurement.get("phase") in ("starting", "background", "listening", "analysing", "recording")
                 else self.measurement}
 
     def _require_idle(self, gcmd):
@@ -92,7 +94,7 @@ class Chordata:
 
     def _begin_measurement(self, belt, expected=None, phase="background"):
         self.state = "listening"
-        self.belt_live = []
+        self.belt_live, self.belt_hum = [], []
         self.belt_now = None
         self._accept = False
         self.measurement = {"phase": phase, "belt": belt, "expected": expected,
@@ -129,6 +131,59 @@ class Chordata:
                 "kinematics": kin}
         return self._tool_info
 
+    # What each accelerometer can hear as Klipper and Kalico set it up: the upper limit is the
+    # smaller of the datasheet's -3 dB bandwidth at the configured rate and 0.45 x that rate.
+    # The lower limit is 0 Hz for all of them (DC-coupled, no high-pass filter turned on).
+    #   adxl345: bandwidth rate/2 (default rate 3200): 0.45 x rate, 1440 Hz
+    #   lis2dw: 1600 Hz, high-performance, BW_FILT=00: 400 Hz anti-alias filter (ST AN5038 table 12)
+    #   lis3dh: 1344 Hz in high-resolution mode: ODR/9, 149 Hz (ST AN3308 table 3)
+    #   mpu9250 (MPU-9250/9255/6500/6515): 4 kHz, DLPF bypassed: 1130 Hz; an MPU-6050 on the same
+    #     driver runs at 1 kHz with a 184 Hz filter (told apart by its sample rate)
+    #   icm20948: 4.5 kHz, filter bypassed: 1209 Hz
+    #   bmi160: 1600 Hz, normal filter: 684 Hz in X and Y, 353 Hz in Z (the lower is used)
+    #   beacon: chip and filter not published: 0.45 x its measured sample rate
+    ACCELS = {"adxl345": "ADXL345", "lis2dw": "LIS2DW12", "lis3dh": "LIS3DH", "mpu9250": "MPU-9250",
+              "icm20948": "ICM-20948", "bmi160": "BMI160", "beacon": "Beacon"}
+    ACCEL_BW = {"lis2dw": 400., "lis3dh": 149., "mpu9250": 1130., "icm20948": 1209., "bmi160": 353.}
+
+    def _accel(self):
+        """The accelerometer [resonance_tester] measures with (the one Chordata records), and the
+        range of frequencies it hears reliably: name, lo, hi (None: not known until it has
+        recorded once)."""
+        if getattr(self, "_accel_cfg", None) is None:      # the config doesn't change while Kalico runs
+            section, rate = "", 3200.
+            try:
+                st = self.printer.lookup_object("configfile").get_status(self.reactor.monotonic())["settings"]
+                rt = st.get("resonance_tester") or {}
+                names = rt.get("accel_chips") or rt.get("accel_chip_x") or rt.get("accel_chip") or ""
+                section = str(names).split(",")[0].strip().lower()
+                rate = float((st.get(section) or {}).get("rate", 3200))
+            except Exception:
+                return None                          # not ready yet: asked again next time
+            self._accel_cfg = (section, rate)
+        section, rate = self._accel_cfg
+        if not section:
+            return None
+        kind = section.split()[0]
+        fs = getattr(self, "_accel_fs", None)
+        name, hi = self.ACCELS.get(kind, section.upper()), self.ACCEL_BW.get(kind)
+        if kind == "adxl345":
+            hi = 0.45 * rate
+        elif kind == "mpu9250" and fs and fs < 2000.:
+            name, hi = "MPU-6050", 184.             # the 1 kHz chip on the same driver
+        elif hi is None and fs:
+            hi = 0.45 * fs                          # not published: what its sample rate allows
+        return {"name": name, "lo": 0, "hi": None if hi is None else int(hi)}
+
+    def _check_target(self, gcmd, target):
+        """A target the accelerometer can't hear gives wrong or no readings: refuse it. Checked
+        at the start and again before each measure (an MPU-6050 or a Beacon is only known once
+        it has recorded)."""
+        acc = self._accel()
+        if acc and acc["hi"] is not None and target > acc["hi"]:
+            raise gcmd.error("Chordata: error frequency target out of range: the %s hears 0-%d Hz"
+                             % (acc["name"], acc["hi"]))
+
     # ---------------- belt tension from plucks ----------------
     cmd_CHORDATA_START_help = "Chordata: start belt tensioning (TARGET=Hz)"
 
@@ -141,6 +196,7 @@ class Chordata:
         target = gcmd.get_float("TARGET", self.belt_target, minval=20., maxval=400.)
         if not math.isfinite(target):
             raise gcmd.error("Chordata: TARGET must be finite")
+        self._check_target(gcmd, target)
         plucks = 5      # on target: the average of 5 good plucks
         self.belt_plucks = plucks
         self.belts = {"target": target, "plucks": plucks, "round": 0,
@@ -148,6 +204,7 @@ class Chordata:
                       "tol": self.belt_tol, "tap": [], "tap_ring": [], "tap_tau": None, "tap_done": False, "fails": {"A": 0, "B": 0}, "deaf": False,
                       "possible": False, "good": {}, "prev": {}}
         self.belt_live = []
+        self._quiet = None                   # the background, recorded once per session at the tap step
         self.measurement = {"phase": "idle", "belt": None}
         gcmd.respond_info("Chordata: belt tension, target %.0f Hz, %d plucks per belt" % (target, plucks))
 
@@ -175,6 +232,7 @@ class Chordata:
         if not self.belts.get("tap_done"):
             # without it a stiff toolhead's ringing can be taken for a belt
             raise gcmd.error("Chordata: tap the toolhead first (_CHORDATA_TAP)")
+        self._check_target(gcmd, self.belts["target"])
         rt = self.printer.lookup_object("resonance_tester")
         chips = getattr(rt, "accel_chips", None) or []
         if not chips:
@@ -185,13 +243,13 @@ class Chordata:
         if not math.isfinite(secs):
             raise gcmd.error("Chordata: SECONDS must be finite")
         toolhead = self.printer.lookup_object("toolhead")
-        self._begin_measurement(belt, n)
+        self._begin_measurement(belt, n, phase="starting" if getattr(self, "_quiet", None) else "background")
         # An attempt supersedes this belt's old reading even if capture fails.
         self.belts = dict(self.belts, **{belt: None, "done": False, "belt_good": {"A": False, "B": False},
                                        "heard": [b for b in self.belts.get("heard", []) if b != belt]})
         toolhead.wait_moves()
         try:
-            # a second of background first (fans, motors), so they aren't taken for the belt
+            # the session's background (fans, motors), so they aren't taken for the belt
             self.belt_live = []
             quiet = self._record_quiet(chip, toolhead)
             self.belt_now = belt
@@ -236,6 +294,7 @@ class Chordata:
         res["measured_at"] = time.time()
         res["round"] = self.belts["round"] + 1
         self.belt_live = res["plucks"]
+        self.belt_hum = res.get("hum") or []
         b = dict(self.belts)                 # a new object: status updates send what changed
         b[belt] = res
         if res["freq"] is not None:
@@ -246,8 +305,9 @@ class Chordata:
         # a sensor that can't hear the belts at all: say so instead of guessing
         fails = dict(b.get("fails") or {"A": 0, "B": 0})
         # a failed series: not one clear pluck in it (plucks that only disagree don't count)
-        clear = any(p["ok"] or p["why"] not in ("no belt tone", "too weak", "a knock, not a belt")
-                    for p in res["plucks"])
+        clear = bool(res.get("hum")) or any(
+            p["ok"] or p["why"] not in ("no belt tone", "too weak", "a knock, not a belt", "steady hum, not a pluck")
+            for p in res["plucks"])
         fails[belt] = 0 if clear else fails.get(belt, 0) + 1
         b["fails"] = fails
         ever = b.get("ever") or res["freq"] is not None
@@ -304,6 +364,7 @@ class Chordata:
             raise gcmd.error("Chordata: run _CHORDATA_START first")
         if not self.belts.get("tap_done"):
             raise gcmd.error("Chordata: tap the toolhead first (_CHORDATA_TAP)")
+        self._check_target(gcmd, self.belts["target"])
         rt = self.printer.lookup_object("resonance_tester")
         chips = getattr(rt, "accel_chips", None) or []
         if not chips:
@@ -315,7 +376,7 @@ class Chordata:
             raise gcmd.error("Chordata: SECONDS must be finite")
         ui = gcmd.get_int("UI", 0)
         toolhead = self.printer.lookup_object("toolhead")
-        self._begin_measurement("both", n)
+        self._begin_measurement("both", n, phase="starting" if getattr(self, "_quiet", None) else "background")
         good = dict(self.belts.get("good") or {})
         self.belts = dict(self.belts, A=None, B=None, done=False, heard=[],
                           belt_good={"A": False, "B": False})
@@ -366,6 +427,7 @@ class Chordata:
                     res = belts.analyse(*self._cols(samples), quiet=q, avoid=avoid, target=tgt,
                                         expect=n, prev=good.get("A"))
                     self.belt_live = res["plucks"]
+                    self.belt_hum = res.get("hum") or []
                     self.measurement = dict(self.measurement, accepted=res["used"], heard=res["heard"])
                     if self._enough(n, res["plucks"], end - t0):
                         ok = [p for p in res["plucks"] if p["ok"]]
@@ -394,6 +456,7 @@ class Chordata:
                     res = belts.analyse(*self._cols(seg), quiet=q, avoid=avoid, target=tgt,
                                         expect=n, prev=good.get("B"), other=st["a_freq"])
                     self.belt_live = res["plucks"]
+                    self.belt_hum = res.get("hum") or []
                     self.measurement = dict(self.measurement, accepted=res["used"], heard=res["heard"])
                     if self._enough(n, res["plucks"], end - seg[0][0]):
                         st["done"] = True
@@ -432,7 +495,7 @@ class Chordata:
             raise gcmd.error("Chordata: invalid accelerometer recording: %s" % error)
         if rb is None:
             rb = {"freq": None, "verdict": "none", "used": 0, "heard": 0, "plucks": [], "spread": None,
-                  "stddev": None, "metadata": {},
+                  "stddev": None, "metadata": {}, "hum": [],
                   "note": ("no tap heard, so belt B wasn't listened to" if st["a_end"] is not None
                            else "belt A wasn't counted, so belt B wasn't listened to")}
         self._apply_belt("A", ra)
@@ -441,7 +504,7 @@ class Chordata:
         self._report_belt(gcmd, "A", ra)
         self._report_belt(gcmd, "B", rb)
 
-    cmd_CHORDATA_FREE_help = ("Chordata: free tune: show every pluck's frequency, with no counting and no "
+    cmd_CHORDATA_FREE_help = ("Chordata: Tuner Mode: show every pluck's frequency, with no counting and no "
                               "belt A/B steps, until a minute after the last pluck, Done on the page, or SECONDS")
     FREE_MAX = 600.     # s: a free tune nobody ends from the page stops by itself after this
     FREE_PIECE = 8.     # s: recorded and analysed in pieces this long
@@ -466,6 +529,7 @@ class Chordata:
             raise gcmd.error("Chordata: run _CHORDATA_START first")
         if not self.belts.get("tap_done"):
             raise gcmd.error("Chordata: tap the toolhead first (_CHORDATA_TAP)")
+        self._check_target(gcmd, self.belts["target"])
         rt = self.printer.lookup_object("resonance_tester")
         chips = getattr(rt, "accel_chips", None) or []
         if not chips:
@@ -477,7 +541,7 @@ class Chordata:
             raise gcmd.error("Chordata: SECONDS must be finite")
         limit = secs or self.FREE_MAX
         toolhead = self.printer.lookup_object("toolhead")
-        self._begin_measurement("free", None)
+        self._begin_measurement("free", None, phase="starting" if getattr(self, "_quiet", None) else "background")
         toolhead.wait_moves()
         try:
             quiet = self._record_quiet(chip, toolhead)
@@ -492,7 +556,7 @@ class Chordata:
             kw = dict(quiet=q, avoid=avoid, target=self.belts["target"], free=True)
             # in short pieces: an open-ended listen would pile up samples (memory on a small Pi)
             # and the live analysis would slow down as the recording grows
-            plucks, t_off, samples = [], 0.0, None
+            plucks, t_off, samples, hum = [], 0.0, None, []
             rec_name = "free-%s" % time.strftime("%Y%m%d-%H%M%S")
             t_end = self.reactor.monotonic() + limit
             # it ends by itself a while after the last pluck (Done on the page ends it at once)
@@ -503,6 +567,7 @@ class Chordata:
                 def live(part, done=done, off=t_off):
                     r = belts.analyse(*self._cols(part), **kw)
                     self.belt_live = (done + [dict(p, t=round(p["t"] + off, 2)) for p in r["plucks"]])[-40:]
+                    self.belt_hum = r.get("hum") or []
 
                 samples = self._record(chip, toolhead, min(self.FREE_PIECE, limit - t_off), live=live,
                                        stop=lambda: self._accept)
@@ -514,6 +579,8 @@ class Chordata:
                 except ValueError as error:
                     raise gcmd.error("Chordata: invalid accelerometer recording: %s" % error)
                 plucks = (plucks + [dict(p, t=round(p["t"] + t_off, 2)) for p in r["plucks"]])[-200:]
+                if samples[-1][0] - samples[0][0] >= 4.0 or r.get("hum"):
+                    hum = r.get("hum") or []      # the newest full piece says whether a fan hums now
                 self.belt_live = plucks[-40:]
                 t_off += samples[-1][0] - samples[0][0]
         finally:
@@ -522,15 +589,16 @@ class Chordata:
         if samples is None:
             raise gcmd.error("Chordata: the accelerometer sent no data")
         ok = [p["freq"] for p in plucks if p["ok"] and p.get("freq") is not None]
-        res = {"freq": ok[-1] if ok else None, "plucks": plucks, "used": len(ok), "heard": len(plucks),
+        res = {"freq": ok[-1] if ok else None, "plucks": plucks, "used": len(ok), "heard": len(plucks), "hum": hum,
                "verdict": "free" if ok else "none", "note": "%d of %d plucks clear" % (len(ok), len(plucks))}
         self.belt_live = plucks[-40:]
-        self.belts = dict(self.belts, free={"plucks": plucks[-40:], "last": ok[-1] if ok else None})
+        self.belt_hum = hum
+        self.belts = dict(self.belts, free={"plucks": plucks[-40:], "last": ok[-1] if ok else None, "hum": hum})
         self._end_measurement(result=res)
         if ok:
-            gcmd.respond_info("Chordata: free tune: last pluck %.1f Hz (%s)" % (ok[-1], ", ".join("%.1f" % f for f in ok)))
+            gcmd.respond_info("Chordata: Tuner Mode: last pluck %.1f Hz (%s)" % (ok[-1], ", ".join("%.1f" % f for f in ok)))
         else:
-            gcmd.respond_info("Chordata: free tune: no clear pluck heard")
+            gcmd.respond_info("Chordata: Tuner Mode: no clear pluck heard")
 
     # ---------------- belt tensioning position (the user's own, saved from the jog pad) ----------------
     def _belt_pos_file(self):
@@ -619,7 +687,7 @@ class Chordata:
         self.tap_live = []
         toolhead.wait_moves()
         try:
-            quiet = self._record_quiet(chip, toolhead, save=False)
+            quiet = self._record_quiet(chip, toolhead, fresh=True)
             q = [[s[i] for s in quiet] for i in (1, 2, 3)]
             self.belt_now = "tap"
             self._measurement_phase("listening")
@@ -690,13 +758,19 @@ class Chordata:
         import chordata_belts as belts
         return r["good"] >= belts.TAP_NEED or r["bad"] >= belts.TAP_FAILS or self._taps_stiff(r)
 
-    # ---------------- the background (fans, motors): recorded before every listen ----------------
-    def _record_quiet(self, chip, toolhead, save=True):
+    # ---------------- the background (fans, motors): recorded once per session, at the tap step ----------------
+    def _record_quiet(self, chip, toolhead, fresh=False):
+        """The background is recorded once, when the toolhead is tapped, and used for every
+        measure after it: a fan that comes on later is told from the belt by the plucks
+        themselves (a pluck starts its tone, a fan hums the same before and after)."""
+        if not fresh and getattr(self, "_quiet", None):
+            return self._quiet
         self._measurement_phase("background")
         self.state, self.message = "listening", "Hands off the printer for a moment"
         quiet = self._record(chip, toolhead, 1.5)
-        if quiet and save:
-            self._save_recording("quiet-%s" % time.strftime("%Y%m%d-%H%M%S"), quiet)
+        self._quiet = quiet or None
+        if quiet and len(quiet) > 100 and quiet[-1][0] > quiet[0][0]:
+            self._accel_fs = (len(quiet) - 1) / (quiet[-1][0] - quiet[0][0])
         return quiet
 
     def _progress(self, n, plucks=None, dur=None):
@@ -745,6 +819,7 @@ class Chordata:
                                         [s[2] for s in samples], [s[3] for s in samples], **live)
                     if self.belt_now in ("A", "B", "free") and self._live_gen == gen_now:
                         self.belt_live = res["plucks"]
+                        self.belt_hum = res.get("hum") or []
                         self._live_dur = samples[-1][0] - client.request_start_time
                         self.measurement = dict(self.measurement, accepted=res["used"],
                                                 heard=res["heard"])

@@ -60,7 +60,9 @@ changing the analysis code.
 
 ## Plucks are weak, rejected or inconsistent
 
-- Wait through the initial background recording before plucking.
+- Wait for the green card (and the beep) before plucking. The background noise is recorded
+  once, at the toolhead taps: if a fan or motor has changed since, use **Measure Toolhead Frequency**
+  to record it again.
 - Use the documented belt span and toolhead position; keep both consistent.
 - Pluck evenly and avoid contacting the toolhead or frame.
 - Reduce avoidable background vibration and check the sensor mount.
@@ -113,7 +115,8 @@ Include:
 - Printer kinematics, accelerometer model and its mount location.
 - The command or UI step, expected result and exact error.
 - Relevant redacted `klippy.log` / `moonraker.log` excerpts.
-- If measurement is the issue, the raw belt/background CSV pair and target/span
+- If measurement is the issue, the raw belt CSV, the `tap-*-quiet.csv` background
+  of the same session and target/span
   details you are comfortable sharing.
 
 Review files before attaching them. Do not share the Moonraker API key.

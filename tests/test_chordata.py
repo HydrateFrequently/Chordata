@@ -263,6 +263,55 @@ class SafetyTests(unittest.TestCase):
         self.assertEqual(obj.measurement["phase"], "complete")
         self.assertGreater(obj.belts["B"]["measured_at"], 0.)
 
+    def test_background_is_recorded_once_per_session(self):
+        obj = plugin({"resonance_tester": SimpleNamespace(accel_chips=[("xy", object())]),
+                      "toolhead": SimpleNamespace(wait_moves=lambda: None)})
+        obj.belts["heard"] = []
+        obj._quiet = None
+        lengths, quiets = [], []
+        def record(chip, toolhead, secs, **kw):
+            lengths.append(secs)
+            return [(i / 3200., float(len(lengths)), 0., 0.) for i in range(100)]
+        obj._record = record
+        obj._save_recording = lambda *args: None
+        def analysis(*args, **kwargs):
+            quiets.append(kwargs["quiet"])
+            return {"freq": 110., "used": 5, "heard": 5, "note": "", "hum": [],
+                    "plucks": [{"t": i, "ok": True, "why": "", "freq": 110.} for i in range(5)]}
+        with patch("chordata_belts.analyse", side_effect=analysis):
+            obj.cmd_CHORDATA_LISTEN(Command(BELT="A"))
+            obj.cmd_CHORDATA_LISTEN(Command(BELT="B"))
+        self.assertEqual(lengths.count(1.5), 1)          # one background, then only the plucks
+        self.assertEqual(quiets[0], quiets[1])
+
+    def _accel_plugin(self, settings):
+        cf = SimpleNamespace(get_status=lambda now: {"settings": settings})
+        obj = plugin({"configfile": cf, "resonance_tester": object()})
+        obj._accel_cfg = None
+        return obj
+
+    def test_accelerometer_from_the_config(self):
+        cases = [({"resonance_tester": {"accel_chip": "adxl345"}, "adxl345": {}}, None, ("ADXL345", 1440)),
+                 ({"resonance_tester": {"accel_chip": "adxl345 tool"}, "adxl345 tool": {"rate": 1600}}, None, ("ADXL345", 720)),
+                 ({"resonance_tester": {"accel_chip_x": "lis3dh", "accel_chip_y": "adxl345"}}, None, ("LIS3DH", 149)),
+                 ({"resonance_tester": {"accel_chip": "mpu9250"}}, 4000., ("MPU-9250", 1130)),
+                 ({"resonance_tester": {"accel_chip": "mpu9250"}}, 1000., ("MPU-6050", 184)),
+                 ({"resonance_tester": {"accel_chip": "beacon"}}, None, ("Beacon", None)),
+                 ({"resonance_tester": {"accel_chip": "beacon"}}, 3083.4, ("Beacon", 1387))]
+        for settings, fs, want in cases:
+            obj = self._accel_plugin(settings)
+            obj._accel_fs = fs
+            a = obj._accel()
+            self.assertEqual((a["name"], a["hi"]), want, settings)
+            self.assertEqual(a["lo"], 0)
+        self.assertIsNone(self._accel_plugin({})._accel())
+
+    def test_target_out_of_the_accelerometers_range_is_refused(self):
+        obj = self._accel_plugin({"resonance_tester": {"accel_chip": "lis3dh"}, "printer": {"kinematics": "corexy"}})
+        obj._tool_info = None
+        with self.assertRaisesRegex(ValueError, "out of range"):
+            obj.cmd_CHORDATA_START(Command(TARGET=160.))
+
     def test_position_file_rejects_nonfinite_coordinates(self):
         with tempfile.TemporaryDirectory() as directory:
             obj = plugin()

@@ -143,7 +143,13 @@ input[type=text], input[type=number], input[type=password] {
 .check { display: flex; gap: 12px; align-items: flex-start; padding: 12px; border: 2px solid var(--warn);
   border-radius: 10px; cursor: pointer; font-size: 16px; font-weight: 400 !important; }
 .check input { flex: none; width: 26px; height: 26px; margin: 2px 0 0; accent-color: var(--primary); }
-.how { margin: 8px 0; padding: 0 0 0 4px; }
+.how { margin: 8px 0; padding: 0 0 0 20px; }
+#howBtn { background: var(--card); color: var(--primary); border: 2px solid var(--primary); }
+#prompt .perr { color: var(--err); font-weight: 700; font-size: 18px; }
+#prompt h2.ptarget { font-size: 22px; margin: 4px 0 8px; }
+.jog .xy { display: grid; grid-template-columns: 1fr 1fr auto; gap: 6px; margin-top: 8px; align-items: end; }
+.jog .xy label { font-size: 14px; color: var(--muted); display: grid; gap: 2px; }
+.jog .xy input { min-height: 44px; font-size: 18px; width: 100%; box-sizing: border-box; }
 .how li { margin: 6px 0; }
 details.sub > summary { cursor: pointer; color: var(--primary); font-weight: 600; min-height: 44px; display: flex; align-items: center; }
 /* Prompt card */
@@ -165,7 +171,7 @@ details.sub > summary { cursor: pointer; color: var(--primary); font-weight: 600
 .jog .pad button, .jog .row button, .jog .steps button { min-height: 44px; padding: 4px 8px; font-size: 16px; }
 .jog .row { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 6px; margin-top: 8px; }
 .jog .saved { text-align: center; color: var(--muted); font-size: 14px; margin-top: 6px; font-variant-numeric: tabular-nums; }
-.jog .row button.sel { background: var(--primary); color: var(--primary-text); font-weight: 700; }  /* inverse video, like a selected MFD option */
+.jog .steps button.sel, .jog .row button.sel { background: var(--primary); color: var(--primary-text); font-weight: 700; }  /* inverse video, like a selected MFD option */
 #beltView .live { text-align: center; padding: 10px 0 4px; }
 #beltView .live .hz { font-size: 64px; font-weight: 700; line-height: 1.05; font-variant-numeric: tabular-nums; }
 #beltView .live .hz.out { color: var(--muted); text-decoration: line-through; }
@@ -295,8 +301,7 @@ summary:focus-visible { outline:3px solid var(--primary); outline-offset:2px; }
       <h2>The printer is busy</h2>
       <p>It is printing. Belt tension can be measured when the print is done.</p>
     </div>
-    <button type="button" class="big" id="startBtn">Belt tension
-      <small>Pluck each belt; the accelerometer on the toolhead hears it and tells you which belt to tighten or loosen</small></button>
+    <button type="button" class="big" id="startBtn">Measure Belts</button>
     <div class="card lock-note" id="noAccel" hidden>
       <h2>No accelerometer set up</h2>
       <p>Chordata listens to the belts with an accelerometer on the toolhead (an ADXL345 or LIS2DW board,
@@ -308,20 +313,70 @@ summary:focus-visible { outline:3px solid var(--primary); outline-offset:2px; }
       <p>On a CoreXY printer both belts pull the toolhead, so they must match. This printer's kinematics:
         <span id="kinName"></span>.</p>
     </div>
-    <div id="homeJog"></div>
-    <details class="card">
-      <summary>How it works</summary>
-      <ol class="how">
-        <li>Set the target frequency your printer's guide gives.</li>
-        <li>Move the toolhead where the guide says (the pad above), and save that spot for next time.</li>
-        <li>Tap one solid spot on the toolhead lightly until 3 taps count: Chordata learns how it rings by itself, so a knock is never taken for a belt.</li>
-        <li>Pluck belt A until 5 good plucks are counted, then belt B.</li>
-        <li>Turn one tensioner a little as advised and measure both again, until both are on target.</li>
-      </ol>
-      <p class="small muted">Which belt you call A doesn't matter: the goal is equal tension. Chordata only
-        moves the toolhead when you press a button.</p>
-    </details>
+    <button type="button" class="big" id="howBtn">How it works</button>
   </section>
+<!-- HOW IT WORKS: every instruction and spec, so the steps themselves only show their controls -->
+<section id="how" hidden>
+  <button type="button" id="howBack">Back</button>
+  <div class="card">
+    <h2>How it works</h2>
+    <p>A plucked belt rings like a guitar string. The accelerometer on the toolhead hears it, and Chordata
+      shows its frequency. Tension goes with the frequency squared, so 1% in Hz is 2% in tension.</p>
+    <p>On CoreXY printers both belts pull the toolhead and pull on each other, so they must match:
+      both are measured after every turn of a tensioner. Which belt you call A doesn't matter.</p>
+  </div>
+  <div class="card">
+    <h2>Set Target Frequency</h2>
+    <ol class="how">
+      <li>Set the target your printer's guide gives for the stretch of belt it says to pluck.</li>
+      <li>Move the toolhead where the guide says, with the arrows or by typing X and Y, and save it as the
+        belt tensioning position. Next time, Go to belt tensioning position takes it there.</li>
+      <li>Turn off loud fans if you can.</li>
+      <li>The screen shows the accelerometer your printer measures with and the frequencies it hears
+        reliably (from its datasheet and the rate Klipper sets). A target outside that range flashes
+        red: that sensor can't measure it.</li>
+    </ol>
+    <p class="small muted">Chordata only moves the toolhead when you press a button.</p>
+  </div>
+  <div class="card">
+    <h2>Measure Toolhead Frequency</h2>
+    <p>First, Chordata learns how your toolhead rings by itself, so a knock is never taken for a belt.
+      This happens at every start: work on the toolhead changes it.</p>
+    <ol class="how">
+      <li>Pick one solid spot on the toolhead, like the extruder. Always tap that same spot, now and later
+        when you switch from belt A to belt B: another spot rings differently.</li>
+      <li>Hands off while the screen is red: it records the background noise (fans, motors) once.</li>
+      <li>When it turns yellow, tap that spot lightly with a finger, one tap at a time. Each tap shows a
+        check mark or an X. An X doesn't count: keep tapping until 3 check marks. It stops by itself.</li>
+    </ol>
+    <p>A toolhead that rings long: pluck firmly, and keep your hands off the toolhead while plucking.
+      A stiff toolhead that rings nothing near the belts has nothing to learn; Pluck - Tap - Pluck Mode
+      then can't tell a tap from a pluck, so use Guided Mode.</p>
+  </div>
+  <div class="card">
+    <h2>The modes</h2>
+    <ul class="how">
+      <li><b>Guided Mode:</b> pluck belt A until 5 are counted, press Measure belt B, pluck belt B.</li>
+      <li><b>Pluck - Tap - Pluck Mode:</b> the same, but a tap on your toolhead spot switches to belt B,
+        so you never press the phone.</li>
+      <li><b>Tuner Mode:</b> pluck either belt and turn a tensioner between plucks; every clear pluck
+        shows up. It stops 60 seconds after your last pluck, or press Done.</li>
+    </ul>
+    <p>Pluck evenly, the same way each time, not too hard. Red means hands off, yellow means tap your
+      toolhead spot, green means pluck. The phone beeps when it is ready for plucks.</p>
+  </div>
+  <div class="card">
+    <h2>The rules</h2>
+    <ul class="how">
+      <li>A belt is on target when the average of 5 good plucks is within <span id="howTol">0.25</span> Hz of the target.</li>
+      <li>Only clear plucks count: 12 dB over the background noise, not a knock on the toolhead, not the
+        other belt ringing along, and within 1 Hz of the others.</li>
+      <li>A fan hums at one steady level; a pluck starts loud and dies away. A hum that starts after the
+        background was recorded is left out, and if it sits on the belt's note Chordata says so.</li>
+      <li>Chordata says which belt to tighten or loosen, one belt per round, taking turns, then measure both again.</li>
+    </ul>
+  </div>
+</section>
 <section class="card" id="measurePanel" hidden><h2>Pluck measurements</h2>
 <p class="help">Frequency is measured in Hz. Force requires belt mass and span length. Use your printer manufacturer's target and measurement position.</p>
 <div id="trend"></div><p class="small muted">Circles: counted · Crosses: rejected · Dashed line: target. Updates after each detected pluck; not a raw accelerometer waveform.</p>
@@ -697,73 +752,108 @@ function promptButton(b) {
 // Belt tension: big numbers on top of the belt prompts, for a phone held at the printer
 let beltBuzz = "";
 function fmtHz(v) { return v == null ? "--" : Number(v).toFixed(1); }
-// Jog pad: the user moves the toolhead to where their printer's guide says to pluck.
-// Chordata itself never moves it; every move here is a button press.
+// Jog pad on Set Target Frequency: the user moves the toolhead to where their printer's guide says to pluck,
+// with the arrows or by typing X and Y. Chordata itself never moves it; every move here is a button press.
+// Built once per prompt and updated in place, so a coordinate being typed is never wiped by a status update.
 let jogStep = 10;
 let homing = false;   // homed_axes shows X and Y before Z is done, so track our own G28 until it returns
-function jogPad(open, landing) {
+const JOG_STEPS = [0.5, 1, 10, 50];
+// Absolute moves from the shown position: if a move is refused (outside the limits), the printer is
+// left in G90, its normal mode, never in relative mode
+// Quick presses add up: each move goes on from the last one sent, until the status has had time to catch up.
+const jogAim = { X: null, Y: null, Z: null, at: 0 };
+function jogMove(axis, dist) {
+  const pos = obj("gcode_move").gcode_position || obj("toolhead").position || [];
+  const i = { X: 0, Y: 1, Z: 2 }[axis];
+  if (Date.now() - jogAim.at > 1500) jogAim.X = jogAim.Y = jogAim.Z = null;
+  const now = jogAim[axis] != null ? jogAim[axis] : Number(pos[i]);
+  if (!Number.isFinite(now)) return;
+  jogAim[axis] = Math.round((now + dist) * 1000) / 1000;
+  jogAim.at = Date.now();
+  runGcode("SAVE_GCODE_STATE NAME=_chordata_jog\nG90\nG1 " + axis + jogAim[axis] +
+    " F" + (axis === "Z" ? 600 : 6000) + "\nRESTORE_GCODE_STATE NAME=_chordata_jog").catch(() => {});
+}
+const jogTyped = { x: "", y: "" };     // what was typed: kept when the step is shown again (+1 Hz, Go, Save)
+function jogPad() {
+  const d = el("div", { class: "jog", id: "setupJog" });
+  d.appendChild(el("div", { class: "pos" }));
+  const r = el("div", { class: "row home" });
+  const h = el("button", { type: "button", class: "primary" }, "Home");
+  h.onclick = () => { homing = true; render(); runGcode("G28").catch(() => {}).finally(() => { homing = false; render(); }); };
+  r.appendChild(h);
+  d.appendChild(r);
+  const body = el("div", { class: "jogbody" });
+  const pad = el("div", { class: "pad" });
+  for (const [label, axis, sign] of [["", 0, 0], ["Y+", "Y", 1], ["", 0, 0], ["X-", "X", -1], ["", 0, 0], ["X+", "X", 1], ["", 0, 0], ["Y-", "Y", -1], ["", 0, 0]]) {
+    if (!label) { pad.appendChild(el("span")); continue; }
+    const bt = el("button", { type: "button" }, label);
+    bt.onclick = () => jogMove(axis, sign * jogStep);
+    pad.appendChild(bt);
+  }
+  body.appendChild(pad);
+  const steps = el("div", { class: "steps" });
+  for (const st of JOG_STEPS) {
+    const bt = el("button", { type: "button", "data-step": String(st) }, st + " mm");
+    bt.onclick = () => { jogStep = st; jogUpdate(); };
+    steps.appendChild(bt);
+  }
+  const z = el("button", { type: "button", class: "zup" }, "Z +10");
+  z.onclick = () => jogMove("Z", 10);
+  steps.appendChild(z);
+  body.appendChild(steps);
+  d.appendChild(body);
+  // a coordinate typed directly: absolute X and Y
+  const xy = el("form", { class: "xy" });
+  for (const a of ["X", "Y"]) {
+    const lb = el("label", {}, a);
+    const inp = el("input", { type: "number", inputmode: "decimal", step: "0.5", name: a.toLowerCase(), "aria-label": a + " (mm)" });
+    inp.value = jogTyped[a.toLowerCase()];
+    inp.oninput = () => { jogTyped[a.toLowerCase()] = inp.value; };
+    lb.appendChild(inp);
+    xy.appendChild(lb);
+  }
+  xy.appendChild(el("button", { type: "submit" }, "Move"));
+  xy.onsubmit = (e) => {
+    e.preventDefault();
+    const x = Number(xy.elements.x.value), y = Number(xy.elements.y.value);
+    if (xy.elements.x.value === "" || xy.elements.y.value === "" || !Number.isFinite(x) || !Number.isFinite(y)) {
+      toast("Type both X and Y"); return;
+    }
+    jogAim.X = x; jogAim.Y = y; jogAim.at = Date.now();
+    runGcode("SAVE_GCODE_STATE NAME=_chordata_jog\nG90\nG1 X" + x + " Y" + y +
+      " F6000\nRESTORE_GCODE_STATE NAME=_chordata_jog").catch(() => {});
+  };
+  d.appendChild(xy);
+  return d;
+}
+function jogUpdate() {
+  const d = $("setupJog");
+  if (!d) return;
   const th = obj("toolhead"), homed = String(th.homed_axes || "");
   // After a page reload (phone screen lock) our own flag is gone: a busy printer without Z homed is still homing
   const homingNow = homing || (obj("idle_timeout").state === "Printing" && !isPrinting() && !homed.includes("z"));
-  const d = el("details", { class: "jog" });
-  if (open || (!landing && !pt().belt_pos)) d.open = true;      // in the prompt with nothing saved yet: open, so the move isn't forgotten
-  d.appendChild(el("summary", {}, "Move the toolhead"));
+  const xyHomed = homed.includes("x") && homed.includes("y");
   const pos = obj("gcode_move").gcode_position || th.position || [];
-  d.appendChild(el("div", { class: "pos" }, homingNow ? "Stand by, homing."
-    : homed.includes("x") && homed.includes("y") && pos.length
+  d.querySelector(".pos").textContent = homingNow ? "Stand by, homing."
+    : xyHomed && pos.length
     ? "X " + Number(pos[0]).toFixed(1) + "   Y " + Number(pos[1]).toFixed(1) + (homed.includes("z") ? "   Z " + Number(pos[2]).toFixed(1) : "")
-    : "Not homed: home first"));
-  const move = (axis, dist) => () => runGcode("SAVE_GCODE_STATE NAME=_chordata_jog\nG91\nG1 " + axis + dist +
-    " F" + (axis === "Z" ? 600 : 6000) + "\nRESTORE_GCODE_STATE NAME=_chordata_jog");
-  if (homingNow) return d;
-  if (!(homed.includes("x") && homed.includes("y"))) {
-    const r = el("div", { class: "row" });
-    const h = el("button", { type: "button", class: "primary" }, "Home");
-    h.onclick = () => { homing = true; render(); runGcode("G28").catch(() => {}).finally(() => { homing = false; render(); }); };
-    r.appendChild(h);
-    d.appendChild(r);
-    return d;
+    : "Not homed: home first";
+  d.querySelector(".home").hidden = homingNow || xyHomed;
+  d.querySelector(".jogbody").hidden = d.querySelector(".xy").hidden = homingNow || !xyHomed;
+  d.querySelector(".zup").hidden = !homed.includes("z");
+  for (const bt of d.querySelectorAll("[data-step]")) {
+    const sel = Number(bt.dataset.step) === jogStep;
+    bt.className = sel ? "sel" : "";
+    bt.setAttribute("aria-pressed", String(sel));
   }
-  const pad = el("div", { class: "pad" });
-  const cell = (label, axis, sign) => {
-    if (!label) return el("span");
-    const bt = el("button", { type: "button" }, label);
-    bt.onclick = () => move(axis, sign * jogStep)();
-    return bt;
-  };
-  for (const c of [["", 0, 0], ["Y+", "Y", 1], ["", 0, 0], ["X-", "X", -1], ["", 0, 0], ["X+", "X", 1], ["", 0, 0], ["Y-", "Y", -1], ["", 0, 0]])
-    pad.appendChild(cell(...c));
-  const body = el("div", { class: "jogbody" });
-  body.appendChild(pad);
-  const r = el("div", { class: "steps" });
-  for (const st of [1, 10, 50]) {
-    const bt = el("button", { type: "button", class: st === jogStep ? "sel" : "", "aria-pressed": String(st === jogStep) }, st + " mm");
-    bt.onclick = () => { jogStep = st; render(); };
-    r.appendChild(bt);
-  }
-  if (homed.includes("z")) {
-    const z = el("button", { type: "button" }, "Z +10");
-    z.onclick = move("Z", 10);
-    r.appendChild(z);
-  }
-  body.appendChild(r);
-  d.appendChild(body);
-  const bp = pt().belt_pos;
-  const r2 = el("div", { class: "row" });
-  if (bp) {
-    const go = el("button", { type: "button", class: "primary" }, "Go to saved position");
-    go.onclick = () => runGcode("_CHORDATA_POS GO=1");
-    r2.appendChild(go);
-  }
-  const sv = el("button", { type: "button" }, "Save this position");
-  sv.onclick = () => runGcode("_CHORDATA_POS SAVE=1");
-  r2.appendChild(sv);
-  d.appendChild(r2);
-  if (bp) d.appendChild(el("div", { class: "saved" }, "Belt tensioning position: X " + Number(bp.x).toFixed(1) + "  Y " + Number(bp.y).toFixed(1)));
-  return d;
 }
 
-// Free tune: one big number, the newest clear pluck, and how far it is from the target
+// A fan humming on the belt's note: the plucks can't be read there
+function humText(st) {
+  const h = (st || pt()).belt_hum || [];
+  return h.length ? "Steady hum at " + h.map((x) => Math.round(x)).join(" and ") + " Hz on the belt's note (a fan?): turn fans off" : "";
+}
+// Tuner Mode: one big number, the newest clear pluck, and how far it is from the target
 function renderFree(box, b) {
   const listening = pt().state === "listening" && pt().belt_now === "free";
   const plucks = (listening ? pt().belt_live : (b.free || {}).plucks) || [];
@@ -779,6 +869,7 @@ function renderFree(box, b) {
   }
   live.appendChild(el("div", { class: "sub" }, "Target " + Number(b.target).toFixed(0) + " Hz" +
     (listening ? "  ·  " + (pt().message || "Listening") : "")));
+  if (humText()) live.appendChild(el("div", { class: "d far" }, humText()));
   box.appendChild(live);
   if (plucks.length) {
     const chips = el("div", { class: "chips" });
@@ -804,14 +895,12 @@ function countText(r, need) {
 }
 function renderBelts() {
   const b = pt().belts || {};
-  const free = !!prompt && /^Chordata - free/i.test(prompt.title || "");
-  const on = !!prompt && /^Chordata - (belt|pluck|tap|free)/i.test(prompt.title || "") && !!b.target;
+  const free = !!prompt && /^Chordata - (free|tuner)/i.test(prompt.title || "");
+  const on = !!prompt && /^Chordata - (belt|pluck|tap|free|tuner)/i.test(prompt.title || "") && !!b.target;
   show("beltView", on);
   if (!on) return;
   const box = $("beltView");
-  const jogOpen = !!(box.querySelector(".jog") || {}).open;
   box.textContent = "";
-  if (!demo && pt().state !== "listening") box.appendChild(jogPad(jogOpen));
   if (free) { renderFree(box, b); return; }
   const now = pt().belt_now || (/belt (A|B)/i.exec(prompt.title || "") || [])[1] || "";
   const cur = (now === "A" || now === "B") ? b[now] : null;
@@ -831,6 +920,7 @@ function renderBelts() {
     live.appendChild(el("div", { class: "hz out" }, last && last.freq != null ? fmtHz(last.freq) : "--"));
     live.appendChild(el("div", { class: "sub" }, "Pluck again"));
   }
+  if (humText()) live.appendChild(el("div", { class: "d far" }, humText()));
   if (live.childNodes.length) box.appendChild(live);
   if (plucks.length && pt().state === "listening") {   // once done, the belt cards say it (the table below keeps every pluck)
     const chips = el("div", { class: "chips" });
@@ -878,10 +968,10 @@ const S = {};             // merged printer status
 let klippyState = "";     // "ready", "startup", "shutdown", "error", "disconnected"
 let connected = false;
 function obj(name) { return S[name] || {}; }
-// ---------- cue cards: red = hands off (recording the quiet), yellow = tap the toolhead, green = pluck ----------
+// ---------- cue cards: red = hands off (recording the background noise), yellow = tap the toolhead, green = pluck ----------
 let cueKey = "", cueTimer = null, cueLast = "";
 const CUES = {     // the big text only: the card says one thing
-  silence: ["red", "Stand by: recording silence"],
+  background: ["red", "Stand by: recording background noise"],
   tap: ["yellow", "Tap your spot on the toolhead, lightly"],
   "pluck:A": ["green", "Pluck belt A"],
   "pluck:B": ["green", "Pluck belt B"],
@@ -909,10 +999,51 @@ function cueSet(key) {
   if (!key) { clearInterval(cueTimer); box.hidden = true; $("cueLive").textContent = ""; return; }
   const [colour, big] = CUES[key];
   const paint = () => { box.className = colour; $("cueBig").textContent = big; };
-  if (key === "silence") { paint(); box.hidden = false; cueFlash(3, 110); }
+  if (key === "background") { paint(); box.hidden = false; cueFlash(3, 110); }
   else if (key === "tap" || key === "switch") { box.hidden = false; cueFlash(2, 55, () => { paint(); }); }
   else { box.hidden = false; cueFlash(1, 110, () => { paint(); }); }
-  if (!was && key !== "silence") paint();
+  if (!was && key !== "background") paint();
+  if (key.startsWith("pluck:")) beep();       // ready to measure (after the switch tap: the tap was heard)
+}
+// How it works: its own page (#how). Back returns to where it was opened, or home if opened by a link
+let howFromPage = false;
+function howButton(body) {
+  const how = el("button", { type: "button", class: "howlink" }, "How it works");
+  how.onclick = openHow;
+  body.appendChild(el("div", { class: "pbuttons" })).appendChild(how);
+}
+function openHow() { howFromPage = true; location.hash = "how"; }
+// An error on a step (a target the accelerometer can't hear): the screen flashes red with it, then the step stays
+function errorFlash(text) {
+  if (cueKey || location.hash === "#how") return;    // a measuring card is up, or the user is reading
+  const box = $("cue");
+  box.className = "";
+  $("cueBig").textContent = text;
+  $("cueLive").textContent = "";
+  box.hidden = false;
+  cueFlash(3, 150, () => setTimeout(() => { if (!cueKey) box.hidden = true; }, 600));
+}
+// A short 1000 Hz beep, 200 ms: heard when the phone is out of sight
+let audio = null;
+function beepUnlock() {
+  try {
+    if (!audio) audio = new (window.AudioContext || window.webkitAudioContext)();
+    if (audio.state === "suspended") audio.resume();
+  } catch (e) { audio = null; }
+}
+function beep() {
+  if (!audio || audio.state !== "running") return;
+  try {
+    const o = audio.createOscillator(), g = audio.createGain(), t = audio.currentTime;
+    o.frequency.value = 1000;
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.3, t + 0.01);      // short ramps: no click
+    g.gain.setValueAtTime(0.3, t + 0.19);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.2);
+    o.connect(g).connect(audio.destination);
+    o.start(t);
+    o.stop(t + 0.21);
+  } catch (e) { /* no sound: the card still shows */ }
 }
 // the plucks so far, on the green card: the newest one big, and the count (or, in a free tune, the target)
 let cueLiveSig = "";
@@ -944,13 +1075,15 @@ function cueLive(key, st) {
       : "Listening";
   }
   const a = key === "pluck:B" && b.A && b.A.freq != null ? "Belt A: " + fmtHz(b.A.freq) + " Hz" : "";
-  const sig = [key, last && last.freq, last && last.ok, sub, a, accepting].join("|");
+  const hum = humText(st);
+  const sig = [key, last && last.freq, last && last.ok, sub, a, hum, accepting].join("|");
   if (sig === cueLiveSig) return;
   cueLiveSig = sig;
   box.textContent = "";
   box.appendChild(el("div", { class: "lhz" }, last && last.freq != null ? fmtHz(last.freq) + " Hz" : "..."));
   box.appendChild(el("div", { class: "lsub" }, sub));
   if (a) box.appendChild(el("div", { class: "lsub" }, a));
+  if (hum) box.appendChild(el("div", { class: "lsub" }, hum));
   if (free) {
     const done = el("button", { type: "button" }, accepting ? "Stopping..." : "Done");
     done.disabled = accepting;
@@ -963,7 +1096,7 @@ function cueUpdate() {
   if (st.state !== "listening") accepting = false;
   const kind = m.belt, phase = m.phase;
   let key = "";
-  if (st.state === "listening" && phase === "background") key = "silence";
+  if (st.state === "listening" && phase === "background") key = "background";
   else if (kind === "tap" && (phase === "listening" || phase === "analysing")) key = "tap";
   else if (st.state === "listening" && phase === "listening" && kind === "both")
     key = m.step === "tap" ? "switch" : "pluck:" + (m.step === "B" ? "B" : "A");
@@ -1002,7 +1135,10 @@ function renderPrompt() {
   if (!prompt) return;
   if (promptRendered !== promptSeq) {
     promptRendered = promptSeq;
-    $("pTitle").textContent = prompt.title || "Chordata";
+    // "Chordata - ..." titles are for Mainsail's pop-up; on this page the cards and numbers say it
+    const title = prompt.title || "";
+    $("pTitle").textContent = title;
+    $("pTitle").hidden = !title || /^Chordata\b/i.test(title);
     const body = $("pBody");
     body.textContent = "";
     let solo = null;
@@ -1011,24 +1147,36 @@ function renderPrompt() {
       ? prompt.items.filter((it) => it.type !== "text").concat(prompt.items.filter((it) => it.type === "text"))
       : prompt.items;
     for (const it of items) {
+      if (it.type === "button" && /STEP=start\b/.test(it.btn.gcode)) { howButton(body); solo = null; }
+      if (it.type === "button" && /STEP=save\b/.test(it.btn.gcode) && !demo) {
+        body.appendChild(jogPad());            // Set Target Frequency: the pad sits between Go and Save
+        solo = null;
+      }
       if (it.type === "button") {
         if (!solo) { solo = el("div", { class: "pbuttons" }); body.appendChild(solo); }
         solo.appendChild(promptButton(it.btn));
         continue;
       }
       solo = null;
-      if (it.type === "text") body.appendChild(el("p", { class: "ptext" }, it.text));
+      if (it.type === "text" && /^Target Frequency:/.test(it.text)) body.appendChild(el("h2", { class: "ptarget" }, it.text));
+      else if (it.type === "text" && /^Error:/.test(it.text)) {
+        body.appendChild(el("p", { class: "ptext perr" }, it.text));
+        errorFlash(it.text.replace(/^Error:\s*/, "Error: "));
+      }
+      else if (it.type === "text") body.appendChild(el("p", { class: "ptext" }, it.text));
       else if (it.type === "group") {
         const g = el("div", { class: "pgroup" });
         for (const b of it.list) g.appendChild(promptButton(b));
         body.appendChild(g);
       }
     }
+    if (prompt.title === "Set Target Frequency" && !body.querySelector(".howlink")) howButton(body);
     const foot = $("pFooter");
     foot.textContent = "";
     for (const b of prompt.footer) foot.appendChild(promptButton(b));
     foot.hidden = !prompt.footer.length;
   }
+  jogUpdate();
   renderBelts();
 }
 
@@ -1040,14 +1188,6 @@ function renderHome() {
   show("notXY", known && tools.accel && !tools.corexy);
   $("kinName").textContent = tools.kinematics || "unknown";
   $("startBtn").disabled = demo || !connected || klippyState !== "ready" || isPrinting() || (known && !(tools.accel && tools.corexy));
-  const box = $("homeJog");
-  const open = !!(box.querySelector(".jog") || {}).open;
-  box.textContent = "";
-  box.id = "homeJog";
-  const wrap = el("div", { id: "beltViewHome" });
-  wrap.appendChild(jogPad(open, true));
-  box.appendChild(wrap);
-  show("homeJog", !isPrinting() && known && tools.accel && tools.corexy);
 }
 
 function render() {
@@ -1060,9 +1200,14 @@ function render() {
   $("dot").className = "dot " + (connected && klippyState === "ready" ? "ok" : "bad");
   const missing = connected && klippyState === "ready" && !S.chordata;
   $("hdrState").textContent = missing ? "Chordata plugin not loaded" : (pt().state === "listening" ? "Listening" : "");
-  show("home", !prompt);
-  if (!prompt) renderHome();
+  // How it works is its own page (#how), so the phone's back button returns
+  const how = location.hash === "#how";
+  show("how", how);
+  if (how && pt().belt_tol) $("howTol").textContent = String(pt().belt_tol);
+  show("home", !prompt && !how);
+  if (!prompt && !how) renderHome();
   renderPrompt();
+  if (how) $("prompt").hidden = true;
   renderMeasurements();
   cueUpdate();
 }
@@ -1105,6 +1250,15 @@ function initPage() {
 function init() {
   initPage();
   $("startBtn").onclick = () => runGcode("CHORDATA").catch(() => {});
+  $("howBtn").onclick = openHow;
+  $("howBack").onclick = () => { if (howFromPage) history.back(); else location.hash = ""; };
+  window.addEventListener("hashchange", () => {
+    if (location.hash !== "#how") howFromPage = false;
+    render(); window.scrollTo(0, 0);
+  });
+  // the beep needs a sound context started by a press on the page (browsers block sound until then)
+  for (const ev of ["pointerdown", "pointerup", "touchend", "click", "keydown"])
+    document.addEventListener(ev, beepUnlock, { capture: true });
 
   render();
   if (demo) {
