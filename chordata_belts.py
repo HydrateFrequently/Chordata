@@ -72,6 +72,7 @@ SIGMA_MAX = 0.2           # Hz: a pluck read less surely than this is left out. 
 # with it. Holding a sixteenth of the tone's energy it can pull the reading by up to ~0.1 Hz
 # (a single-tone reading sits near the energy-weighted mean of the two): more is "hidden".
 HIDE_DB = 12.0
+HUM_HZ = 1.0 / WINDOW + 1.0  # a background hum this close to a belt's note (Hz): turn it off first
 BESIDE_DB = 3.0           # dB: a tone closer than the window resolves and within this of the pluck's: can't tell which belt was plucked
 PAIR_HZ = 1.0             # Hz: twice the tone is looked for this far either side of 2F, at least
 PAIR_SHARE = 0.01         # or this share of 2F (a stiff belt's overtone sits sharp, ~0.5-1 Hz at 220 Hz)
@@ -332,9 +333,13 @@ def steady_lines(axes, fs):
 
 
 def disturbing(quiet, fs, notes):
-    """Steady lines in the background on or near a belt's note or twice it (notes: the
-    target, the belt's last readings), loudest first: (Hz, the note it is near). A fan there
-    can hide the belt; removing it beats measuring around it."""
+    """Steady lines in the background within HUM_HZ of a belt's note (notes: the target, the
+    belt's last readings), loudest first: (Hz, the note it is near). A fan that close can hide
+    the belt (closer than a pluck's window resolves); removing it beats measuring around it.
+    Not twice the note, and not further off: the fit tells a steady line from a decaying
+    tone there (the A/B's fan scenario, fans 2-8 Hz from F or 2F: no reading wrong), and on
+    the Nebula a 211 Hz motor/controller-fan hum, 9 Hz from twice a 110 Hz target, stopped
+    the tap step for nothing. A hum that does sit on a pluck is still refused per pluck."""
     q = [np.asarray(a, float) for a in quiet]
     floor = _Floor(q, fs)
     if not floor.ok:
@@ -342,7 +347,7 @@ def disturbing(quiet, fs, notes):
     out = []
     for x, lv in sorted(_lines(q, fs, floor), key=lambda c: -c[1]):
         for y in notes or ():
-            if y and (abs(x - y) <= SPAN * y or abs(x - 2 * y) <= 2 * SPAN * y):
+            if y and abs(x - y) <= HUM_HZ:
                 out.append((x, y))
                 break
     return out

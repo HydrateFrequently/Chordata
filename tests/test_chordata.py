@@ -39,7 +39,8 @@ def plugin(objects=None):
     obj = Chordata.__new__(Chordata)
     obj.reactor = SimpleNamespace(monotonic=lambda: 100., NEVER=1e30)
     objects = dict(objects or {})
-    obj.printer = SimpleNamespace(lookup_object=lambda name, default=None: objects.get(name, default))
+    obj.printer = SimpleNamespace(lookup_object=lambda name, default=None: objects.get(name, default),
+                                  lookup_objects=lambda module=None: list(objects.items()))
     obj.gcode = SimpleNamespace(respond_raw=lambda *args: None)
     obj.state, obj.message = "idle", ""
     obj.measurement = {"phase": "idle", "belt": None}
@@ -732,6 +733,21 @@ class FanTests(unittest.TestCase):
         obj.scripts.clear()
         obj.cmd_CHORDATA_FANS(Command())
         self.assertEqual(obj.scripts, ["M106 S204"])
+
+    def test_a_fan_named_with_capitals_is_found_and_turned_off_by_its_own_name(self):
+        # the config's settings are all lowercase; the object and SET_FAN_SPEED keep the case
+        # (on the Nebula: [fan_generic Bed_Circulation_Fan], refused as bed_circulation_fan)
+        obj = self._fan_plugin({"fan_generic Bed_Circulation_Fan": .6})
+        obj.printer.lookup_object("configfile").get_status(0)["settings"]["fan_generic bed_circulation_fan"] = {}
+        fans = {f["section"]: f for f in obj._fan_list()}
+        self.assertIn("fan_generic Bed_Circulation_Fan", fans)
+        self.assertTrue(fans["fan_generic Bed_Circulation_Fan"]["on"])
+        order = [f["section"] for f in obj._fan_list()]
+        obj.cmd_CHORDATA_FAN(Command(INDEX=order.index("fan_generic Bed_Circulation_Fan")))
+        self.assertEqual(obj.scripts, ["SET_FAN_SPEED FAN=Bed_Circulation_Fan SPEED=0.000"])
+        obj.scripts.clear()
+        obj.cmd_CHORDATA_FANS(Command())
+        self.assertEqual(obj.scripts, ["SET_FAN_SPEED FAN=Bed_Circulation_Fan SPEED=0.600"])
 
     def test_a_generic_fan_named_for_the_electronics_gets_no_button(self):
         obj = self._fan_plugin({"fan_generic mainboard_fan": 1., "fan_generic exhaust_fan": 1.})

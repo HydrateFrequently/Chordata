@@ -870,8 +870,15 @@ class Chordata:
                 self.reactor.monotonic())["settings"]
         except Exception:
             return []
+        # the config's settings name every section in lowercase; the printer object (and so
+        # SET_FAN_SPEED FAN=) keeps the case it was written in: [fan_generic Bed_Fan]
+        try:
+            names = {n.lower(): n for n, _ in self.printer.lookup_objects()}
+        except Exception:
+            names = {}
         out = []
-        for section in sorted(settings):
+        for key in sorted(settings):
+            section = names.get(key, key)
             kind = section.split()[0]
             if kind not in self.FAN_KINDS or (kind == "fan" and section != "fan"):
                 continue
@@ -916,7 +923,7 @@ class Chordata:
             if speed is None:
                 settings = self.printer.lookup_object("configfile").get_status(
                     self.reactor.monotonic())["settings"]
-                top = float((settings.get(fan["section"]) or {}).get("max_power", 1.))
+                top = float((settings.get(fan["section"].lower()) or {}).get("max_power", 1.))
                 speed = float(st.get("speed", 0.)) / top if top > 0. else 0.
             speed = min(1., max(0., float(speed)))
         except Exception:

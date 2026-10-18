@@ -17,6 +17,11 @@ Update from Mainsail's Update Manager, then restart Klipper.
   when Chordata is closed, after 10 idle minutes, or when a print starts; in a print the part
   fan is left to the slicer.
 - The analysis runs beside Klipper's main loop, so a slow host never holds up the printer.
+- Fixed: fans named with capitals (`[fan_generic Bed_Fan]`) couldn't be turned off and showed
+  as on; Chordata now uses each fan's own name.
+- The hum check before the taps only stops for a hum within about 2.7 Hz of the belt's note.
+  A steady hum further off, or near twice the note (like a stepper's holding buzz), no longer
+  blocks the measurement.
 
 ## 2026-10-18
 
