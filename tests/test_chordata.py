@@ -787,6 +787,42 @@ class FanTests(unittest.TestCase):
         self.assertEqual(recorded, [1])
         self.assertIsNone(obj.belts["disturb"])
 
+    def test_a_fan_that_cannot_be_found_gets_no_button_and_does_not_count_as_on(self):
+        obj = self._fan_plugin({})
+        fans = {f["section"]: f for f in obj._fan_list()}
+        self.assertFalse(fans["fan_generic exhaust_fan"]["button"])
+        self.assertFalse(fans["fan_generic exhaust_fan"]["on"])
+
+    def _tap_with_background(self, speeds, fan_hz):
+        from test_belts import quiet
+        obj = self._fan_plugin(speeds)
+        q = quiet(fan=fan_hz)
+        obj._record_quiet = lambda *a, **k: [(i / 3200., q[0][i], q[1][i], q[2][i]) for i in range(len(q[0]))]
+        obj._accel_fs = 3200.
+        objects = {"resonance_tester": SimpleNamespace(accel_chips=[("adxl345", object())]),
+                   "toolhead": SimpleNamespace(wait_moves=lambda: None)}
+        look = obj.printer.lookup_object
+        obj.printer = SimpleNamespace(lookup_object=lambda n, d=None: objects.get(n, look(n, d)))
+        recorded = []
+        obj._record = lambda *a, **k: recorded.append(1) or []
+        with self.assertRaisesRegex(ValueError, "no data"):     # this fake accelerometer sends nothing
+            obj.cmd_CHORDATA_TAP(Command())
+        return obj, recorded
+
+    def test_a_hum_from_nothing_chordata_can_turn_off_does_not_stop_the_tap_step(self):
+        # only the controller fan runs (the motors are held): noted, and the taps are listened to
+        obj, recorded = self._tap_with_background({"controller_fan board": 1., "fan_generic exhaust_fan": 0.}, 110.5)
+        self.assertEqual(recorded, [1])
+        self.assertIsNone(obj.belts["disturb"])
+        self.assertTrue(abs(obj.belts["hum_note"][0] - 110.5) < 0.5)
+
+    def test_a_hum_near_twice_the_note_does_not_stop_the_tap_step(self):
+        # the Nebula: 211 Hz with a 110 Hz target, and a fan Chordata could turn off running
+        obj, recorded = self._tap_with_background({"fan_generic exhaust_fan": 1.}, 211.0)
+        self.assertEqual(recorded, [1])
+        self.assertIsNone(obj.belts["disturb"])
+        self.assertEqual(obj.belts["hum_note"], [])
+
 
 if __name__ == "__main__":
     unittest.main()

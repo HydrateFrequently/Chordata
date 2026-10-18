@@ -22,6 +22,9 @@ Update from Mainsail's Update Manager, then restart Klipper.
 - The hum check before the taps only stops for a hum within about 2.7 Hz of the belt's note.
   A steady hum further off, or near twice the note (like a stepper's holding buzz), no longer
   blocks the measurement.
+- A hum near the belt's note from something Chordata can't turn off (the motors held, a
+  controller fan, a fan without an off button) no longer stops the tap step: it is noted on the
+  card and the taps are listened to. The step only stops while a fan with an off button runs.
 
 ## 2026-10-18
 

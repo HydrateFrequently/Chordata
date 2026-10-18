@@ -746,13 +746,23 @@ class Chordata:
             hums = [] if gcmd.get_int("ANYWAY", 0) else belts.disturbing(
                 q, getattr(self, "_accel_fs", None) or 3200.,
                 [self.belts.get("target")] + list((self.belts.get("good") or {}).values()))
-            self.belts = dict(self.belts, disturb={"lines": [round(x, 1) for x, _ in hums],
-                                                   "fans": self._fan_list()} if hums else None)
-            if hums:
+            fans = self._fan_list() if hums else []
+            lines = [round(x, 1) for x, _ in hums]
+            # only stop when a fan Chordata can turn off is running: a hum from something it
+            # can't (the motors held, a controller fan, a fan it doesn't know) is noted, and the
+            # plucks themselves tell the belt from it
+            stop = any(f["button"] and f["on"] for f in fans)
+            self.belts = dict(self.belts, disturb={"lines": lines, "fans": fans} if stop else None,
+                              hum_note=lines if hums and not stop else [])
+            if stop:
                 self._end_measurement()
                 gcmd.respond_info("Chordata: steady hum at %s Hz on or near the belt's note: turn fans off, "
-                                  "or measure anyway (ANYWAY=1)" % " and ".join("%.0f" % x for x, _ in hums))
+                                  "or measure anyway (ANYWAY=1)" % " and ".join("%.0f" % x for x in lines))
                 return
+            if hums:
+                gcmd.respond_info("Chordata: steady hum at %s Hz near the belt's note, from nothing Chordata "
+                                  "can turn off (motors, controller fan?): measuring with it"
+                                  % " and ".join("%.0f" % x for x in lines))
             self.belt_now = "tap"
             self._measurement_phase("listening")
             self.message = "Tap the toolhead lightly, %d times, on the same spot" % belts.TAP_NEED
@@ -889,12 +899,15 @@ class Chordata:
             except Exception:
                 speed = None
             button, why = self.FAN_KINDS[kind], self.FAN_WHY.get(kind, "")
+            if obj is None:
+                # not found under any name: Chordata can't read or set it
+                button, why = False, "could not be found"
             name = section.split(None, 1)[-1].lower()
             if kind == "fan_generic" and self._safety_name(name):
                 # electronics and hotend fans are often a fan_generic a macro drives: by its name
                 button, why = False, "seems to cool the electronics or the hotend (by its name)"
             out.append({"section": section, "label": label, "kind": kind,
-                        "button": button, "on": speed is None or speed > 0., "why": why})
+                        "button": button, "on": obj is not None and (speed is None or speed > 0.), "why": why})
         return out
 
     def _fan_script(self, section, speed):
