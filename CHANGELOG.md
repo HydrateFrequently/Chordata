@@ -5,13 +5,11 @@ Update from Mainsail's Update Manager, then restart Klipper.
 
 ## Unreleased (dev)
 
-- **New belt detection engine.** Each pluck's tones are fitted as decaying notes, so the belt's
-  note is told apart from its 2F, the toolhead's ring, a fan's hum and the other belt even when
-  they sit close together. In simulated tests a belt was called good at the wrong frequency in
-  4 of 2,200 series, against 215 before; readings are about 5 times tighter.
-- When the belt's note and twice it can't be told apart (a loose belt, a toolhead or frame note
-  at half the belt's), the pluck is refused and you are asked to pluck again, instead of a guess.
-- A quick second pluck, a knock or a toolhead tap is no longer counted as a belt pluck.
+- **Belt detection: back to the proven engine.** The fitted-tone engine tried on dev counted only
+  about half the real plucks on a Nebula 370 and analysed 6-30 times slower (a Pi 5 couldn't keep
+  up live); measured against a microphone, the earlier engine found 94 % of real plucks with no
+  tap or knock counted on an ADXL345. Its taps now learn the toolhead's note from the note most
+  taps ring, not the first tap's loudest line (a Beacon rings a higher mode first now and then).
 - **Fan off buttons:** when a fan hums near the belt's note, Chordata offers to turn it off for
   the measurement. Mainboard, hotend and other safety fans never get a button. Fans come back on
   when Chordata is closed, after 10 idle minutes, or when a print starts; in a print the part

@@ -233,10 +233,9 @@ class Chordata:
         self._check_target(gcmd, target)
         acc = self._accel()
         if acc and acc["hi"] is not None and 2 * target > acc["hi"]:
-            gcmd.respond_info("Chordata: the %s hears up to %d Hz, less than twice the target: a pluck is "
-                              "told from a knock by the taps learned and by how long it rings. A knock on the frame that "
-                              "rings long near the target can still read as the belt: pluck the belt, don't tap the frame"
-                              % (acc["name"], acc["hi"]))
+            gcmd.respond_info("Chordata: the %s hears up to %d Hz, less than twice the target: it can't hear "
+                              "a pluck's tone at twice its note, which tells a pluck from a knock, so many plucks may be "
+                              "refused. An ADXL345 or a Beacon hears both" % (acc["name"], acc["hi"]))
         plucks = 5      # on target: the average of 5 good plucks
         self.belt_plucks = plucks
         self.belts = {"target": target, "plucks": plucks, "round": 0,
