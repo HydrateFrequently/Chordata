@@ -47,12 +47,15 @@ class Chordata:
         self.belt_hum = []        # a fan humming on the belt's note in the newest analysis (Hz)
         self.tap_live = []        # the setup taps so far, each good or not
         self.measurement = {"phase": "idle", "belt": None}
+        self._fans_off = {}       # fans Chordata turned off this session: section -> speed before
+        self._fans_timer = None   # brings them back FANS_IDLE s after Chordata was last used
+        self._fans_until = 0.
         self._tool_info = None
         self._accept = False
         webhooks = self.printer.lookup_object("webhooks", None)
         if webhooks is not None:
             webhooks.register_endpoint("chordata/accept", self._handle_accept)
-        for name in ("START", "LISTEN", "BOTH", "FREE", "TAP", "POS"):
+        for name in ("START", "LISTEN", "BOTH", "FREE", "TAP", "POS", "FAN", "FANS"):
             fn = getattr(self, "cmd_CHORDATA_" + name)
             self.gcode.register_command("_CHORDATA_" + name, fn,
                                         desc=getattr(self, "cmd_CHORDATA_%s_help" % name))
@@ -93,6 +96,7 @@ class Chordata:
             raise gcmd.error("Chordata: wait for the printer to become idle")
 
     def _begin_measurement(self, belt, expected=None, phase="background"):
+        self._fans_touch()
         self.state = "listening"
         self.belt_live, self.belt_hum = [], []
         self.belt_now = None
@@ -105,6 +109,7 @@ class Chordata:
         self.measurement = dict(self.measurement, phase=phase)
 
     def _end_measurement(self, result=None, error=None):
+        self._fans_touch()
         self.measurement = dict(self.measurement, phase="error" if error else "complete",
                                 elapsed=round(max(0., self.reactor.monotonic()
                                                   - self.measurement["started_at"]), 1),
@@ -175,6 +180,35 @@ class Chordata:
             hi = 0.45 * fs                          # not published: what its sample rate allows
         return {"name": name, "lo": 0, "hi": None if hi is None else int(hi)}
 
+    def _analyse(self, *cols, **kw):
+        """The belt engine's analyse(), told how high the accelerometer hears (a pluck's
+        tone at twice its note is then only looked for where the sensor can hear it)."""
+        import chordata_belts as belts
+        acc = self._accel()
+        return self._off_reactor(belts.analyse, *cols, hears=acc["hi"] if acc else None, **kw)
+
+    def _off_reactor(self, fn, *args, **kw):
+        """fn(*args, **kw), in a thread when called on Kalico's own (reactor) thread, which
+        keeps running meanwhile: an analysis can take seconds on a small Pi, and a reactor
+        held that long stops the heaters' updates (an MCU shutdown after 3 s)."""
+        pause = getattr(self.reactor, "pause", None)
+        if pause is None or threading.current_thread() is not threading.main_thread():
+            return fn(*args, **kw)          # (the live analysis: already in its own thread)
+        out = {}
+
+        def work():
+            try:
+                out["r"] = fn(*args, **kw)
+            except BaseException as error:
+                out["e"] = error
+        t = threading.Thread(target=work, daemon=True)
+        t.start()
+        while t.is_alive():
+            pause(self.reactor.monotonic() + 0.05)
+        if "e" in out:
+            raise out["e"]
+        return out["r"]
+
     def _check_target(self, gcmd, target):
         """A target the accelerometer can't hear gives wrong or no readings: refuse it. Checked
         at the start and again before each measure (an MPU-6050 or a Beacon is only known once
@@ -197,6 +231,12 @@ class Chordata:
         if not math.isfinite(target):
             raise gcmd.error("Chordata: TARGET must be finite")
         self._check_target(gcmd, target)
+        acc = self._accel()
+        if acc and acc["hi"] is not None and 2 * target > acc["hi"]:
+            gcmd.respond_info("Chordata: the %s hears up to %d Hz, less than twice the target: a pluck is "
+                              "told from a knock by the taps learned and by how long it rings. A knock on the frame that "
+                              "rings long near the target can still read as the belt: pluck the belt, don't tap the frame"
+                              % (acc["name"], acc["hi"]))
         plucks = 5      # on target: the average of 5 good plucks
         self.belt_plucks = plucks
         self.belts = {"target": target, "plucks": plucks, "round": 0,
@@ -204,6 +244,9 @@ class Chordata:
                       "tol": self.belt_tol, "tap": [], "tap_ring": [], "tap_tau": None, "tap_done": False, "fails": {"A": 0, "B": 0}, "deaf": False,
                       "possible": False, "good": {}, "prev": {}}
         self.belt_live = []
+        self._restore_fans()                 # (a session closed without Close Chordata)
+        import chordata_belts as belts
+        belts.clear_cache()
         self._quiet = None                   # the background, recorded once per session at the tap step
         self.measurement = {"phase": "idle", "belt": None}
         gcmd.respond_info("Chordata: belt tension, target %.0f Hz, %d plucks per belt" % (target, plucks))
@@ -272,7 +315,7 @@ class Chordata:
         other = (self.belts.get("B" if belt == "A" else "A") or {}).get("freq")
         good = dict(self.belts.get("good") or {})
         try:
-            res = belts.analyse(*self._cols(samples), target=self.belts["target"], expect=n,
+            res = self._analyse(*self._cols(samples), target=self.belts["target"], expect=n,
                                 quiet=[[s[i] for s in quiet] for i in (1, 2, 3)],
                                 avoid=self.belts.get("tap_ring") or self.belts.get("tap", []), other=other, prev=good.get(belt))
         except ValueError as error:
@@ -407,7 +450,7 @@ class Chordata:
                 if not main or (fa is not None and abs(fa - main["freq"]) <= main["guard"] + belts.SPREAD):
                     return not (p["ok"] and fa is not None and abs(p["freq"] - fa) <= belts.SPREAD)
                 nxt = plucks[i + 1]["t"] if i + 1 < len(plucks) else None
-                return belts.toolhead_knock(*self._cols(seg), p["t"], main, fa, quiet=q, until=nxt)[0]
+                return self._off_reactor(belts.toolhead_knock, *self._cols(seg), p["t"], main, fa, quiet=q, until=nxt)[0]
 
             def knock_after(samples, t):
                 """The first tap on the toolhead after t: where belt B starts (half a second
@@ -415,7 +458,7 @@ class Chordata:
                 seg = [x for x in samples if x[0] >= t]
                 if len(seg) < 200:
                     return None
-                res = belts.analyse(*self._cols(seg), quiet=q, avoid=avoid, target=tgt, free=True)
+                res = self._analyse(*self._cols(seg), quiet=q, avoid=avoid, target=tgt, free=True)
                 taps = [p for i, p in enumerate(res["plucks"]) if switch(seg, res["plucks"], i)]
                 return seg[0][0] + taps[0]["t"] + 0.5 if taps else None
 
@@ -424,8 +467,10 @@ class Chordata:
                 end = samples[-1][0]
                 if st["step"] == "A":
                     t0 = samples[0][0]
-                    res = belts.analyse(*self._cols(samples), quiet=q, avoid=avoid, target=tgt,
+                    res = self._analyse(*self._cols(samples), quiet=q, avoid=avoid, target=tgt,
                                         expect=n, prev=good.get("A"))
+                    if st.get("final"):         # a late live result can't change the final result
+                        return
                     self.belt_live = res["plucks"]
                     self.belt_hum = res.get("hum") or []
                     self.measurement = dict(self.measurement, accepted=res["used"], heard=res["heard"])
@@ -440,7 +485,10 @@ class Chordata:
                         self.measurement = dict(self.measurement, step="tap", accepted=0, heard=0)
                         self.message = "Tap the toolhead, then pluck belt B"
                 elif st["step"] == "tap":
-                    st["b_start"] = knock_after(samples, st["a_end"])
+                    b_start = knock_after(samples, st["a_end"])
+                    if st.get("final"):
+                        return
+                    st["b_start"] = b_start
                     if st["b_start"] is not None:
                         st["step"] = "B"
                         self.belt_now = "B"
@@ -453,8 +501,10 @@ class Chordata:
                     seg = [x for x in samples if x[0] >= st["b_start"]]
                     if len(seg) < 200:
                         return
-                    res = belts.analyse(*self._cols(seg), quiet=q, avoid=avoid, target=tgt,
+                    res = self._analyse(*self._cols(seg), quiet=q, avoid=avoid, target=tgt,
                                         expect=n, prev=good.get("B"), other=st["a_freq"])
+                    if st.get("final"):
+                        return
                     self.belt_live = res["plucks"]
                     self.belt_hum = res.get("hum") or []
                     self.measurement = dict(self.measurement, accepted=res["used"], heard=res["heard"])
@@ -462,7 +512,9 @@ class Chordata:
                         st["done"] = True
 
             samples = self._record(chip, toolhead, secs, live=live, stop=lambda: st["done"])
+            st["final"] = True
         finally:
+            st["final"] = True
             self.belt_now = None
             self._measurement_phase("analysing")
         if not samples:
@@ -472,7 +524,7 @@ class Chordata:
         try:
             # a slow host may not have kept up live: the switch is looked for again in all of it
             if st["a_end"] is None:
-                res = belts.analyse(*self._cols(samples), quiet=q, avoid=avoid, target=tgt, free=True)
+                res = self._analyse(*self._cols(samples), quiet=q, avoid=avoid, target=tgt, free=True)
                 for i, p in enumerate(res["plucks"]):
                     before = [x["freq"] for x in res["plucks"][:i] if x["ok"]]
                     if len(before) >= belts.MIN_GOOD:
@@ -484,10 +536,10 @@ class Chordata:
             if st["a_end"] is not None and st["b_start"] is None:
                 st["b_start"] = knock_after(samples, st["a_end"])
             seg = [x for x in samples if st["a_end"] is None or x[0] < st["a_end"]]
-            ra = belts.analyse(*self._cols(seg), prev=good.get("A"), **kw)
+            ra = self._analyse(*self._cols(seg), prev=good.get("A"), **kw)
             if st["b_start"] is not None:
                 seg = [x for x in samples if x[0] >= st["b_start"]]
-                rb = (belts.analyse(*self._cols(seg), prev=good.get("B"), other=ra["freq"], **kw)
+                rb = (self._analyse(*self._cols(seg), prev=good.get("B"), other=ra["freq"], **kw)
                       if len(seg) > 200 else None)
             else:
                 rb = None
@@ -565,7 +617,7 @@ class Chordata:
                 done = list(plucks)
 
                 def live(part, done=done, off=t_off):
-                    r = belts.analyse(*self._cols(part), **kw)
+                    r = self._analyse(*self._cols(part), **kw)
                     self.belt_live = (done + [dict(p, t=round(p["t"] + off, 2)) for p in r["plucks"]])[-40:]
                     self.belt_hum = r.get("hum") or []
 
@@ -575,7 +627,7 @@ class Chordata:
                     break
                 self._save_recording(rec_name, samples, append=True)
                 try:
-                    r = belts.analyse(*self._cols(samples), **kw)
+                    r = self._analyse(*self._cols(samples), **kw)
                 except ValueError as error:
                     raise gcmd.error("Chordata: invalid accelerometer recording: %s" % error)
                 plucks = (plucks + [dict(p, t=round(p["t"] + t_off, 2)) for p in r["plucks"]])[-200:]
@@ -689,6 +741,18 @@ class Chordata:
         try:
             quiet = self._record_quiet(chip, toolhead, fresh=True)
             q = [[s[i] for s in quiet] for i in (1, 2, 3)]
+            # step 0: something humming on the belt's note (or twice it) in the background is
+            # turned off before measuring, rather than measured around
+            hums = [] if gcmd.get_int("ANYWAY", 0) else belts.disturbing(
+                q, getattr(self, "_accel_fs", None) or 3200.,
+                [self.belts.get("target")] + list((self.belts.get("good") or {}).values()))
+            self.belts = dict(self.belts, disturb={"lines": [round(x, 1) for x, _ in hums],
+                                                   "fans": self._fan_list()} if hums else None)
+            if hums:
+                self._end_measurement()
+                gcmd.respond_info("Chordata: steady hum at %s Hz on or near the belt's note: turn fans off, "
+                                  "or measure anyway (ANYWAY=1)" % " and ".join("%.0f" % x for x, _ in hums))
+                return
             self.belt_now = "tap"
             self._measurement_phase("listening")
             self.message = "Tap the toolhead lightly, %d times, on the same spot" % belts.TAP_NEED
@@ -698,7 +762,7 @@ class Chordata:
 
             def live(part):
                 # about once a second: each tap so far, good or not; it stops at 3 good ones
-                r = belts.analyse_taps(*self._cols(part), quiet=q)
+                r = belts.analyse_taps(*self._cols(part), quiet=q, target=self.belts.get("target"))
                 if st.get("final"):             # a late live result can't overwrite the final marks
                     return
                 self.tap_live = r["taps"]
@@ -717,7 +781,7 @@ class Chordata:
         self._save_recording("tap-%s-quiet" % stamp, quiet)
         self._save_recording("tap-%s" % stamp, samples)
         try:
-            res = belts.analyse_taps(*self._cols(samples), quiet=q)
+            res = self._off_reactor(belts.analyse_taps, *self._cols(samples), quiet=q, target=self.belts.get("target"))
         except ValueError as error:
             raise gcmd.error("Chordata: invalid accelerometer recording: %s" % error)
         self.tap_live = res["taps"]
@@ -775,6 +839,170 @@ class Chordata:
         return r["good"] >= belts.TAP_NEED or r["bad"] >= belts.TAP_FAILS or self._taps_stiff(r) \
             or bool(self._taps_hum(r))
 
+    # ---------------- fans: turned off when they hum on the belt's note (step 0) ----------------
+    # The kinds Chordata may turn off, and the ones it never touches: a controller fan runs
+    # while the motors are held, a heater fan while the hotend is warm, and a temperature fan
+    # keeps something below a set temperature (often the electronics). Those stay on.
+    FAN_KINDS = {"fan": True, "fan_generic": True,
+                 "controller_fan": False, "heater_fan": False, "temperature_fan": False}
+    FAN_WHY = {"controller_fan": "runs while the motors are on",
+               "heater_fan": "runs while the hotend is warm: it stops once the hotend has cooled",
+               "temperature_fan": "keeps something below a set temperature"}
+
+    # (matched with "_", "-" and spaces taken out: hot_end, heat-break; whole words for "pi")
+    SAFETY_NAMES = ("board", "mobo", "mcu", "pcb", "electronic", "controller", "control", "ctrl", "driver",
+                    "stepper", "rpi", "raspberry", "raspi", "sbc", "skr", "octopus", "spider", "manta", "ebb",
+                    "tmc", "elec", "host", "cpu", "skirt", "bay", "case", "hotend", "heatbreak", "extruder",
+                    "nozzle", "toolfan", "toolheadfan", "psu", "power")
+    SAFETY_WORDS = ("pi",)
+
+    def _safety_name(self, name):
+        """A fan_generic named for the electronics or the hotend (a macro often drives those)."""
+        words = re.split(r"[\s_\-]+", name.lower())
+        flat = "".join(words)
+        return any(w in flat for w in self.SAFETY_NAMES) or any(w in words for w in self.SAFETY_WORDS)
+
+    def _fan_list(self):
+        """The printer's fans from its config, each with whether Chordata may turn it off and
+        whether it is on now: [{"section", "label", "kind", "button", "on", "why"}]."""
+        try:
+            settings = self.printer.lookup_object("configfile").get_status(
+                self.reactor.monotonic())["settings"]
+        except Exception:
+            return []
+        out = []
+        for section in sorted(settings):
+            kind = section.split()[0]
+            if kind not in self.FAN_KINDS or (kind == "fan" and section != "fan"):
+                continue
+            label = "Part cooling fan" if section == "fan" else section.split(None, 1)[-1].replace("_", " ")
+            obj = self.printer.lookup_object(section, None)
+            try:
+                speed = float(obj.get_status(self.reactor.monotonic()).get("speed", 0.))
+            except Exception:
+                speed = None
+            button, why = self.FAN_KINDS[kind], self.FAN_WHY.get(kind, "")
+            name = section.split(None, 1)[-1].lower()
+            if kind == "fan_generic" and self._safety_name(name):
+                # electronics and hotend fans are often a fan_generic a macro drives: by its name
+                button, why = False, "seems to cool the electronics or the hotend (by its name)"
+            out.append({"section": section, "label": label, "kind": kind,
+                        "button": button, "on": speed is None or speed > 0., "why": why})
+        return out
+
+    def _fan_script(self, section, speed):
+        if section == "fan":
+            return "M106 S%d" % round(255 * speed) if speed > 0 else "M107"
+        return "SET_FAN_SPEED FAN=%s SPEED=%.3f" % (section.split(None, 1)[-1], speed)
+
+    cmd_CHORDATA_FAN_help = ("Chordata: turn a fan off for the measurement (INDEX: its place in the fan list); "
+                             "it comes back on with _CHORDATA_FANS")
+
+    def cmd_CHORDATA_FAN(self, gcmd):
+        self._require_idle(gcmd)
+        fans = self._fan_list()
+        i = gcmd.get_int("INDEX", -1)
+        if not 0 <= i < len(fans):
+            raise gcmd.error("Chordata: no fan %d" % i)
+        fan = fans[i]
+        if not fan["button"]:
+            raise gcmd.error("Chordata: the %s %s; Chordata leaves it on" % (fan["label"], fan["why"]))
+        obj = self.printer.lookup_object(fan["section"], None)
+        try:
+            # the speed asked for, to ask for again: Kalico shows it as "value"; Klipper only
+            # as "speed", which is already times max_power
+            st = obj.get_status(self.reactor.monotonic())
+            speed = st.get("value")
+            if speed is None:
+                settings = self.printer.lookup_object("configfile").get_status(
+                    self.reactor.monotonic())["settings"]
+                top = float((settings.get(fan["section"]) or {}).get("max_power", 1.))
+                speed = float(st.get("speed", 0.)) / top if top > 0. else 0.
+            speed = min(1., max(0., float(speed)))
+        except Exception:
+            speed = 0.
+        self._fans_off.setdefault(fan["section"], speed)
+        self.gcode.run_script_from_command(self._fan_script(fan["section"], 0.))
+        self._fans_touch()
+        gcmd.respond_info("Chordata: %s off until Chordata is closed" % fan["label"])
+
+    cmd_CHORDATA_FANS_help = "Chordata: turn the fans Chordata turned off back to how they were"
+
+    def cmd_CHORDATA_FANS(self, gcmd):
+        import chordata_belts as belts
+        self._restore_fans()
+        belts.clear_cache()                  # (Close Chordata: the session's cached fits go)
+
+    FANS_IDLE = 600.    # s without Chordata after which the fans it turned off come back on
+
+    def _fans_touch(self):
+        """Chordata is in use: the fans it turned off stay off FANS_IDLE s more."""
+        self._fans_until = self.reactor.monotonic() + self.FANS_IDLE
+        if getattr(self, "_fans_off", None) and getattr(self, "_fans_timer", None) is None:
+            self._fans_timer = self.reactor.register_timer(self._fans_check, self.reactor.monotonic() + 2.0)
+
+    def _printing(self, eventtime):
+        """A print running (or paused): what Klipper's print_stats and virtual_sdcard say. (Not
+        idle_timeout's "Printing": that only means the toolhead is busy, which Chordata's own
+        fan and dwell commands make it.)"""
+        stats = self.printer.lookup_object("print_stats", None)
+        sd = self.printer.lookup_object("virtual_sdcard", None)
+        try:
+            return (stats is not None and stats.get_status(eventtime).get("state") in ("printing", "paused")) \
+                or (sd is not None and bool(sd.get_status(eventtime).get("is_active")))
+        except Exception:
+            return False
+
+    def _fans_check(self, eventtime):
+        """Every 2 s while fans are off: they come back on when a print starts (a print never
+        runs with a fan Chordata turned off: the card closed with its X, a step that failed)
+        or FANS_IDLE s after Chordata was last used. Not while a command runs (the G-code lock:
+        it would land inside the user's macro)."""
+        if not self._fans_off:
+            self._fans_timer = None
+            return self.reactor.NEVER
+        printing = self._printing(eventtime)
+        if not printing and (self.state != "idle" or eventtime < self._fans_until):
+            return eventtime + 2.0
+        # idle, not while a command runs (it would land inside the user's macro). A print holds
+        # the G-code lock nearly all the time (each line runs with it, heat-up and homing too),
+        # so then the fans go in the queue: run_script waits its turn and the print lets it in
+        # at its next line
+        mutex = getattr(self.gcode, "get_mutex", None)
+        if not printing and mutex is not None and mutex().test():
+            return eventtime + 1.0
+        self._fans_timer = None
+        if mutex is None:
+            self._restore_fans(script=self.gcode.run_script, printing=printing)
+            return self.reactor.NEVER
+        # read the speeds and set them inside the lock: waiting for it outside, the start macro
+        # may set a fan meanwhile, and the old speed would then undo it (review 7). (A timer
+        # isn't inside a command, so taking the lock is allowed: run_script does the same)
+        with mutex():
+            self._restore_fans(script=self.gcode.run_script_from_command, printing=printing)
+        return self.reactor.NEVER
+
+    def _restore_fans(self, script=None, printing=False):
+        off = getattr(self, "_fans_off", None) or {}
+        self._fans_off = {}
+        for section, speed in sorted(off.items()):
+            # the part fan in a print is the slicer's: the queued M106 would only land after the
+            # start macro (heat-up holds the G-code lock) and undo the slicer's M107 on layer 1.
+            # The slicer sets it itself when the print needs it
+            if printing and section == "fan":
+                continue
+            obj = self.printer.lookup_object(section, None)
+            try:
+                now = float(obj.get_status(self.reactor.monotonic()).get("speed", 0.))
+            except Exception:
+                now = 0.
+            # a fan set since (the slicer's M106, the user's macro) keeps what it was set to
+            if speed > 0. and now <= 0.:
+                try:
+                    (script or self.gcode.run_script_from_command)(self._fan_script(section, speed))
+                except Exception:
+                    logging.exception("chordata: restoring %s", section)
+
     # ---------------- the background (fans, motors): recorded once per session, at the tap step ----------------
     def _record_quiet(self, chip, toolhead, fresh=False):
         """The background is recorded once, when the toolhead is tapped, and used for every
@@ -812,6 +1040,7 @@ class Chordata:
 
     # ---------------- raw recordings, readable from Mainsail (Kalico's own go to /tmp) ----------------
     REC_KEEP = 40
+    LIVE_WAIT = 60.     # s at most for a live analysis still running when a listen ends
 
     def _record(self, chip, toolhead, secs, live=None, stop=None):
         """Record for secs. live: analyse() arguments; then the plucks heard so far are
@@ -832,7 +1061,7 @@ class Chordata:
                         if self._live_gen == gen_now:
                             live(samples)
                         return
-                    res = belts.analyse([s[0] for s in samples], [s[1] for s in samples],
+                    res = self._analyse([s[0] for s in samples], [s[1] for s in samples],
                                         [s[2] for s in samples], [s[3] for s in samples], **live)
                     if self.belt_now in ("A", "B", "free") and self._live_gen == gen_now:
                         self.belt_live = res["plucks"]
@@ -893,6 +1122,12 @@ class Chordata:
                 if timer is not None:
                     self.reactor.unregister_timer(timer)
                     self._live_gen += 1          # a late live result can't overwrite the final one
+                    # and the live analysis still running finishes first: the final one beside
+                    # it would double the memory (about 140 MB each for a minute's listen: a
+                    # Pi Zero 2 W has 512 MB)
+                    wait = self.reactor.monotonic() + self.LIVE_WAIT
+                    while busy and self.reactor.monotonic() < wait:
+                        self.reactor.pause(self.reactor.monotonic() + 0.05)
         return client.get_samples()
 
     def _find_chip(self, name):

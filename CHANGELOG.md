@@ -3,6 +3,21 @@
 What changed in each update of Chordata's main branch, newest first.
 Update from Mainsail's Update Manager, then restart Klipper.
 
+## Unreleased (dev)
+
+- **New belt detection engine.** Each pluck's tones are fitted as decaying notes, so the belt's
+  note is told apart from its 2F, the toolhead's ring, a fan's hum and the other belt even when
+  they sit close together. In simulated tests a belt was called good at the wrong frequency in
+  4 of 2,200 series, against 215 before; readings are about 5 times tighter.
+- When the belt's note and twice it can't be told apart (a loose belt, a toolhead or frame note
+  at half the belt's), the pluck is refused and you are asked to pluck again, instead of a guess.
+- A quick second pluck, a knock or a toolhead tap is no longer counted as a belt pluck.
+- **Fan off buttons:** when a fan hums near the belt's note, Chordata offers to turn it off for
+  the measurement. Mainboard, hotend and other safety fans never get a button. Fans come back on
+  when Chordata is closed, after 10 idle minutes, or when a print starts; in a print the part
+  fan is left to the slicer.
+- The analysis runs beside Klipper's main loop, so a slow host never holds up the printer.
+
 ## 2026-10-18
 
 - Fixed: Kalico refused to load `chordata.cfg` ("Missing end of comment tag" in `_CHORDATA_BELTS`), so a printer

@@ -1422,7 +1422,7 @@ function init() {
   $("pClose").onclick = () => {
     const close = [...$("pFooter").querySelectorAll("button")].find((b) => b.textContent === "Close Chordata");
     if (close && !close.disabled) close.click();
-    else { runGcode("RESPOND TYPE=command MSG=action:prompt_end").catch(() => {}); setTimeout(() => { location.href = $("backUi").href; }, 300); }
+    else { runGcode("_CHORDATA_CLOSE").catch(() => {}); setTimeout(() => { location.href = $("backUi").href; }, 300); }
   };
   $("startBtn").onclick = () => runGcode("CHORDATA").catch(() => {});
   $("howBtn").onclick = openHow;

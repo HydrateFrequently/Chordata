@@ -10,6 +10,7 @@
 # Copyright (C) 2026  Chordata contributors
 # This file may be distributed under the terms of the GNU GPLv3 license.
 import argparse
+import math
 import os
 import sys
 
@@ -95,8 +96,9 @@ def synthetic():
     for r2, label in ((18.0, "2F 25 dB over F"), (1.8, "2F 5 dB over F"), (0.3, "F 10 dB over 2F")):
         r = belts.analyse(*rec(series([91.0] * 5, r2=r2)), quiet=q)
         check("5 good plucks, " + label, r["verdict"] == "good" and abs(r["freq"] - 91.0) < 0.4, r)
-    # a pluck that misses the belt (too weak) is thrown out, the rest still count
-    r = belts.analyse(*rec(series([88.0] * 5, amps=[1500, 40, 1500, 1500, 30])), quiet=q)
+    # a pluck that misses the belt (too weak) is thrown out, the rest still count (amplitude 20
+    # and 30 are at the noise; 40 sits right at the too-weak limit, read to about 0.1 Hz)
+    r = belts.analyse(*rec(series([88.0] * 5, amps=[1500, 20, 1500, 1500, 30])), quiet=q)
     check("2 of 5 too weak: 3 counted", r["verdict"] == "good" and r["used"] == 3
           and abs(r["freq"] - 88.0) < 0.4, r)
     r = belts.analyse(*rec(series([88.0] * 5, amps=[1500, 40, 30, 1500, 30])), quiet=q)
@@ -264,17 +266,15 @@ def octaves(q):
     ev = [(1.0 + 1.2 * i, "harm", 62.0, (80.0, 1070.0, 0.0), 0) for i in range(5)]
     r = belts.analyse(*rec(ev), quiet=q, target=110.0)
     check("loose belt 62 Hz, 2F sensor, target 110", near(r, 62.0), r)
-    # the last reading breaks a tie the ringing can't settle (no timing: pluck_freq alone)
-    f = np.fft.rfftfreq(1 << 15, 1.0 / FS)
-    df = f[1] - f[0]
-    p = np.ones(len(f))
-    for fc, lv in ((45.5, 10.0), (91.0, 10.0 ** 3.5), (182.0, 10.0)):
-        p[np.abs(f - fc) < 0.3] = lv
-    fr = belts.pluck_freq(f, p, np.ones(len(f)), df, 25.0, 700.0, prev=91.0)[0]
-    ok = fr is not None and abs(fr - 91.0) < 0.3
-    print("%-4s %-46s %s" % ("ok" if ok else "FAIL", "tie: the last reading (91) decides", fr))
-    if not ok:
-        FAILS.append("prev tie")
+    # lines at 45.5, 91 and 182 Hz that all die alike (no sign which is the tone), the outer
+    # two equally loud: the last reading takes the lower octave when it is there; it never
+    # takes the upper one (a 2F reading stored once would confirm itself: review 5)
+    ev = [(1.0 + 1.2 * i, "ring", fc, lv, 0, 0.3) for i in range(5) for fc, lv in ((45.5, 300.0), (91.0, 1500.0), (182.0, 300.0))]
+    r = belts.analyse(*rec(ev), quiet=q, prev=45.5)
+    check("tie: the last reading (45.5) takes the lower octave", near(r, 45.5), r)
+    r = belts.analyse(*rec(ev), quiet=q, prev=91.0)
+    check("tie: the last reading (91.0) doesn't take the upper one: pluck again", r["freq"] is None
+          and any("can't tell" in p["why"] for p in r["plucks"]), r)
 
 
 def toolheads(q):
@@ -434,11 +434,63 @@ def real(d):
         check(name + " left 88.2", left["verdict"] == "good" and abs(left["freq"] - 88.2) < 0.6, left)
 
 
+def loose():
+    """A loose belt (F well under the target) that the sensor hears mostly at 2F, with a weak
+    4F: read at F or refused, never read at 2F (review 4: "a 55 Hz belt: Both belts good")."""
+    q = quiet()
+    for fr, under in ((55.0, 25), (55.0, 32), (70.0, 25), (70.0, 32)):
+        a2 = 1500.0
+        ev = [(1.0 + 1.2 * i, "harm", fr + 0.05 * (i % 3), (a2 * 10 ** (-under / 20.0), a2, 0.1 * a2), 0)
+              for i in range(6)]
+        r = belts.analyse(*rec(ev), quiet=q, target=110.0, expect=5)
+        check("loose belt %.0f Hz, F %d dB under 2F: F or refused" % (fr, under),
+              r["freq"] is None or abs(r["freq"] - fr) < 0.5, r)
+
+
+def octave_tie():
+    """Once a lower tone rang as a tone's own (its partner, dying like a belt's), the last
+    reading can't take the 2F back, even when the lower tone is read too unsurely to count
+    (it is refused then). Fabricated tones, as _pick sees them."""
+    def tone(f, al, snr, sig):
+        return {"freq": f, "alpha": al, "sigma_a": 0.3, "sigma": sig, "tau": 1 / al, "snr": snr,
+                "db": 10 * math.log10(snr), "starts": True}
+    ctx = belts._Ctx(frange=belts._f_range(belts.SEARCH[0], 1440.0, None))
+    ev = {"tones": [tone(90.0, 6.0, 60, 0.30), tone(180.0, 13.0, 3000, 0.02), tone(360.0, 28.0, 3000, 0.05)]}
+    for prev in (None, 90.0, 180.0):
+        x = belts._pick(ev, ctx, prev)[0]
+        check("F unsure, 2F and 4F sure, last reading %s: F (refused later), not 2F" % prev,
+              x["freq"] == 90.0, {"freq": x["freq"], "verdict": None, "used": None, "heard": None,
+                                  "note": "picked", "plucks": []})
+
+
+def narrow():
+    """A sensor that can't hear twice the note (an LIS3DH hears up to 149 Hz): no pluck has
+    a partner, so a lone tone that rings like a belt counts there; a knock still doesn't."""
+    q = quiet()
+    ev = series([91.0] * 5, r2=0.0)
+    r = belts.analyse(*rec(ev), quiet=q, target=110.0)
+    check("no 2F, sensor hears it: pluck again", r["freq"] is None, r)
+    r = belts.analyse(*rec(ev), quiet=q, target=110.0, hears=149.0)
+    check("no 2F at 91 Hz, target 110, sensor hears to 149 Hz: can't tell", r["freq"] is None
+          and all("knock" in p["why"] for p in r["plucks"]), r)
+    r = belts.analyse(*rec(ev), quiet=q, target=92.0, hears=149.0)
+    check("no 2F at 91 Hz, target 92, sensor hears to 149 Hz: read", near(r, 91.0), r)
+    r = belts.analyse(*rec(ev), quiet=q, target=110.0, prev=91.2, hears=149.0)
+    check("no 2F at 91 Hz, last reading 91.2: read", near(r, 91.0), r)
+    for f0, tau in ((95.0, 0.1), (95.0, 0.25), (80.0, 0.1)):
+        knocks = [(1.0 + 1.2 * i, "ring", f0, 1500.0, 0, tau) for i in range(5)]
+        r = belts.analyse(*rec(knocks), quiet=q, target=110.0, hears=149.0)
+        check("knocks at %.0f Hz (%.2f s), sensor hears to 149 Hz: refused" % (f0, tau), r["freq"] is None, r)
+
+
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--real", help="folder with the plucks2 recordings")
     a = ap.parse_args()
     synthetic()
+    narrow()
+    octave_tie()
+    loose()
     tensioning()
     if a.real:
         real(a.real)

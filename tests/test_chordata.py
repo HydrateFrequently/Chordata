@@ -382,16 +382,60 @@ class CaptureTests(unittest.TestCase):
         obj.reactor.register_timer = lambda tick, when: setattr(obj, "tick", tick) or 1
         obj.reactor.unregister_timer = lambda timer: None
         class Worker:
-            def __init__(self, target, args, daemon):
+            def __init__(self, target, args=(), daemon=None, **kw):
                 workers.append(lambda: target(*args))
             def start(self):
                 pass
+            def is_alive(self):
+                return False
+        clock = [100.]
+        obj.reactor.monotonic = lambda: clock[0]
+        obj.reactor.pause = lambda when: clock.__setitem__(0, when)
         with patch("chordata.threading.Thread", Worker), patch("chordata_belts.analyse", return_value={"plucks": ["stale"], "used": 1, "heard": 1}):
             obj._record(SimpleNamespace(start_internal_client=lambda: client),
                         SimpleNamespace(dwell=lambda seconds: obj.tick(100.)), 2., live={})
             obj.belt_live = ["final"]
             workers[0]()
         self.assertEqual(obj.belt_live, ["final"])
+        # the recording waits (yielding to the reactor) for a live analysis still running,
+        # LIVE_WAIT at most, so the final one doesn't run beside it
+        self.assertGreaterEqual(clock[0], 100. + obj.LIVE_WAIT)
+
+    def test_listen_end_waits_for_the_live_analysis(self):
+        workers, order = [], []
+        samples = [(i / 1000., 0., 0., 0.) for i in range(300)]
+        client = SimpleNamespace(msgs=[{"data": samples}], request_start_time=0.,
+                                 finish_measurements=lambda: None, get_samples=lambda: samples)
+        obj = plugin()
+        obj.belt_now = "A"
+        obj.reactor.register_timer = lambda tick, when: setattr(obj, "tick", tick) or 1
+        obj.reactor.unregister_timer = lambda timer: None
+        clock = [100.]
+        obj.reactor.monotonic = lambda: clock[0]
+
+        def pause(when):            # the thread runs while the reactor waits
+            order.append("wait")
+            clock[0] = when
+            while workers:
+                workers.pop(0)()
+        obj.reactor.pause = pause
+
+        class Worker:
+            def __init__(self, target, args=(), daemon=None, **kw):
+                workers.append(lambda: target(*args))
+
+            def start(self):
+                pass
+
+            def is_alive(self):
+                return False
+        with patch("chordata.threading.Thread", Worker), \
+                patch("chordata_belts.analyse", return_value={"plucks": ["live"], "used": 1, "heard": 1}) as live:
+            obj._record(SimpleNamespace(start_internal_client=lambda: client),
+                        SimpleNamespace(dwell=lambda seconds: obj.tick(100.)), 2., live={})
+        self.assertTrue(live.called)              # the live analysis did run, inside the wait
+        self.assertEqual(order, ["wait"])         # one short wait, then done
+        self.assertLess(clock[0], 100.1)
 
 
 class AnalysisValidationTests(unittest.TestCase):
@@ -510,8 +554,245 @@ class AnalysisValidationTests(unittest.TestCase):
             self.assertEqual([x["why"] for x in result["plucks"]], ["two plucks at once", "", "", ""])
 
 
+class ReactorTests(unittest.TestCase):
+    def test_long_analysis_runs_beside_the_reactor(self):
+        import time as _time
+        obj = plugin()
+        paused = []
+        obj.reactor = SimpleNamespace(monotonic=_time.monotonic, NEVER=1e30,
+                                      pause=lambda when: paused.append(when) or _time.sleep(0.01))
+        self.assertEqual(obj._off_reactor(lambda a, b=0: (_time.sleep(0.2), a + b)[1], 2, b=3), 5)
+        self.assertGreater(len(paused), 3)               # the reactor kept running meanwhile
+        with self.assertRaisesRegex(ValueError, "bad"):
+            obj._off_reactor(lambda: (_ for _ in ()).throw(ValueError("bad")))
+
+
+class FakeMutex:
+    """The G-code lock: test() says whether a command holds it; taking it runs what the
+    holder does before letting go (on_take), as the reactor would."""
+
+    def __init__(self, held=False, on_take=None):
+        self.held, self.on_take = held, on_take
+
+    def test(self):
+        return self.held
+
+    def __enter__(self):
+        if self.on_take:
+            self.on_take()
+        self.held = True
+        return self
+
+    def __exit__(self, *a):
+        self.held = False
+
+
+class FanTests(unittest.TestCase):
+    """Step 0: fans humming on the belt's note are turned off (never the safety fans) and
+    turned back on when Chordata closes."""
+
+    def _fan_plugin(self, speeds):
+        settings = {"fan": {}, "fan_generic exhaust_fan": {}, "heater_fan hotend_fan": {},
+                    "controller_fan board": {}, "temperature_fan chamber": {}, "printer": {}}
+        objects = {"configfile": status(settings=settings), "print_stats": status(state="standby")}
+        for name, speed in speeds.items():
+            objects[name] = status(speed=speed)
+        obj = plugin(objects)
+        obj._fans_off = {}
+        obj.scripts = []
+
+        def run(script):            # the fan takes the speed it is set to, as Kalico's would
+            obj.scripts.append(script)
+            w = script.split()
+            if w[0] in ("M106", "M107"):
+                objects["fan"].get_status(0)["speed"] = float(w[1][1:]) / 255. if w[0] == "M106" else 0.
+            elif w[0] == "SET_FAN_SPEED":
+                objects["fan_generic " + w[1][4:]].get_status(0)["speed"] = float(w[2][6:])
+        obj.gcode = SimpleNamespace(respond_raw=lambda *a: None, run_script_from_command=run, run_script=run)
+        obj.timers, obj.callbacks = [], []
+        obj.reactor = SimpleNamespace(monotonic=lambda: 100., NEVER=1e30,
+                                      register_timer=lambda f, when: obj.timers.append((f, when)) or f,
+                                      register_callback=obj.callbacks.append)
+        return obj
+
+    def test_fan_list_marks_the_safety_fans(self):
+        obj = self._fan_plugin({"fan": .5, "fan_generic exhaust_fan": 0., "heater_fan hotend_fan": 1.,
+                                "controller_fan board": 1., "temperature_fan chamber": .3})
+        fans = {f["section"]: f for f in obj._fan_list()}
+        self.assertEqual(set(fans), {"fan", "fan_generic exhaust_fan", "heater_fan hotend_fan",
+                                     "controller_fan board", "temperature_fan chamber"})
+        self.assertTrue(fans["fan"]["button"] and fans["fan"]["on"])
+        self.assertTrue(fans["fan_generic exhaust_fan"]["button"])
+        self.assertFalse(fans["fan_generic exhaust_fan"]["on"])
+        for k in ("heater_fan hotend_fan", "controller_fan board", "temperature_fan chamber"):
+            self.assertFalse(fans[k]["button"], k)
+            self.assertTrue(fans[k]["why"])
+
+    def test_turned_off_then_restored_as_they_were(self):
+        obj = self._fan_plugin({"fan": .5, "fan_generic exhaust_fan": .8, "heater_fan hotend_fan": 1.,
+                                "controller_fan board": 1., "temperature_fan chamber": .3})
+        order = [f["section"] for f in obj._fan_list()]
+        obj.cmd_CHORDATA_FAN(Command(INDEX=order.index("fan")))
+        obj.cmd_CHORDATA_FAN(Command(INDEX=order.index("fan_generic exhaust_fan")))
+        self.assertEqual(obj.scripts, ["M107", "SET_FAN_SPEED FAN=exhaust_fan SPEED=0.000"])
+        obj.scripts.clear()
+        obj.cmd_CHORDATA_FANS(Command())
+        self.assertEqual(sorted(obj.scripts), ["M106 S128", "SET_FAN_SPEED FAN=exhaust_fan SPEED=0.800"])
+        obj.scripts.clear()
+        obj.cmd_CHORDATA_FANS(Command())          # once only
+        self.assertEqual(obj.scripts, [])
+
+    def test_back_on_after_ten_idle_minutes_or_when_a_print_starts(self):
+        obj = self._fan_plugin({"fan": .5})
+        stats = {"state": "standby"}
+        look = obj.printer.lookup_object
+        obj.printer.lookup_object = lambda n, d=None: SimpleNamespace(get_status=lambda now: stats) \
+            if n == "print_stats" else look(n, d)
+        lock = [False]
+        m = FakeMutex()
+        m.test = lambda: lock[0]
+        obj.gcode.get_mutex = lambda: m
+        i = [f["section"] for f in obj._fan_list()].index("fan")
+        obj.cmd_CHORDATA_FAN(Command(INDEX=i))
+        (check, when), = obj.timers
+        obj.scripts.clear()
+        idle_end = 100. + obj.FANS_IDLE
+        self.assertEqual(check(150.), 152.)              # idle, but not for 10 minutes yet
+        obj.state = "listening"
+        self.assertEqual(check(idle_end + 1.), idle_end + 3.)    # in use: not yet
+        obj.state = "idle"
+        lock[0] = True
+        self.assertEqual(check(idle_end + 1.), idle_end + 2.)    # a command runs: a second later
+        lock[0] = False
+        self.assertEqual(check(idle_end + 1.), obj.reactor.NEVER)
+        self.assertEqual(obj.scripts, ["M106 S128"])
+        # a print start brings them back at once (and Chordata's own M107 is no print start)
+        obj.timers.clear()
+        obj.cmd_CHORDATA_FAN(Command(INDEX=i))
+        (check, when), = obj.timers
+        obj.scripts.clear()
+        self.assertEqual(check(120.), 122.)
+        self.assertEqual(obj.scripts, [])
+        stats["state"] = "printing"
+        self.assertEqual(check(124.), obj.reactor.NEVER)
+        self.assertEqual(obj.scripts, [])            # the part fan is the slicer's in a print
+
+    def test_back_on_while_a_print_holds_the_gcode_lock(self):
+        # a print runs every line with the G-code lock held: the fans are queued, not held back.
+        # The part fan is left to the slicer: queued, it would land after the start macro and
+        # undo the slicer's M107 on the first layer
+        obj = self._fan_plugin({"fan": .5, "fan_generic exhaust_fan": .8})
+        stats = {"state": "standby"}
+        look = obj.printer.lookup_object
+        obj.printer.lookup_object = lambda n, d=None: SimpleNamespace(get_status=lambda now: stats) \
+            if n == "print_stats" else look(n, d)
+        m = FakeMutex(held=True)
+        obj.gcode.get_mutex = lambda: m
+        order = [f["section"] for f in obj._fan_list()]
+        obj.cmd_CHORDATA_FAN(Command(INDEX=order.index("fan")))
+        obj.cmd_CHORDATA_FAN(Command(INDEX=order.index("fan_generic exhaust_fan")))
+        (check, when), = obj.timers
+        obj.scripts.clear()
+        stats["state"] = "printing"            # (the card closed with its X, then a print)
+        self.assertEqual(check(102.), obj.reactor.NEVER)
+        self.assertEqual(obj.scripts, ["SET_FAN_SPEED FAN=exhaust_fan SPEED=0.800"])
+        self.assertEqual(obj._fans_off, {})    # and nothing is left to restore later
+
+    def test_a_fan_the_start_macro_sets_while_waiting_keeps_its_speed(self):
+        # the restore waits for the lock the start macro holds; what the macro set meanwhile
+        # stays (the speed is read inside the lock, not before it)
+        obj = self._fan_plugin({"fan_generic exhaust_fan": .8})
+        stats = {"state": "standby"}
+        look = obj.printer.lookup_object
+        obj.printer.lookup_object = lambda n, d=None: SimpleNamespace(get_status=lambda now: stats) \
+            if n == "print_stats" else look(n, d)
+        m = FakeMutex(held=True, on_take=lambda: obj.gcode.run_script("SET_FAN_SPEED FAN=exhaust_fan SPEED=0.3"))
+        obj.gcode.get_mutex = lambda: m
+        obj.cmd_CHORDATA_FAN(Command(INDEX=[f["section"] for f in obj._fan_list()].index("fan_generic exhaust_fan")))
+        (check, when), = obj.timers
+        obj.scripts.clear()
+        stats["state"] = "printing"
+        self.assertEqual(check(102.), obj.reactor.NEVER)
+        self.assertEqual(obj.scripts, ["SET_FAN_SPEED FAN=exhaust_fan SPEED=0.3"])     # the macro's only
+
+    def test_a_fan_set_since_keeps_its_new_speed(self):
+        # the slicer's M106 (or the user's) after Chordata turned the fan off isn't undone
+        obj = self._fan_plugin({"fan": .5})
+        obj.cmd_CHORDATA_FAN(Command(INDEX=[f["section"] for f in obj._fan_list()].index("fan")))
+        obj.gcode.run_script("M106 S255")
+        obj.scripts.clear()
+        obj.cmd_CHORDATA_FANS(Command())
+        self.assertEqual(obj.scripts, [])
+
+    def test_restored_to_the_speed_asked_for_not_times_max_power(self):
+        obj = self._fan_plugin({"fan": .4})       # Klipper: speed .4 = asked .8 x max_power .5
+        obj.printer.lookup_object("configfile").get_status(0)["settings"]["fan"] = {"max_power": .5}
+        i = [f["section"] for f in obj._fan_list()].index("fan")
+        obj.cmd_CHORDATA_FAN(Command(INDEX=i))
+        obj.scripts.clear()
+        obj.cmd_CHORDATA_FANS(Command())
+        self.assertEqual(obj.scripts, ["M106 S204"])
+
+    def test_a_generic_fan_named_for_the_electronics_gets_no_button(self):
+        obj = self._fan_plugin({"fan_generic mainboard_fan": 1., "fan_generic exhaust_fan": 1.})
+        obj.printer.lookup_object("configfile").get_status(0)["settings"]["fan_generic mainboard_fan"] = {}
+        fans = {f["section"]: f for f in obj._fan_list()}
+        self.assertFalse(fans["fan_generic mainboard_fan"]["button"])
+        self.assertTrue(fans["fan_generic exhaust_fan"]["button"])
+
+    def test_safety_fans_are_never_turned_off(self):
+        obj = self._fan_plugin({"heater_fan hotend_fan": 1., "controller_fan board": 1., "temperature_fan chamber": 1.})
+        order = [f["section"] for f in obj._fan_list()]
+        for k in ("heater_fan hotend_fan", "controller_fan board", "temperature_fan chamber"):
+            with self.assertRaisesRegex(ValueError, "leaves it on"):
+                obj.cmd_CHORDATA_FAN(Command(INDEX=order.index(k)))
+        self.assertEqual(obj.scripts, [])
+
+    def test_a_hum_on_the_note_stops_the_tap_step(self):
+        from test_belts import quiet
+        obj = self._fan_plugin({"fan_generic exhaust_fan": 1.})
+        q = quiet(fan=110.5)
+        obj._record_quiet = lambda *a, **k: [(i / 3200., q[0][i], q[1][i], q[2][i]) for i in range(len(q[0]))]
+        obj._accel_fs = 3200.
+        objects = {"resonance_tester": SimpleNamespace(accel_chips=[("adxl345", object())]),
+                   "toolhead": SimpleNamespace(wait_moves=lambda: None)}
+        look = obj.printer.lookup_object
+        obj.printer = SimpleNamespace(lookup_object=lambda n, d=None: objects.get(n, look(n, d)))
+        recorded = []
+        obj._record = lambda *a, **k: recorded.append(1) or []
+        obj.cmd_CHORDATA_TAP(Command())
+        self.assertEqual(recorded, [])                       # no tap listen
+        self.assertEqual(obj.state, "idle")
+        self.assertTrue(obj.belts["disturb"]["lines"])
+        self.assertTrue(abs(obj.belts["disturb"]["lines"][0] - 110.5) < 0.5)
+        # measure anyway: the taps are listened to (this fake accelerometer sends nothing)
+        with self.assertRaisesRegex(ValueError, "no data"):
+            obj.cmd_CHORDATA_TAP(Command(ANYWAY=1))
+        self.assertEqual(recorded, [1])
+        self.assertIsNone(obj.belts["disturb"])
+
+
 if __name__ == "__main__":
     unittest.main()
+
+
+class ConfigLoadTest(unittest.TestCase):
+    """chordata.cfg read as Klipper reads it (" #" starts an inline comment) and every macro
+    compiled as Klipper compiles it: a {# ... #} comment lost its closing tag that way once."""
+
+    def test_every_macro_compiles(self):
+        import configparser
+        try:
+            import jinja2
+        except ImportError:
+            self.skipTest("jinja2 not installed (Klipper's own dependency)")
+        cfg = configparser.RawConfigParser(strict=False, inline_comment_prefixes=(";", "#"))
+        cfg.read(os.path.join(os.path.dirname(__file__), "..", "chordata.cfg"))
+        env = jinja2.Environment("{%", "%}", "{", "}", extensions=["jinja2.ext.do"])
+        macros = [s for s in cfg.sections() if s.startswith("gcode_macro ") and cfg.has_option(s, "gcode")]
+        self.assertTrue(macros)
+        for section in macros:
+            env.from_string(cfg.get(section, "gcode"))
 
 
 class MacroRecursionTest(unittest.TestCase):
@@ -519,7 +800,8 @@ class MacroRecursionTest(unittest.TestCase):
 
     def test_no_macro_runs_itself(self):
         import re
-        text = open(os.path.join(os.path.dirname(__file__), "..", "chordata.cfg")).read()
+        with open(os.path.join(os.path.dirname(__file__), "..", "chordata.cfg")) as f:
+            text = f.read()
         for name, body in re.findall(r"^\[gcode_macro (\S+)\]\n(.*?)(?=^\[|\Z)", text, re.M | re.S):
             for line in body.splitlines():
                 cmd = line.strip().split(" ")[0]
