@@ -66,21 +66,21 @@ changing the analysis code.
 - Use the documented belt span and toolhead position; keep both consistent.
 - Pluck evenly and avoid contacting the toolhead or frame.
 - Reduce avoidable background vibration and check the sensor mount.
-- Review rejection reasons in **Measurement data** instead of relying on a single
-  large number. A strong knock is not necessarily a useful belt pluck.
+- A pluck left out shows as a crossed-out chip under the number (on a PC its
+  reason shows when you point at it); the big number stays on the last clear pluck. A strong knock
+  is not necessarily a useful belt pluck.
 - If interference resembles the toolhead's own resonance, repeat tap calibration.
 
-A few accepted plucks can yield a provisional average. Completion still requires
-five accepted readings per belt within the target tolerance. If no clear pluck can
-be captured repeatedly, use the manufacturer's alternative tensioning method.
+Pluck each belt a few times before turning: readings of one belt should agree within a few
+tenths of a Hz. If no clear pluck can be captured repeatedly, use the manufacturer's
+alternative tensioning method.
 Do not invent a target from the loudest sensor peak.
 
-## The two belts look matched but Chordata is not done
+## The two belts look matched but are off target
 
-Matching each other is only one comparison. Both averages must be within tolerance
-of the configured target, with enough accepted plucks. After any adjustment,
-complete a fresh A/B pair. Starting a new attempt intentionally clears that belt's
-old result and the previous completion state.
+Matching each other is only one comparison: both belts must also be within tolerance
+of the configured target. Turning one tensioner moves the other belt a little, so
+pluck both once more after the last turn.
 
 ## A saved position is missing or movement is rejected
 
@@ -89,10 +89,9 @@ are in G-code coordinates; re-save after changing offsets or your measurement se
 Klipper still enforces its movement limits. Inspect the error and actual coordinates
 rather than editing saved JSON to bypass an invalid movement.
 
-## Recordings or exports are missing
+## Recordings are missing
 
-**Export CSV** contains the current displayed frequency series only. Raw samples
-are separate files under `chordata/recordings/` in the config directory. Writes occur
+Raw samples are saved as files under `chordata/recordings/` in the config directory. Writes occur
 in a background thread, so allow time for large files to finish. Chordata retains
 40 raw CSV files; a background capture counts as a file too. Check `klippy.log` and
 directory permissions if a completed recording is not saved.

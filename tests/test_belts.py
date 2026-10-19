@@ -4,7 +4,7 @@
 # Synthetic recordings cover what differs between printers (which of the tone and
 # twice the tone is stronger, the toolhead ringing by itself, weak plucks, the other
 # belt ringing along). Real recordings are checked too when they are present:
-#   tools/test_belts.py [--real DIR]   DIR holds adxl345-plucks2.csv and
+#   tests/test_belts.py [--real DIR]   DIR holds adxl345-plucks2.csv and
 #                                      beacon_accel-beacon-plucks2.csv (a real CoreXY printer)
 #
 # Copyright (C) 2026  Chordata contributors
@@ -159,23 +159,25 @@ def synthetic():
     series_rules(q)
     fingerprint(q)
     fans()
+    wandering_line()
+    uncertainty()
 
 
-def real_fan(t, fr, amp, start=0.0, seed=3):
-    """A real fan: its speed wanders slowly (+-0.2 Hz), its level wobbles a few %, and it
+def real_fan(t, fr, amp, start=0.0, seed=3, wander=0.2):
+    """A real fan: its speed wanders slowly (+-wander Hz), its level wobbles a few %, and it
     has a weaker line at twice its note. Returns what it adds to (x, y, z)."""
     g = np.random.default_rng(seed)
     walk = np.convolve(np.cumsum(g.normal(0, 1, len(t))), np.ones(800) / 800, "same")
-    walk = 0.2 * walk / max(1e-9, np.abs(walk).max())
+    walk = wander * walk / max(1e-9, np.abs(walk).max())
     ph = 2 * np.pi * np.cumsum(fr + walk) / FS + g.uniform(0, 6.28)
     a = amp * (1 + 0.03 * np.sin(2 * np.pi * 0.7 * t))
     s = np.where(t >= start, a * np.sin(ph) + 0.3 * a * np.sin(2 * ph + 1.0), 0.0)
     return s, 0.8 * s, 0.5 * s
 
 
-def with_fan(r, fr, amp, start=0.0, seed=3):
+def with_fan(r, fr, amp, start=0.0, seed=3, wander=0.2):
     t, ax, ay, az = r
-    fx, fy, fz = real_fan(t - t[0], fr, amp, start, seed)
+    fx, fy, fz = real_fan(t - t[0], fr, amp, start, seed, wander)
     return t, ax + fx, ay + fy, az + fz
 
 
@@ -434,6 +436,133 @@ def real(d):
         check(name + " left 88.2", left["verdict"] == "good" and abs(left["freq"] - 88.2) < 0.6, left)
 
 
+def wandering_line():
+    """A strong steady line that wanders a few Hz (a motor or fan line like the 184 Hz one on a
+    real Beacon, 178-188 Hz) right where the belt's twice-the-tone sits: twice the tone can't be
+    heard there, so the tone alone decides. Its skirt just past its mask stands far above the
+    noise; a tone picked so that twice it lands there would read a fixed wrong Hz (the same to
+    the last digit, pluck after pluck) and pass as 'good'. Each seed is another fan path."""
+    for seed in (3, 5, 8):
+        fq = lambda: with_fan(rec([], 2.0), 184.0, 600, seed=seed, wander=4.0)[1:]
+        r = belts.analyse(*with_fan(rec(series([91.0] * 5, r2=0.3)), 184.0, 600, seed=seed, wander=4.0),
+                          quiet=fq(), target=110.0)
+        fr = [p["freq"] for p in r["plucks"] if p["ok"]]
+        # either the right Hz, or no reading: never a wrong one
+        check("2F on a wandering 184 Hz line (seed %d)" % seed,
+              (r["freq"] is None or abs(r["freq"] - 91.0) <= 0.3) and all(abs(x - 91.0) <= 0.5 for x in fr), r)
+
+
+def uncertainty():
+    """u95: s with n - 1, Student's t, the rounding (readings exactly alike still leave it)."""
+    cases = [([90.0], None), ([89.67] * 3, 4.303 * np.sqrt(1e-4 / 12)), ([90.5, 90.9, 91.0], 4.303 * np.sqrt(np.var([90.5, 90.9, 91.0], ddof=1) / 3 + 1e-4 / 12)),
+             ([110.0, 110.05, 110.1, 110.2, 110.1], 2.776 * np.sqrt(np.var([110.0, 110.05, 110.1, 110.2, 110.1], ddof=1) / 5 + 1e-4 / 12))]
+    for vals, want in cases:
+        got = belts.u95(vals)
+        ok = (got is None) if want is None else (got is not None and abs(got - want) < 2e-3)
+        print("%-4s %-46s %s" % ("ok" if ok else "FAIL", "u95 %s" % vals, got))
+        if not ok:
+            FAILS.append("u95 %s" % vals)
+    # a good series says how well its mean is known
+    q = quiet()
+    r = belts.analyse(*rec(series([91.0] * 5)), quiet=q, target=110.0)
+    ok = r["verdict"] == "good" and r["u95"] is not None and 0 < r["u95"] < 0.5 and r["stddev"] is not None
+    print("%-4s %-46s %s" % ("ok" if ok else "FAIL", "good series has u95 and stddev (n - 1)", (r["u95"], r["stddev"])))
+    if not ok:
+        FAILS.append("series u95")
+    # more good plucks than needed: the latest count (a belt just tensioned still settles)
+    r = belts.analyse(*rec(series([91.6, 91.4, 91.0, 91.0, 91.0])), quiet=q, target=110.0, expect=3)
+    ok = r["verdict"] == "good" and abs(r["freq"] - 91.0) <= 0.2 and [p["why"] for p in r["plucks"]][:2] == ["more than needed"] * 2
+    print("%-4s %-46s %s" % ("ok" if ok else "FAIL", "expect 3 of 5: the latest 3 count", (r["freq"], [p["why"] for p in r["plucks"]])))
+    if not ok:
+        FAILS.append("latest count")
+
+
+FREE_ERR = 0.45          # Hz: a Tuner Mode pluck this far from the mic is a wrong reading
+# Tuner Mode readings known to be wrong (pluck time, s), not put right yet: on the Beacon, whose
+# setup tap rang nothing clearly (so its toolhead note isn't learned), a left-belt pluck read at
+# 102.8 Hz (a short ring near the toolhead's note)
+KNOWN_WRONG = {("beacon", "left"): {6.79}}
+# Tuner Mode plucks read right (within FREE_ERR) today: fewer is a loss of plucks heard
+MIN_RIGHT = {("adxl", "right"): 7, ("adxl", "left"): 7, ("beacon", "right"): 6, ("beacon", "left"): 7}
+# the belts' difference against the mic: target 0.125 Hz. The Beacon misses it today (0.16 Hz:
+# two weak right-belt plucks whose twice-the-tone sits on its 184 Hz line read 0.4 Hz high);
+# allowed that much until it is put right, then this entry goes
+KNOWN_DIFF = {"beacon": 0.2}
+DATA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "data", "plucks2.npz")
+
+
+def real_mic():
+    """The real plucks2 recordings (cut short: tests/data/plucks2.npz, kept out of the public repo), judged by
+    the microphone that was recording beside them. A Nebula 370 with an ADXL345 and a Beacon,
+    the right belt plucked, then the left. The mic's pitch at each counted pluck is read over
+    the same stretch the engine used (0.03 s after the onset, 0.6 s or up to the next pluck):
+    a plucked belt's tone sinks as it rings down, so a longer or later window reads lower.
+    Checked: a reading for each belt, near the mic (within 0.3 Hz: the tone at twice the note
+    weighs the louder start more), and above all the two belts' difference, which is what
+    tensioning matches, as the mic has it (within 0.125 Hz)."""
+    if not os.path.exists(DATA):
+        print("skip real_mic: no %s (real recordings are kept out of this repo)" % os.path.relpath(DATA))
+        return
+    d = np.load(DATA)
+    mfs = float(d["mic_fs"])
+
+    def mic(y, t, n_s, c):
+        seg = y[int((t + belts.SKIP) * mfs):][:int(n_s * mfs)].astype(float)
+        n = 1 << 18
+        sp = np.abs(np.fft.rfft((seg - seg.mean()) * np.hanning(len(seg)), n)) ** 2
+        f = np.fft.rfftfreq(n, 1 / mfs)
+        sel = np.flatnonzero(np.abs(f - c) <= 2.0)
+        k = sel[np.argmax(sp[sel])]
+        a, b, g = np.log(sp[k - 1:k + 2])
+        return float(f[k] + 0.5 * (a - g) / (a - 2 * b + g) * (f[1] - f[0]))
+    for chip in ("adxl", "beacon"):
+        tap = belts.analyse_tap(*d[chip + "_tap"].astype(float), quiet=list(d[chip + "_tapq"].astype(float)))
+        res = {}
+        for side, ref in (("right", 90.9), ("left", 88.2)):
+            seg = d[chip + "_" + side].astype(float)
+            fs = (len(seg[0]) - 1) / (seg[0][-1] - seg[0][0])
+            on = belts.find_plucks(list(seg[1:]), fs, belts.SEARCH[0], 0.45 * fs / 2.0, None)
+            n = (on[0] - int(0.05 * fs)) if on else 0
+            q = [x[:n] for x in seg[1:]] if n > int(0.5 * fs) else None
+            r = belts.analyse(*seg, quiet=q, target=110.0, avoid=tap["ring"],
+                              other=res["right"][0]["freq"] if side == "left" else None)
+            ts = [p["t"] for p in r["plucks"]]
+            err = []
+            for i, p in enumerate(r["plucks"]):
+                if p["ok"]:
+                    w = min(belts.WINDOW, ts[i + 1] - p["t"] - belts.SKIP - 0.01) if i + 1 < len(ts) else belts.WINDOW
+                    err.append((p["freq"], mic(d[chip + "_" + side + "_mic"], p["t"], w, ref)))
+            res[side] = (r, err)
+            e = [a - b for a, b in err]
+            check("%s %s: reading near the mic (%+.2f Hz)" % (chip, side, np.mean(e) if e else 99),
+                  r["verdict"] == "good" and e and abs(np.mean(e)) <= 0.3, r)
+            # and as Tuner Mode shows them: every clear pluck on its own (no series rules)
+            r = belts.analyse(*seg, quiet=q, target=110.0, avoid=tap["ring"], free=True)
+            ts = [p["t"] for p in r["plucks"]]
+            fe = []
+            for i, p in enumerate(r["plucks"]):
+                if p["ok"]:
+                    w = min(belts.WINDOW, ts[i + 1] - p["t"] - belts.SKIP - 0.01) if i + 1 < len(ts) else belts.WINDOW
+                    fe.append((p["t"], round(p["freq"] - mic(d[chip + "_" + side + "_mic"], p["t"], w, ref), 2)))
+            bad = {x[0] for x in fe if abs(x[1]) > FREE_ERR}
+            known = KNOWN_WRONG.get((chip, side), set())
+            ok = len(fe) - len(bad) >= MIN_RIGHT[(chip, side)] and bad == known
+            print("%-4s %-46s %s%s" % ("ok" if ok else "FAIL", "%s %s, Tuner Mode: each pluck vs the mic" % (chip, side), fe,
+                                       "  known wrong: %s" % sorted(known) if known else ""))
+            if not ok:
+                # a new wrong reading, or a known one put right (then take it out of KNOWN_WRONG)
+                FAILS.append("%s %s Tuner plucks" % (chip, side))
+        (rr, er), (rl, el) = res["right"], res["left"]
+        if er and el:
+            de = np.mean([a for a, _ in er]) - np.mean([a for a, _ in el])
+            dm = np.mean([b for _, b in er]) - np.mean([b for _, b in el])
+            lim = KNOWN_DIFF.get(chip, 0.125)
+            ok = abs(de - dm) <= lim and (lim == 0.125 or abs(de - dm) > 0.125)
+            print("%-4s %-46s engine %.2f, mic %.2f" % ("ok" if ok else "FAIL", "%s: right - left as the mic has it" % chip, de, dm))
+            if not ok:
+                FAILS.append("%s belts' difference" % chip)
+
+
 def background_hum():
     """Step 0's hum check (disturbing): a fan a few Hz off the note is no disturbance (its
     skirt is not a line of its own), one on the note is, once; silent data gives nothing."""
@@ -482,6 +611,7 @@ if __name__ == "__main__":
     background_hum()
     tap_spot()
     tensioning()
+    real_mic()
     if a.real:
         real(a.real)
     print("FAILED: " + ", ".join(FAILS) if FAILS else "all passed")

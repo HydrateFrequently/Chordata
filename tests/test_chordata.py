@@ -47,8 +47,7 @@ def plugin(objects=None):
     obj.belt_now, obj.belt_live = None, []
     obj.belt_tol, obj.belt_target = .25, 110.
     obj._tool_info = {"corexy": True}
-    obj.belts = {"target": 110., "tol": .25, "plucks": 5, "round": 0, "A": {"freq": 110.},
-                 "B": {"freq": 110.}, "done": True, "heard": ["A"], "good": {}, "tap": [], "tap_done": True}
+    obj.belts = {"target": 110., "tol": .25, "tap": [], "tap_done": True}
     return obj
 
 
@@ -59,7 +58,7 @@ def status(**values):
 class SafetyTests(unittest.TestCase):
     def test_all_direct_commands_reject_printing_and_paused(self):
         for state in ("printing", "paused"):
-            for command in ("START", "LISTEN", "BOTH", "FREE", "TAP", "POS", "RECORD"):
+            for command in ("START", "FREE", "TAP", "POS", "RECORD"):
                 with self.subTest(state=state, command=command):
                     obj = plugin({"print_stats": status(state=state)})
                     with self.assertRaisesRegex(ValueError, "finish or cancel"):
@@ -72,13 +71,6 @@ class SafetyTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "tap the toolhead"):
             obj.cmd_CHORDATA_FREE(Command())
         self.assertEqual(json.dumps(obj.belts, sort_keys=True), before)
-        self.assertEqual(obj.state, "idle")
-
-    def test_both_needs_the_tap(self):
-        obj = plugin({"print_stats": status(state="standby")})
-        obj.belts["tap_done"] = False
-        with self.assertRaisesRegex(ValueError, "tap the toolhead"):
-            obj.cmd_CHORDATA_BOTH(Command())
         self.assertEqual(obj.state, "idle")
 
     def test_free_tune_ends_by_itself_after_a_minute_without_plucks(self):
@@ -203,30 +195,6 @@ class SafetyTests(unittest.TestCase):
             obj.cmd_CHORDATA_START(Command(TARGET="nan"))
         self.assertIs(obj.belts, before)
 
-    def test_belts_need_a_tap_first(self):
-        obj = plugin({"resonance_tester": SimpleNamespace(accel_chips=[("xy", object())]),
-                      "toolhead": SimpleNamespace(wait_moves=lambda: None)})
-        obj.belts = dict(obj.belts, tap_done=False)
-        recorded = []
-        obj._record = lambda *args, **kwargs: recorded.append(args) or []
-        with self.assertRaisesRegex(ValueError, "tap the toolhead first"):
-            obj.cmd_CHORDATA_LISTEN(Command(BELT="A"))
-        self.assertEqual(recorded, [])
-
-    def test_failed_capture_clears_old_result_and_completion(self):
-        toolhead = SimpleNamespace(wait_moves=lambda: None)
-        obj = plugin({"resonance_tester": SimpleNamespace(accel_chips=[("xy", object())]),
-                      "toolhead": toolhead})
-        obj._record = lambda *args, **kwargs: []
-        with self.assertRaisesRegex(ValueError, "no data"):
-            obj.cmd_CHORDATA_LISTEN(Command(BELT="A"))
-        self.assertIsNone(obj.belts["A"])
-        self.assertFalse(obj.belts["done"])
-        self.assertEqual(obj.belts["heard"], [])
-        self.assertEqual(obj.state, "idle")
-        self.assertEqual(obj.measurement["phase"], "error")
-        self.assertIn("no data", obj.measurement["error"])
-
     def test_wait_failure_releases_measurement(self):
         def fail():
             raise RuntimeError("shutdown")
@@ -254,46 +222,22 @@ class SafetyTests(unittest.TestCase):
         self.assertEqual(snapshot["measurement"]["belt"], "B")
         self.assertEqual(obj.measurement["elapsed"], 0.)
 
-    def test_success_requires_fresh_pair_and_publishes_final_metadata(self):
-        obj = plugin({"resonance_tester": SimpleNamespace(accel_chips=[("xy", object())]),
-                      "toolhead": SimpleNamespace(wait_moves=lambda: None)})
-        obj.belts["heard"] = []
-        obj._record = lambda *args, **kwargs: [(i / 3200., 0., 0., 0.) for i in range(100)]
-        obj._save_recording = lambda *args: None
-        def analysis(*args, **kwargs):
-            return {"freq": 110., "used": 5, "heard": 5, "note": "five good plucks",
-                    "plucks": [{"t": i, "ok": True, "why": "", "freq": 110.} for i in range(5)]}
-        with patch("chordata_belts.analyse", side_effect=analysis):
-            obj.cmd_CHORDATA_LISTEN(Command(BELT="A"))
-            self.assertFalse(obj.belts["done"])
-            self.assertEqual(obj.belts["round"], 0)
-            obj.cmd_CHORDATA_LISTEN(Command(BELT="B"))
-        self.assertTrue(obj.belts["done"])
-        self.assertEqual(obj.belts["round"], 1)
-        self.assertEqual(obj.belts["A"]["round"], 1)
-        self.assertEqual(obj.belts["B"]["round"], 1)
-        self.assertEqual(obj.measurement["accepted"], 5)
-        self.assertEqual(obj.measurement["phase"], "complete")
-        self.assertGreater(obj.belts["B"]["measured_at"], 0.)
-
     def test_background_is_recorded_once_per_session(self):
         obj = plugin({"resonance_tester": SimpleNamespace(accel_chips=[("xy", object())]),
                       "toolhead": SimpleNamespace(wait_moves=lambda: None)})
-        obj.belts["heard"] = []
         obj._quiet = None
         lengths, quiets = [], []
         def record(chip, toolhead, secs, **kw):
             lengths.append(secs)
-            return [(i / 3200., float(len(lengths)), 0., 0.) for i in range(100)]
+            return [(i * secs / 99., float(len(lengths)), 0., 0.) for i in range(100)]
         obj._record = record
-        obj._save_recording = lambda *args: None
+        obj._save_recording = lambda *args, **kw: None
         def analysis(*args, **kwargs):
             quiets.append(kwargs["quiet"])
-            return {"freq": 110., "used": 5, "heard": 5, "note": "", "hum": [],
-                    "plucks": [{"t": i, "ok": True, "why": "", "freq": 110.} for i in range(5)]}
+            return {"hum": [], "plucks": [{"t": 1., "ok": True, "why": "", "freq": 110.}]}
         with patch("chordata_belts.analyse", side_effect=analysis):
-            obj.cmd_CHORDATA_LISTEN(Command(BELT="A"))
-            obj.cmd_CHORDATA_LISTEN(Command(BELT="B"))
+            obj.cmd_CHORDATA_FREE(Command(SECONDS=8.))
+            obj.cmd_CHORDATA_FREE(Command(SECONDS=8.))
         self.assertEqual(lengths.count(1.5), 1)          # one background, then only the plucks
         self.assertEqual(quiets[0], quiets[1])
 
@@ -370,7 +314,7 @@ class CaptureTests(unittest.TestCase):
             raise RuntimeError("timer unavailable")
         obj.reactor.register_timer = fail
         with self.assertRaisesRegex(RuntimeError, "timer unavailable"):
-            obj._record(chip, SimpleNamespace(), 2., live={})
+            obj._record(chip, SimpleNamespace(), 2., live=lambda samples: None)
         self.assertEqual(events, ["finish"])
 
     def test_late_live_analysis_cannot_overwrite_final_result(self):
@@ -379,7 +323,7 @@ class CaptureTests(unittest.TestCase):
         client = SimpleNamespace(msgs=[{"data": samples}], request_start_time=0.,
                                  finish_measurements=lambda: None, get_samples=lambda: samples)
         obj = plugin()
-        obj.belt_now = "A"
+        obj.belt_now = "free"
         obj.reactor.register_timer = lambda tick, when: setattr(obj, "tick", tick) or 1
         obj.reactor.unregister_timer = lambda timer: None
         class Worker:
@@ -392,9 +336,10 @@ class CaptureTests(unittest.TestCase):
         clock = [100.]
         obj.reactor.monotonic = lambda: clock[0]
         obj.reactor.pause = lambda when: clock.__setitem__(0, when)
-        with patch("chordata.threading.Thread", Worker), patch("chordata_belts.analyse", return_value={"plucks": ["stale"], "used": 1, "heard": 1}):
+        with patch("chordata.threading.Thread", Worker):
             obj._record(SimpleNamespace(start_internal_client=lambda: client),
-                        SimpleNamespace(dwell=lambda seconds: obj.tick(100.)), 2., live={})
+                        SimpleNamespace(dwell=lambda seconds: obj.tick(100.)), 2.,
+                        live=lambda part: setattr(obj, "belt_live", ["stale"]))
             obj.belt_live = ["final"]
             workers[0]()
         self.assertEqual(obj.belt_live, ["final"])
@@ -408,7 +353,7 @@ class CaptureTests(unittest.TestCase):
         client = SimpleNamespace(msgs=[{"data": samples}], request_start_time=0.,
                                  finish_measurements=lambda: None, get_samples=lambda: samples)
         obj = plugin()
-        obj.belt_now = "A"
+        obj.belt_now = "free"
         obj.reactor.register_timer = lambda tick, when: setattr(obj, "tick", tick) or 1
         obj.reactor.unregister_timer = lambda timer: None
         clock = [100.]
@@ -430,11 +375,11 @@ class CaptureTests(unittest.TestCase):
 
             def is_alive(self):
                 return False
-        with patch("chordata.threading.Thread", Worker), \
-                patch("chordata_belts.analyse", return_value={"plucks": ["live"], "used": 1, "heard": 1}) as live:
+        called = []
+        with patch("chordata.threading.Thread", Worker):
             obj._record(SimpleNamespace(start_internal_client=lambda: client),
-                        SimpleNamespace(dwell=lambda seconds: obj.tick(100.)), 2., live={})
-        self.assertTrue(live.called)              # the live analysis did run, inside the wait
+                        SimpleNamespace(dwell=lambda seconds: obj.tick(100.)), 2., live=called.append)
+        self.assertEqual(called, [])              # the worker ran inside the wait (too late to count: skipped)
         self.assertEqual(order, ["wait"])         # one short wait, then done
         self.assertLess(clock[0], 100.1)
 
@@ -826,6 +771,168 @@ class FanTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class HistoryTests(unittest.TestCase):
+    """Tuner Mode's session history: every final pluck once, cleared by a new session, Reset
+    and a double tap on the toolhead (the whole history, as Reset history)."""
+    COLS = ([0.], [0.], [0.], [0.])
+
+    @staticmethod
+    def pk(t, ok=True, freq=110., why="", **kw):
+        return dict({"t": t, "ok": ok, "freq": freq, "why": why if ok else (why or "a knock")}, **kw)
+
+    def _filled(self, n=7):
+        obj = plugin()
+        obj.belts["tap_main"] = {"freq": 60., "guard": 2.}
+        obj._history_add(1, 0., [self.pk(float(i)) for i in range(1, n + 1)] + [self.pk(n + .5, ok=False)],
+                         self.COLS, None, 20., final=True)
+        return obj
+
+    def test_live_then_final_is_one_entry_and_the_final_verdict_wins(self):
+        obj = plugin()
+        obj._history_add(1, 0., [self.pk(1., final=True), self.pk(2., final=False)], self.COLS, None, 2.5)
+        self.assertEqual([(h["n"], h["freq"], h["ok"]) for h in obj.history], [(1, 110., True)])
+        obj._history_add(1, 0., [self.pk(1.02, ok=False, why="too weak"), self.pk(2., freq=111.)],
+                         self.COLS, None, 8., final=True)
+        self.assertEqual([(h["n"], h["freq"], h["ok"], h["why"]) for h in obj.history],
+                         [(1, 110., False, "too weak"), (2, 111., True, "")])
+        self.assertEqual(obj.get_status(100.)["history"], obj.history)
+        # the same time in another listen (another Tuner run) is another pluck; the history stays
+        obj._history_add(2, 0., [self.pk(1.)], self.COLS, None, 8., final=True)
+        self.assertEqual(len(obj.history), 3)
+
+    def test_a_tuner_run_puts_each_pluck_in_once(self):
+        obj = plugin({"print_stats": status(state="standby"),
+                      "resonance_tester": SimpleNamespace(accel_chips=[("adxl345", object())]),
+                      "toolhead": SimpleNamespace(wait_moves=lambda: None)})
+        obj._record_quiet = lambda *args, **kw: [(0., 0., 0., 0.)] * 10
+        obj._save_recording = lambda *args, **kw: None
+        part = [(i * .01, 0., 0., 0.) for i in range(800)]
+
+        def record(chip, toolhead, secs, live=None, stop=None):
+            live(part)                    # heard live (its window all in), then in the final analysis
+            return part
+        obj._record = record
+        res = {"plucks": [self.pk(1.)], "onsets": [1.]}
+        with patch.object(belts, "analyse", lambda *a, **k: res):
+            obj.cmd_CHORDATA_FREE(Command(SECONDS=8.))
+            obj.cmd_CHORDATA_FREE(Command(SECONDS=8.))
+        self.assertEqual([h["n"] for h in obj.history], [1, 2])     # one per run, kept across runs
+
+    def test_cleared_by_start_close_and_reset(self):
+        obj = self._filled()
+        obj._tool_info = {"corexy": True}
+        obj.printer = SimpleNamespace(lookup_object=lambda name, default=None:
+                                      object() if name == "resonance_tester" else default)
+        obj.cmd_CHORDATA_START(Command())
+        self.assertEqual(obj.history, [])
+        obj = self._filled()
+        obj.cmd_CHORDATA_FANS(Command())               # Close Chordata
+        self.assertEqual(obj.history, [])
+        obj = self._filled()
+        sent = []
+        obj._handle_history_reset(SimpleNamespace(send=sent.append))
+        self.assertEqual((obj.history, sent), ([], [{"cleared": True}]))
+
+    def test_reset_while_listening_keeps_earlier_plucks_out(self):
+        obj = self._filled()
+        obj.state, obj.measurement = "listening", {"phase": "listening", "belt": "free"}
+        obj._listen_t0 = (1, 8., 99.)                  # its piece from 8 s started 1 s ago: Reset at 9 s
+        obj._handle_history_reset(SimpleNamespace(send=lambda r: None))
+        obj._history_add(1, 0., [self.pk(3.), self.pk(9.5)], self.COLS, None, 12., final=True)
+        self.assertEqual([h["n"] for h in obj.history], [1])
+
+    def test_reset_right_after_a_listen_starts_keeps_its_plucks(self):
+        obj = self._filled()
+        obj.state, obj.measurement = "listening", {"phase": "listening", "belt": "free"}
+        obj._listen_id, obj._listen_t0 = 2, (2, 0., 100.)   # recording, no live analysis yet
+        obj._handle_history_reset(SimpleNamespace(send=lambda r: None))
+        obj._history_add(2, 0., [self.pk(.5), self.pk(2.)], self.COLS, None, 8., final=True)
+        self.assertEqual(len(obj.history), 2)
+
+    def test_reset_in_a_later_listen_leaves_out_only_its_earlier_plucks(self):
+        obj = self._filled()
+        obj.state, obj.measurement = "listening", {"phase": "listening", "belt": "free"}
+        obj._listen_id, obj._listen_t0 = 2, (2, 8., 97.)    # the second piece, 3 s in: Reset at 11 s
+        obj._handle_history_reset(SimpleNamespace(send=lambda r: None))
+        obj._history_add(2, 8., [self.pk(2.), self.pk(4.)], self.COLS, None, 8., final=True)
+        self.assertEqual([h["freq"] for h in obj.history], [110.])
+        obj._history_add(3, 0., [self.pk(1.)], self.COLS, None, 8., final=True)      # the next listen: all of it
+        self.assertEqual(len(obj.history), 2)
+
+    def test_double_tap_clears_the_whole_history_once(self):
+        obj = self._filled()
+        calls = []
+
+        def knock(*args, **kw):
+            calls.append((args[4], kw["until"]))
+            return True, 20., None
+        taps = [self.pk(1.), self.pk(9., ok=False), self.pk(9.4, ok=False)]
+        with patch.object(belts, "toolhead_knock", knock):
+            obj._history_add(1, 0., taps, self.COLS, None, 12., final=True)
+            obj._history_add(1, 0., taps, self.COLS, None, 12., final=True)     # seen again: once only
+            # and again a hundredth later (the live and final analyses may place an onset apart)
+            obj._history_add(1, 0., [self.pk(9.03, ok=False), self.pk(9.42, ok=False)], self.COLS, None, 12.,
+                             final=True)
+        self.assertEqual(calls, [(9., 9.4), (9.4, None)])
+        self.assertEqual(obj.history, [])
+        self.assertEqual(obj.history_note["text"], "History cleared (double tap)")
+        self.assertEqual(obj.get_status(100.)["history_note"], obj.history_note)
+
+    def test_double_tap_across_two_pieces(self):
+        obj = self._filled()
+        calls = []
+
+        def knock(*args, **kw):
+            calls.append((args[4], kw["until"]))
+            return True, 20., None
+        with patch.object(belts, "toolhead_knock", knock):
+            # the first knock at the end of one piece (listen 2, 0-8 s), the second 0.5 s later in the next
+            obj._history_add(2, 0., [self.pk(7.6, ok=False)], self.COLS, None, 8., final=True)
+            self.assertIsNone(obj.history_note)
+            obj._history_add(2, 8., [self.pk(.1, ok=False, final=True), self.pk(3., final=False)],
+                             self.COLS, None, 3.5)                                  # live
+            obj._history_add(2, 8., [self.pk(.1, ok=False), self.pk(3.)], self.COLS, None, 8., final=True)
+        self.assertEqual(calls, [(7.6, None), (.1, 3.)])
+        self.assertEqual([(h["n"], h["ok"]) for h in obj.history], [(11, True)])     # only what came after
+        self.assertEqual(obj.history_note["text"], "History cleared (double tap)")
+
+    def test_double_tap_keeps_what_comes_after_and_earlier_plucks_stay_gone(self):
+        obj = self._filled()
+        with patch.object(belts, "toolhead_knock", lambda *a, **k: (True, 20., None)):
+            obj._history_add(1, 0., [self.pk(9., ok=False), self.pk(9.4, ok=False), self.pk(10.5)], self.COLS, None, 12., final=True)
+            # a later analysis of the same listen sees the earlier plucks again: they don't come back
+            obj._history_add(1, 0., [self.pk(3.), self.pk(9., ok=False), self.pk(9.4, ok=False), self.pk(10.5)],
+                             self.COLS, None, 12., final=True)
+        self.assertEqual([h["ok"] for h in obj.history], [True])
+        self.assertEqual(len(obj.history), 1)
+
+    def test_no_clear_with_a_pluck_between_or_outside_the_gap(self):
+        for taps in ([self.pk(9.), self.pk(9.3), self.pk(9.6)],        # a counted pluck between
+                     [self.pk(9.), self.pk(9.9)], [self.pk(9.), self.pk(9.1)]):
+            for i, p in enumerate(taps):
+                if i != 1 or len(taps) == 2:
+                    p["ok"], p["why"] = False, "a knock"
+            with self.subTest(taps=[p["t"] for p in taps]):
+                obj = self._filled()
+                with patch.object(belts, "toolhead_knock", lambda *a, **k: (True, 20., None)):
+                    obj._history_add(1, 0., taps, self.COLS, None, 12., final=True)
+                self.assertEqual(sum(h["ok"] for h in obj.history), 7 + (len(taps) == 3))
+                self.assertIsNone(obj.history_note)
+
+    def test_no_double_tap_without_the_toolhead_note_or_a_knock(self):
+        obj = self._filled()
+        del obj.belts["tap_main"]
+        calls = []
+        with patch.object(belts, "toolhead_knock", lambda *a, **k: calls.append(1) or (True, 20., None)):
+            obj._history_add(1, 0., [self.pk(9., ok=False), self.pk(9.4, ok=False)], self.COLS, None, 12., final=True)
+        self.assertEqual((calls, len(obj.history)), ([], 10))
+        obj = self._filled()
+        with patch.object(belts, "toolhead_knock", lambda *a, **k: (False, 3., None)):
+            obj._history_add(1, 0., [self.pk(9., ok=False), self.pk(9.4, ok=False)], self.COLS, None, 12., final=True)
+        self.assertEqual(sum(h["ok"] for h in obj.history), 7)
+        self.assertIsNone(obj.history_note)
 
 
 class ConfigLoadTest(unittest.TestCase):

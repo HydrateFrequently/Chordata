@@ -172,6 +172,12 @@ input[type=text], input[type=number], input[type=password] {
 .jog .xy label { font-size: 14px; color: var(--muted); display: grid; gap: 2px; }
 .jog .xy input { min-height: 44px; font-size: 18px; width: 100%; box-sizing: border-box; }
 .how li { margin: 6px 0; }
+/* How it works: numbered steps, one short line and a line-art icon each */
+.manual { list-style: none; counter-reset: step; margin: 8px 0 12px; padding: 0; }
+.manual li { display: grid; grid-template-columns: 24px 32px 1fr; align-items: center; gap: 10px;
+  padding: 8px 0; border-bottom: 1px solid var(--line); counter-increment: step; }
+.manual li::before { content: counter(step); font-weight: 800; font-size: 20px; color: var(--primary); text-align: center; }
+.manual svg { width: 32px; height: 32px; color: var(--primary); }
 details.sub > summary { cursor: pointer; color: var(--primary); font-weight: 600; min-height: 44px; display: flex; align-items: center; }
 /* Prompt card */
 #prompt { scroll-margin-top: 72px; border: 2px solid var(--primary); box-shadow: 0 0 0 4px var(--primary-soft); }
@@ -196,24 +202,29 @@ details.sub > summary { cursor: pointer; color: var(--primary); font-weight: 600
 #beltView .live { text-align: center; padding: 10px 0 4px; }
 #beltView .live .hz { font-size: 64px; font-weight: 700; line-height: 1.05; font-variant-numeric: tabular-nums; }
 #beltView .live .hz.out { color: var(--muted); text-decoration: line-through; }
+/* the number sits in a box: a pluck heard this instant lights the box (HEARD_MS), nothing else flashes;
+   a reading whose window isn't all in yet: greyed */
+#beltView .live .hzbox { display: inline-block; min-width: 6em; padding: 2px 18px; border: 2px solid var(--line);
+  border-radius: var(--radius); transition: background-color 0.12s, border-color 0.12s; }
+#beltView .live .hzbox.lit { border-color: var(--primary); background: var(--primary-soft); }
+#beltView .live .hz { transition: opacity 0.25s; }
+#beltView .live .hz.prov { opacity: 0.55; }
+#beltView .live .age { color: var(--muted); font-size: 14px; }
 #beltView .live .sub { color: var(--muted); font-size: 16px; }
 #beltView .live .d { font-size: 20px; font-weight: 600; }
 #beltView .live .d.good { color: var(--ok); } #beltView .live .d.near { color: var(--warn); } #beltView .live .d.far { color: var(--err); }
-#beltView .chips { display: flex; flex-wrap: wrap; gap: 6px; justify-content: center; margin: 8px 0; }
-#beltView .chip { padding: 4px 10px; border-radius: 999px; background: var(--card2); font-variant-numeric: tabular-nums; font-size: 16px; }
-#beltView .chip.ok { background: var(--primary-soft); color: var(--text); }
-#beltView .chip.out { color: var(--muted); text-decoration: line-through; }
-#beltView .belts { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
-#beltView .belt { background: var(--card2); border-radius: var(--radius); padding: 12px; text-align: center; border: 2px solid transparent; min-width: 0; }
-#beltView .belt.now { border-color: var(--primary); }
-#beltView .belt .name { color: var(--muted); font-size: 15px; }
-#beltView .belt .hz { white-space: nowrap; font-size: clamp(26px, 8vw, 40px); font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; }
-#beltView .belt .d { font-size: 16px; font-weight: 600; }
-#beltView .belt .d.good { color: var(--ok); }
-#beltView .belt .d.near { color: var(--warn); }
-#beltView .belt .d.far { color: var(--err); }
-#beltView .belt .prev, #beltView .belt .n { color: var(--muted); font-size: 14px; }
-#beltView .diff { text-align: center; color: var(--muted); margin-top: 8px; font-size: 16px; }
+/* the session's plucks, newest at the top, like a tuner app's log; about 20 rows show, the rest scroll */
+.hist { list-style: none; margin: 10px auto 0; padding: 0; width: 100%; max-width: 380px; max-height: calc(20 * 30px);
+  overflow-y: auto; text-align: left; font-variant-numeric: tabular-nums; -webkit-overflow-scrolling: touch; }
+.hist li { display: flex; align-items: baseline; gap: 10px; min-height: 30px; padding: 3px 8px; border-bottom: 1px solid var(--line); }
+.hist .n { flex: none; min-width: 2.6em; font-size: 13px; opacity: .7; }
+.hist .f { flex: none; font-weight: 700; }
+.hist li.out { opacity: .5; }
+.hist li.out .f { font-weight: 400; }
+.hist .u { flex: none; font-size: 13px; opacity: .75; font-variant-numeric: tabular-nums; }
+.hist .why { font-size: 13px; min-width: 0; overflow-wrap: anywhere; }
+#beltView .hbtns { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 10px; margin-top: 12px; }
+#beltView .tgt { text-align: center; color: var(--muted); margin-top: 8px; font-size: 16px; }
 #prompt .pfooter { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 14px; border-top: 1px solid var(--line); padding-top: 12px; }
 #prompt .pfooter button { flex: 1 1 140px; }
 .disclaimer { font-size: 13px; color: var(--muted); text-align: center; margin: 24px 8px 8px; }
@@ -255,7 +266,7 @@ details.sub > summary { cursor: pointer; color: var(--primary); font-weight: 600
 .dialog p { font-size: 19px; margin: 0 0 16px; }
 .dialog .row button { flex: 1 1 120px; }
 #toast {
-  position: fixed; left: 16px; right: 16px; bottom: 16px; max-width: 600px; margin: 0 auto; z-index: 30;
+  position: fixed; left: 16px; right: 16px; bottom: 16px; max-width: 600px; margin: 0 auto; z-index: 60;   /* over the cue cards */
   background: var(--err); color: #fff; padding: 12px 16px; border-radius: 10px; font-size: 16px;
   box-shadow: 0 4px 20px rgba(0,0,0,.4); overflow-wrap: anywhere;
 }
@@ -314,6 +325,7 @@ html.pc #cueLive .lhz { font-size: 40px; }
 html.pc #cueLive .lsub { font-size: 16px; }
 html.pc #cueLive .marks { font-size: 36px; }
 html.pc #cueLive button { margin: 0; min-height: 36px; min-width: 0; font-size: 14px; }
+html.pc #cueLive .hist { max-height: 40vh; }
 @media(prefers-reduced-motion:reduce) { * { scroll-behavior:auto!important; transition:none!important; } }
 /* Full-screen cue cards for what the hands do on the printer (hands off, tap, pluck): seen from the corner of an eye.
    Fixed colours on purpose, the same in both themes. */
@@ -326,7 +338,6 @@ html.pc #cueLive button { margin: 0; min-height: 36px; min-width: 0; font-size: 
 }
 #cue.yellow { --cbg: #ffd600; --cfg: #111111; }
 #cue.green { --cbg: #2e7d32; --cfg: #ffffff; }
-#cue.inv { background: var(--cfg); color: var(--cbg); }
 #cue .cbig {
   font-size: clamp(30px, 10vw, 64px); font-weight: 900; line-height: 1.1; letter-spacing: .02em;
   text-transform: uppercase; text-wrap: balance; max-width: 14em; }
@@ -334,6 +345,16 @@ html.pc #cueLive button { margin: 0; min-height: 36px; min-width: 0; font-size: 
 #cueLive { display: grid; gap: 6px; justify-items: center; }
 #cueLive .lhz { font-size: clamp(40px, 16vw, 96px); font-weight: 900; font-variant-numeric: tabular-nums; line-height: 1; }
 #cueLive .lsub { font-size: clamp(16px, 4.5vw, 22px); font-weight: 700; }
+/* the number in a box: a pluck heard this instant lights the box only; a reading whose window isn't all in yet: dimmed */
+#cueLive .lbox { border: 3px solid var(--cfg); border-radius: 18px; padding: 4px 22px; transition: background-color 0.12s, color 0.12s; }
+#cueLive .lbox.lit { background: var(--cfg); color: var(--cbg); }
+#cueLive .lhz { transition: opacity 0.2s; }
+#cueLive .lhz.prov { opacity: 0.6; }
+#cueLive .hist { max-height: 26vh; margin-top: 4px; }
+#cueLive .hist li { border-bottom-color: rgba(127,127,127,.4); font-size: 18px; }
+#cueLive .lbtns { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
+#cueLive button.lreset { background: transparent; color: var(--cfg); border: 2px solid var(--cfg); min-width: 0; }
+#cueLive .lage { font-size: clamp(14px, 4vw, 18px); font-weight: 600; opacity: 0.85; }
 #cueLive .marks { font-size: clamp(40px, 14vw, 80px); font-weight: 900; letter-spacing: .15em; line-height: 1; }
 #cueLive button { margin-top: 14px; min-width: 12em; min-height: 56px; font-size: 20px; font-weight: 800;
   background: var(--cfg); color: var(--cbg); border: 0; }
@@ -379,66 +400,46 @@ html.pc #cueLive button { margin: 0; min-height: 36px; min-width: 0; font-size: 
     <button type="button" class="big" id="howBtn">How it works</button>
     <button type="button" class="big" id="exitBtn">Close Chordata</button>
   </section>
-<!-- HOW IT WORKS: every instruction and spec, so the steps themselves only show their controls -->
+<!-- HOW IT WORKS: the steps in short, like an assembly manual; the details behind More -->
 <section id="how" hidden>
   <button type="button" id="howBack">Back</button>
   <div class="card">
     <h2>How it works</h2>
-    <p>A plucked belt rings like a guitar string. The accelerometer on the toolhead hears it, and Chordata
-      shows its frequency. Tension goes with the frequency squared, so 1% in Hz is 2% in tension.</p>
-    <p>On CoreXY printers both belts pull the toolhead and pull on each other, so they must match:
-      both are measured after every turn of a tensioner. Which belt you call A doesn't matter.</p>
-  </div>
-  <div class="card">
-    <h2>Set Target Frequency</h2>
-    <ol class="how">
-      <li>Set the target your printer's guide gives for the stretch of belt it says to pluck.</li>
-      <li>Move the toolhead where the guide says, with the arrows or by typing X and Y, and save it as the
-        belt tensioning position. Next time, Go to belt tensioning position takes it there.</li>
-      <li>Turn off loud fans if you can.</li>
-      <li>The screen shows the accelerometer your printer measures with and the frequencies it hears
-        reliably (from its datasheet and the rate Klipper sets). A target outside that range flashes
-        red: that sensor can't measure it.</li>
+    <ol class="manual">
+      <li><svg viewBox="0 0 32 32" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="16" cy="16" r="10"/><circle cx="16" cy="16" r="3"/><path d="M16 2v6M16 24v6M2 16h6M24 16h6"/></svg><span>Set the target and park the toolhead at your tensioning spot.</span></li>
+      <li><svg viewBox="0 0 32 32" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v12M12 4a2 2 0 0 1 4 0v9"/><path d="M6 24h20"/><path d="M9 28l1-2M16 29v-2M23 28l-1-2"/></svg><span>Tap one spot on the toolhead, 3 times.</span></li>
+      <li><svg viewBox="0 0 32 32" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="5" cy="16" r="3"/><circle cx="27" cy="16" r="3"/><path d="M8 13q8 -7 16 0M8 19q8 7 16 0"/></svg><span>Pluck either belt mid-span and read the number.</span></li>
+      <li><svg viewBox="0 0 32 32" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M25 11a10 10 0 1 0 1 8"/><path d="M26 4v7h-7"/></svg><span>Turn a tensioner a little, pluck again, watch the history.</span></li>
+      <li><svg viewBox="0 0 32 32" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9h24M4 23h24"/><path d="M13 14h6M13 18h6"/></svg><span>Bring both belts to the target, and to each other.</span></li>
+      <li><svg viewBox="0 0 32 32" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="10" r="3"/><circle cx="17" cy="10" r="3"/><path d="M27 22H9"/><path d="M14 17l-5 5 5 5"/></svg><span>Double tap the toolhead, or Reset history, to start the history over.</span></li>
+      <li><svg viewBox="0 0 32 32" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 17l7 7 15-16"/></svg><span>Done, then Close Chordata (fans come back on).</span></li>
     </ol>
-    <p class="small muted">Chordata only moves the toolhead when you press a button.</p>
-  </div>
-  <div class="card">
-    <h2>Measure Toolhead Frequency</h2>
-    <p>First, Chordata learns how your toolhead rings by itself, so a knock is never taken for a belt.
-      This happens at every start: work on the toolhead changes it.</p>
-    <ol class="how">
-      <li>Pick one solid spot on the toolhead, like the extruder. Always tap that same spot, now and later
-        when you switch from belt A to belt B: another spot rings differently.</li>
-      <li>Hands off while the screen is red: it records the background noise (fans, motors) once.</li>
-      <li>When it turns yellow, tap that spot lightly with a finger, one tap at a time. Each tap shows a
-        check mark or an X. An X doesn't count: keep tapping until 3 check marks. It stops by itself.</li>
-    </ol>
-    <p>A toolhead that rings long: pluck firmly, and keep your hands off the toolhead while plucking.
-      A stiff toolhead that rings nothing near the belts has nothing to learn; Pluck - Tap - Pluck Mode
-      then can't tell a tap from a pluck, so use Guided Mode.</p>
-  </div>
-  <div class="card">
-    <h2>The modes</h2>
-    <ul class="how">
-      <li><b>Guided Mode:</b> pluck belt A until 5 are counted, press Measure belt B, pluck belt B.</li>
-      <li><b>Pluck - Tap - Pluck Mode:</b> the same, but a tap on your toolhead spot switches to belt B,
-        so you never press the phone.</li>
-      <li><b>Tuner Mode:</b> pluck either belt and turn a tensioner between plucks; every clear pluck
-        shows up. It stops 60 seconds after your last pluck, or press Done.</li>
-    </ul>
-    <p>Pluck evenly, the same way each time, not too hard. Red means hands off, yellow means tap your
-      toolhead spot, green means pluck. The phone beeps when it is ready for plucks.</p>
-  </div>
-  <div class="card">
-    <h2>The rules</h2>
-    <ul class="how">
-      <li>A belt is on target when the average of 5 good plucks is within <span id="howTol">0.25</span> Hz of the target.</li>
-      <li>Only clear plucks count: 12 dB over the background noise, not a knock on the toolhead, not the
-        other belt ringing along, and within 1 Hz of the others.</li>
-      <li>A fan hums at one steady level; a pluck starts loud and dies away. A hum that starts after the
-        background was recorded is left out, and if it sits on the belt's note Chordata says so.</li>
-      <li>Chordata says which belt to tighten or loosen, one belt per round, taking turns, then measure both again.</li>
-    </ul>
+    <p class="small muted">Red: hands off. Yellow: tap the toolhead. Green: pluck. Chordata only moves the toolhead when you press a button.</p>
+    <details class="sub">
+      <summary>More</summary>
+      <ul class="how small">
+        <li>A plucked belt rings like a guitar string; the accelerometer on the toolhead hears it. Tension goes with the
+          frequency squared: 1% in Hz is 2% in tension. On CoreXY both belts pull on each other, so they must match.</li>
+        <li>Use the target your printer's guide gives for the stretch of belt it says to pluck. Turn off loud fans if you can.</li>
+        <li>Move the toolhead with the arrows or by typing X and Y, and save it as the belt tensioning position; next
+          time, Go to belt tensioning position takes it there.</li>
+        <li>The setup shows your accelerometer and the frequencies it hears reliably (from its datasheet and the rate
+          Klipper sets). A target outside that range is shown in red: that sensor can't measure it.</li>
+        <li>The taps teach Chordata how the toolhead rings by itself, so a knock is never taken for a belt. Tap only one
+          solid spot (another spot rings differently); an X doesn't count, keep tapping until 3 check marks. A stiff toolhead
+          that rings nothing near the belts has nothing to learn. The taps run at every start (work on the toolhead changes
+          how it rings), after one background recording while the screen is red: hands off then. A toolhead that rings long:
+          pluck firmly, hands off the toolhead while plucking.</li>
+        <li>Tuner Mode stops 60 seconds after your last pluck, or press Done. Pluck evenly, the same way each time, not too
+          hard. The phone beeps when it is ready, and the box around the number lights up for each pluck heard.</li>
+        <li>The history keeps this session's plucks (the last 100), newest at the top; refused ones are grey, with why.
+          A new session, Close Chordata and Reset history clear it.</li>
+        <li>A pluck is on target within <span id="howTol">0.25</span> Hz. Only clear plucks count: 12 dB over the background
+          noise and not a knock on the toolhead.</li>
+        <li>A fan hums at one steady level; a pluck starts loud and dies away. A hum that starts after the background was
+          recorded is left out, and if it sits on the belt's note Chordata says so.</li>
+      </ul>
+    </details>
   </div>
 </section>
 <section class="card" id="measurePanel" hidden><h2>Pluck measurements</h2>
@@ -821,7 +822,7 @@ function targetBox(text) {
   f.onsubmit = (e) => {
     e.preventDefault();
     const v = Math.round(Number(inp.value));
-    if (!Number.isFinite(v) || v < 40 || v > 300) { errorFlash("Error: target must be 40-300 Hz"); return; }
+    if (!Number.isFinite(v) || v < 40 || v > 300) { errorNote("Error: target must be 40-300 Hz"); return; }
     pressPromptButton("_CHORDATA_BELTS HZ=" + v);
   };
   return f;
@@ -849,7 +850,41 @@ function promptButton(b) {
 }
 
 // Belt tension: big numbers on top of the belt prompts, for a phone held at the printer
-let beltBuzz = "";
+// "heard you": the plugin counts every onset it hears; a new one lights the box around the big number
+// for HEARD_MS, before its reading is in (the only flash on the page), and a reading's age shows in Tuner Mode
+const HEARD_MS = 300;
+let heardN = 0, heardAt = 0, heardTimer = null, goodSig = "", goodAt = 0, ageTimer = null;
+function heardNow() {
+  const n = pt().belt_heard || 0;
+  if (n < heardN) heardN = 0;          // a new listen counts from 0 again
+  if (n > heardN) {
+    heardAt = Date.now();
+    if (navigator.vibrate) { try { navigator.vibrate(15); } catch (e) {} }
+    // and dark again on time, whenever the next status comes
+    clearTimeout(heardTimer);
+    heardTimer = setTimeout(() => { renderBelts(); cueUpdate(); }, HEARD_MS + 20);
+  }
+  heardN = n;
+  return Date.now() - heardAt < HEARD_MS;
+}
+function hzClass(base, p) {
+  return base + (p && p.final === false ? " prov" : "");
+}
+function ageText(ms) {
+  const s = Math.floor(ms / 1000);
+  return s < 2 ? "just now" : s + " s ago";
+}
+// Tuner Mode: how old the number is (ms). A new pluck reading the same number starts it again. Told
+// by the history's newest clear entry (its n stays put: belt_live is rewritten by each piece's final
+// analysis), or by the shown pluck's time while it is still provisional (not in the history yet)
+function ageOf(p) {
+  const h = (pt().history || []).filter((e) => e.ok);
+  const sig = p && p.final === false ? "p" + p.t : "h" + (h.length ? h[h.length - 1].n : "");
+  if (sig !== goodSig) { goodSig = sig; goodAt = Date.now(); }
+  return Date.now() - goodAt;
+}
+// in place: the elements stay, so a button under the user's finger is never swapped for a new one
+function setText(e, t) { if (e.textContent !== t) e.textContent = t; }
 function fmtHz(v) { return v == null ? "--" : Number(v).toFixed(1); }
 // Jog pad on Set Target Frequency: the user moves the toolhead to where their printer's guide says to pluck,
 // with the arrows or by typing X and Y. Chordata itself never moves it; every move here is a button press.
@@ -952,115 +987,171 @@ function humText(st) {
   const h = (st || pt()).belt_hum || [];
   return h.length ? "Steady hum at " + h.map((x) => Math.round(x)).join(" and ") + " Hz on the belt's note (a fan?): turn fans off" : "";
 }
-// Tuner Mode: one big number, the newest clear pluck, and how far it is from the target
-function renderFree(box, b) {
+// Tuner Mode: one big number, the newest clear pluck, and how far it is from the target; the
+// session's history below it. Built once (freeBuild), then updated in place (renderFree)
+function freeBuild(box) {
+  const v = {}, live = el("div", { class: "live" });
+  v.box = live.appendChild(el("div", { class: "hzbox" }));
+  v.hz = v.box.appendChild(el("div", { class: "hz" }));
+  v.age = live.appendChild(el("div", { class: "age" }));
+  v.d = live.appendChild(el("div", { class: "d" }));
+  v.u = live.appendChild(el("div", { class: "age u" }));
+  v.sub = live.appendChild(el("div", { class: "sub" }));
+  v.hum = live.appendChild(el("div", { class: "d far" }));
+  box.appendChild(live);
+  v.list = box.appendChild(el("ul", { class: "hist", "aria-label": "Plucks this session, newest first" }));
+  const row = box.appendChild(el("div", { class: "hbtns" }));
+  v.done = row.appendChild(el("button", { class: "primary", type: "button" }, "Done"));
+  v.done.onclick = freeDone;
+  v.reset = row.appendChild(el("button", { type: "button" }, "Reset history"));
+  v.reset.onclick = historyReset;
+  return v;
+}
+// How far one pluck's reading can be trusted: the scatter of the plucks just before it that lie
+// close together (all within twice the tolerance of each other, one after another back from it, at
+// most U_N, stopping at the first that doesn't: Tuner Mode doesn't know which belt a pluck was, and
+// a tensioner turned in between moves the next one). The 95 % interval of ONE reading from that
+// scatter: Student's t for n - 1 degrees of freedom times s (n - 1 in the divisor). Only from 3
+// plucks on (from 2, t is 12.7: no use), and none for readings exactly alike (real plucks scatter
+// 0.1-0.4 Hz; the same number to the last digit is an artefact repeating, not a sure reading). It
+// is the pluck-to-pluck repeatability, not the engine's systematic error.
+const T95 = [12.706, 4.303, 3.182, 2.776, 2.571, 2.447, 2.365, 2.306, 2.262, 2.228];
+const U_N = 5;
+function u1(vals) {
+  const n = vals.length;
+  if (n < 3) return null;
+  const m = vals.reduce((a, x) => a + x, 0) / n;
+  const s2 = vals.reduce((a, x) => a + (x - m) * (x - m), 0) / (n - 1);
+  if (Math.sqrt(s2) < 0.02) return null;          // (alike to the 0.01 Hz the readings are given in)
+  return (n - 2 < T95.length ? T95[n - 2] : 1.96) * Math.sqrt(s2 * (1 + 1 / n));   // (a prediction interval: the next pluck)
+}
+// the reading at freqs[i] (oldest first) and the run just before it within span Hz of each other: {n, u, span}
+function agree(freqs, i, span) {
+  const g = [];
+  let lo = freqs[i], hi = freqs[i];
+  for (let j = i; j >= 0 && g.length < U_N; j--) {
+    const l = Math.min(lo, freqs[j]), h = Math.max(hi, freqs[j]);
+    if (h - l > span) break;
+    lo = l; hi = h; g.push(freqs[j]);
+  }
+  return { n: g.length, u: u1(g), span, mean: g.reduce((a, x) => a + x, 0) / g.length };
+}
+function runSpan() { return 2 * (((pt().belts || {}).tol) || 0.25); }
+// the shown reading's run: the history's clear plucks, and the shown one unless it is the history's
+// newest already (a provisional one never is; a final one may not be in yet, or was just cleared)
+function shownGroup(p) {
+  if (!p || p.freq == null) return null;
+  const h = (pt().history || []).filter((e) => e.ok && e.freq != null).map((e) => e.freq);
+  if (p.final === false || !h.length || Math.abs(h[h.length - 1] - p.freq) > 0.005) h.push(p.freq);
+  return agree(h, h.length - 1, runSpan());
+}
+// the average of the run (the last plucks that agree, at most U_N): pluck and turn on and on, it
+// follows; and the pluck-to-pluck +- once there are enough
+function uText(g) {
+  if (!g || g.n < 2) return "";
+  return "Average " + g.mean.toFixed(2) + " Hz of the last " + g.n + " (within " + Number(g.span.toFixed(2)) + " Hz)" +
+    (g.u != null ? "  \u00b7  \u00b1 " + g.u.toFixed(1) + " Hz per pluck" : "");
+}
+// how far a reading is from the target, and its class: one wording for the card and the cue
+function deltaText(last, b) {
+  const d = last - b.target, tol = b.tol || 0.25;
+  return [Math.abs(d) <= tol ? "good" : (Math.abs(d) <= 2 ? "near" : "far"), Math.abs(d) <= tol ? "On target"
+    : (d < 0 ? "-" : "+") + Math.abs(d).toFixed(1) + " Hz, " + (d < 0 ? "tighten" : "loosen")];
+}
+function renderFree(v, b) {
   const listening = pt().state === "listening" && pt().belt_now === "free";
   const plucks = (listening ? pt().belt_live : (b.free || {}).plucks) || [];
   const good = plucks.filter((p) => p.ok && p.freq != null);
-  const last = good.length ? good[good.length - 1].freq : null;
-  const live = el("div", { class: "live" });
-  live.appendChild(el("div", { class: "hz" }, last != null ? fmtHz(last) + " Hz" : (listening ? "..." : "--")));
-  if (last != null) {
-    const d = last - b.target, tol = b.tol || 0.25;
-    const cls = Math.abs(d) <= tol ? "good" : (Math.abs(d) <= 2 ? "near" : "far");
-    live.appendChild(el("div", { class: "d " + cls }, Math.abs(d) <= tol ? "on target"
-      : (d < 0 ? "-" : "+") + Math.abs(d).toFixed(1) + " Hz, " + (d < 0 ? "tighten" : "loosen")));
-  }
-  live.appendChild(el("div", { class: "sub" }, "Target " + Number(b.target).toFixed(0) + " Hz" +
-    (listening ? "  ·  " + (pt().message || "Listening") : "")));
-  if (humText()) live.appendChild(el("div", { class: "d far" }, humText()));
-  box.appendChild(live);
-  if (plucks.length) {
-    const chips = el("div", { class: "chips" });
-    for (const p of plucks.slice(-12)) {
-      const c = el("span", { class: "chip " + (p.ok ? "ok" : "out") }, p.freq != null ? fmtHz(p.freq) : "x");
-      if (!p.ok && p.why) c.title = p.why;
-      chips.appendChild(c);
-    }
-    box.appendChild(chips);
-  }
-  if (listening && pt().measurement && pt().measurement.phase === "listening") {
-    const done = el("button", { class: "primary", type: "button", style: "width:100%;margin-top:12px" }, accepting ? "Stopping..." : "Done");
-    done.disabled = accepting;
-    done.onclick = freeDone;
-    box.appendChild(done);
-  }
+  const lastP = good.length ? good[good.length - 1] : null;
+  const last = lastP ? lastP.freq : null;
+  setText(v.hz, last != null ? fmtHz(last) + " Hz" : (listening ? "..." : "--"));
+  v.hz.className = hzClass("hz", lastP);
+  v.box.classList.toggle("lit", listening && heardNow());
+  v.age.hidden = !(listening && last != null);
+  setText(v.age, v.age.hidden ? "" : ageText(ageOf(lastP)));
+  v.d.hidden = last == null;
+  const g = shownGroup(lastP);
+  if (last != null) { const [cls, t] = deltaText(last, b); v.d.className = "d " + cls; setText(v.d, t); }
+  setText(v.u, uText(g));
+  v.u.hidden = !v.u.textContent;
+  setText(v.sub, "Target " + Number(b.target).toFixed(0) + " Hz" + (listening ? "  ·  " + (pt().message || "Listening") : ""));
+  setText(v.hum, humText());
+  v.hum.hidden = !v.hum.textContent;
+  histUpdate(v.list);
+  v.done.hidden = !(listening && pt().measurement && pt().measurement.phase === "listening");
+  setText(v.done, accepting ? "Stopping..." : "Done");
+  v.done.disabled = accepting;
+  v.reset.disabled = resetting;
 }
 
-// "4 of 5 counted (1 left out)": counted out of the plucks needed, not out of those heard
-function countText(r, need) {
-  const heard = r.heard || (r.plucks || []).length, out = heard - r.used;
-  return Math.min(r.used, need || heard) + " of " + (need || heard) + " counted" + (out > 0 ? " (" + out + " left out)" : "");
+// The session's history (the plugin keeps the last 100 final plucks of Tuner Mode): newest at the
+// top, the Hz per row; a refused pluck greyed, with why in smaller type. Rows are redrawn only
+// when the history changes; the list itself stays
+function histUpdate(list) {
+  const h = pt().history || [];
+  const sig = runSpan() + "/" + h.map((e) => [e.n, e.freq, e.ok, e.why].join(":")).join("|");
+  if (list.dataset.sig === sig) return;
+  list.dataset.sig = sig;
+  // each clear pluck's +-: from the run of clear plucks just before it that agree (u1)
+  const ok = h.filter((e) => e.ok && e.freq != null), fr = ok.map((e) => e.freq);
+  const um = new Map(ok.map((e, i) => [e, agree(fr, i, runSpan()).u]));
+  list.replaceChildren(...h.slice().reverse().map((e) => {
+    const li = el("li", { class: e.ok ? "ok" : "out" });
+    li.appendChild(el("span", { class: "n" }, "#" + e.n));
+    li.appendChild(el("span", { class: "f" }, e.freq != null ? fmtHz(e.freq) + " Hz" : "--"));
+    const u = um.get(e);
+    if (u != null) li.appendChild(el("span", { class: "u" }, "\u00b1 " + u.toFixed(1)));
+    if (!e.ok && e.why) li.appendChild(el("span", { class: "why" }, e.why));
+    return li;
+  }));
+  list.hidden = !h.length;
 }
+// Reset history is not G-code either (a listen may be running): to the plugin through Moonraker
+let resetting = false;
+function historyReset() {
+  if (resetting) return;
+  resetting = true;
+  render();
+  rpc("server.chordata.history_reset", {}).then(() => toast("History cleared", true), (e) => toast(errText(e)))
+    .finally(() => { resetting = false; render(); });
+}
+// A double tap on the toolhead cleared the history: said once, as a short notice
+let noteAt;
+function noteCheck() {
+  if (!S.chordata) return;
+  const n = pt().history_note, at = n ? n.at : null;
+  if (noteAt === undefined) { noteAt = at; return; }      // (on load: an earlier note is no news)
+  if (at !== noteAt) { noteAt = at; if (n && n.text) toast(n.text, true); }
+}
+
+let beltViewKey = "", freeView = null;
 function renderBelts() {
+  const listen = pt().state === "listening" && !!pt().belt_now;
+  if (listen && !ageTimer) ageTimer = setInterval(() => { renderBelts(); cueUpdate(); }, 250);
+  else if (!listen && ageTimer) { clearInterval(ageTimer); ageTimer = null; }
   const b = pt().belts || {};
   const free = !!prompt && /^Chordata - (free|tuner)/i.test(prompt.title || "");
-  const on = !!prompt && /^Chordata - (belt|pluck|tap|free|tuner)/i.test(prompt.title || "") && !!b.target;
+  const on = !!prompt && /^Chordata - (tap|free|tuner)/i.test(prompt.title || "") && !!b.target;
   show("beltView", on);
   if (!on) return;
   const box = $("beltView");
+  if (free) {
+    if (beltViewKey !== "free") { beltViewKey = "free"; box.textContent = ""; freeView = freeBuild(box); }
+    renderFree(freeView, b);
+    return;
+  }
+  beltViewKey = "tap";                 // (nothing to press on the tap step: drawn afresh)
   box.textContent = "";
-  if (free) { renderFree(box, b); return; }
-  const now = pt().belt_now || (/belt (A|B)/i.exec(prompt.title || "") || [])[1] || "";
-  const cur = (now === "A" || now === "B") ? b[now] : null;
-  // the newest pluck of the belt being measured, big
-  const listening = pt().state === "listening" && !!pt().belt_now;
-  const plucks = (listening ? pt().belt_live : cur && cur.plucks) || [];
-  const last = plucks.length ? plucks[plucks.length - 1] : null;
+  // the tap step: what it is listening for, and the target
   const live = el("div", { class: "live" });
   if (pt().state === "listening") {
-    live.appendChild(el("div", { class: "hz" + (last && !last.ok ? " out" : "") },
-      last && last.freq != null ? fmtHz(last.freq) + " Hz" : "..."));
-    const okN = plucks.filter((p) => p.ok).length;
-    live.appendChild(el("div", { class: "sub" }, listening && plucks.length
-      ? Math.min(okN, b.plucks || okN) + " of " + (b.plucks || plucks.length) + " counted" + (last && !last.ok ? " (last: " + (last.why || "not counted") + ")" : "")
-      : (pt().message || "Listening")));
-  } else if (cur && cur.freq == null) {     // a finished belt is shown once, in its card below
-    live.appendChild(el("div", { class: "hz out" }, last && last.freq != null ? fmtHz(last.freq) : "--"));
-    live.appendChild(el("div", { class: "sub" }, "Pluck again"));
+    live.appendChild(el("div", { class: "hz" }, "..."));
+    live.appendChild(el("div", { class: "sub" }, pt().message || "Listening"));
   }
   if (humText()) live.appendChild(el("div", { class: "d far" }, humText()));
   if (live.childNodes.length) box.appendChild(live);
-  if (plucks.length && pt().state === "listening") {   // once done, the belt cards say it (the table below keeps every pluck)
-    const chips = el("div", { class: "chips" });
-    for (const p of plucks) {
-      const c = el("span", { class: "chip " + (p.ok ? "ok" : "out") }, p.freq != null ? fmtHz(p.freq) : "x");
-      if (!p.ok && p.why) c.title = p.why;
-      chips.appendChild(c);
-    }
-    box.appendChild(chips);
-  }
-  // a short buzz when a new pluck is counted (phones that can)
-  const sig = now + plucks.filter((p) => p.ok).length + ":" + plucks.length;
-  if (sig !== beltBuzz) {
-    if (beltBuzz && plucks.length && navigator.vibrate) { try { navigator.vibrate(last && last.ok ? 40 : [20, 60, 20]); } catch (e) {} }
-    beltBuzz = sig;
-  }
-  // both belts, with the target and the change since the last round
-  const grid = el("div", { class: "belts" });
-  for (const k of ["A", "B"]) {
-    const r = b[k];
-    const t = el("div", { class: "belt" + (k === now ? " now" : "") });
-    t.appendChild(el("div", { class: "name" }, "Belt " + k));
-    t.appendChild(el("div", { class: "hz" }, r && r.freq != null ? fmtHz(r.freq) + " Hz" : "--"));
-    if (r && r.freq != null) {
-      const d = r.freq - b.target, tol = b.tol || 0.25;
-      const cls = Math.abs(d) <= tol ? "good" : (Math.abs(d) <= 2 ? "near" : "far");
-      const good = Math.abs(d) <= tol && (r.enough != null ? r.enough : r.used >= (b.plucks || 5));
-      t.appendChild(el("div", { class: "d " + cls }, Math.abs(d) <= tol ? (good ? "Belt good" : "on target")
-        : (d < 0 ? "-" : "+") + Math.abs(d).toFixed(1) + " Hz, " + (d < 0 ? "tighten" : "loosen")));
-      t.appendChild(el("div", { class: "n" }, countText(r, b.plucks)));
-    }
-    const pv = (b.prev || {})[k];
-    if (pv != null && r && r.freq != null && Math.abs(pv - r.freq) >= 0.1) t.appendChild(el("div", { class: "prev" }, "was " + fmtHz(pv) + " Hz"));
-    grid.appendChild(t);
-  }
-  box.appendChild(grid);
-  const fa = b.A && b.A.freq, fb = b.B && b.B.freq;
-  box.appendChild(el("div", { class: "diff" }, "Target " + Number(b.target).toFixed(0) + " Hz" +
-    (fa != null && fb != null ? "  ·  difference " + Math.abs(fa - fb).toFixed(1) + " Hz" : "")));
+  box.appendChild(el("div", { class: "tgt" }, "Target " + Number(b.target).toFixed(0) + " Hz"));
 }
-
 
 // ---------- state ----------
 const S = {};             // merged printer status
@@ -1068,41 +1159,26 @@ let klippyState = "";     // "ready", "startup", "shutdown", "error", "disconnec
 let connected = false;
 function obj(name) { return S[name] || {}; }
 // ---------- cue cards: red = hands off (recording the background noise), yellow = tap the toolhead, green = pluck ----------
-let cueKey = "", cueTimer = null, cueLast = "";
+let cueKey = "";
 const CUES = {     // the big text only: the card says one thing
   background: ["red", "Stand by: recording background noise"],
   tap: ["yellow", "Tap your toolhead"],
-  "pluck:A": ["green", "Pluck belt A"],
-  "pluck:B": ["green", "Pluck belt B"],
   "pluck:free": ["green", "Pluck either belt"],
-  switch: ["yellow", "Tap your toolhead"],
 };
 // No card closes on a timer or needs a press on the phone: each stays until the printer is done
 // with that step (red until the quiet is recorded, yellow until the tap is heard, green until
-// the plucking is over). The green ones show each pluck as it is heard.
-function cueFlash(times, ms, done) {
-  const box = $("cue");
-  clearInterval(cueTimer);
-  let n = 0;
-  if (matchMedia("(prefers-reduced-motion: reduce)").matches) times = 0;
-  if (!times) { box.classList.remove("inv"); if (done) done(); return; }
-  cueTimer = setInterval(() => {
-    box.classList.toggle("inv");
-    if (++n >= times * 2) { clearInterval(cueTimer); box.classList.remove("inv"); if (done) done(); }
-  }, ms);
-}
+// the plucking is over). The green ones show each pluck as it is heard. No card flashes: a new
+// card simply replaces the last (only the box around the number lights, on each pluck heard).
 function cueSet(key) {
   if (key === cueKey) return;
-  const was = cueKey, box = $("cue");
+  const box = $("cue");
   cueKey = key;
-  if (!key) { clearInterval(cueTimer); box.hidden = true; $("cueLive").textContent = ""; return; }
+  if (!key) { box.hidden = true; return; }
   const [colour, big] = CUES[key];
-  const paint = () => { box.className = colour; $("cueBig").textContent = big; };
-  if (key === "background") { paint(); box.hidden = false; cueFlash(3, 110); }
-  else if (key === "tap" || key === "switch") { box.hidden = false; cueFlash(2, 55, () => { paint(); }); }
-  else { box.hidden = false; cueFlash(1, 110, () => { paint(); }); }
-  if (!was && key !== "background") paint();
-  if (key.startsWith("pluck:")) beep();       // ready to measure (after the switch tap: the tap was heard)
+  box.className = colour;
+  $("cueBig").textContent = big;
+  box.hidden = false;
+  if (key.startsWith("pluck:")) beep();       // ready to measure
 }
 // How it works: its own page (#how). Back returns to where it was opened, or home if opened by a link
 let howFromPage = false;
@@ -1112,15 +1188,10 @@ function howButton(body) {
   body.appendChild(el("div", { class: "pbuttons" })).appendChild(how);
 }
 function openHow() { howFromPage = true; location.hash = "how"; }
-// An error on a step (a target the accelerometer can't hear): the screen flashes red with it, then the step stays
-function errorFlash(text) {
+// An error on a step (a target the accelerometer can't hear): a notice, the step itself shows it in red
+function errorNote(text) {
   if (cueKey || location.hash === "#how") return;    // a measuring card is up, or the user is reading
-  const box = $("cue");
-  box.className = "";
-  $("cueBig").textContent = text;
-  $("cueLive").textContent = "";
-  box.hidden = false;
-  cueFlash(3, 150, () => setTimeout(() => { if (!cueKey) box.hidden = true; }, 600));
+  toast(text);
 }
 // A short 1000 Hz beep, 200 ms: heard when the phone is out of sight
 let audio = null;
@@ -1176,51 +1247,59 @@ function beep() {
     o.stop(t + 0.21);
   } catch (e) { /* no sound: the card still shows */ }
 }
-// the plucks so far, on the green card: the newest one big, and the count (or, in a free tune, the target)
-let cueLiveSig = "";
+// the plucks so far, on the green card: the newest clear one big, and how far it is from the target,
+// the session's history, Done and Reset history. Built once per card, then updated in place
+let cueView = null, cueViewKey = "";
+function cueBuild(box) {
+  const v = {};
+  v.box = box.appendChild(el("div", { class: "lbox" }));
+  v.hz = v.box.appendChild(el("div", { class: "lhz" }));
+  v.age = box.appendChild(el("div", { class: "lage" }));
+  v.sub = box.appendChild(el("div", { class: "lsub" }));
+  v.u = box.appendChild(el("div", { class: "lage u" }));
+  v.hum = box.appendChild(el("div", { class: "lsub" }));
+  v.list = box.appendChild(el("ul", { class: "hist", "aria-label": "Plucks this session, newest first" }));
+  const row = box.appendChild(el("div", { class: "lbtns" }));
+  v.done = row.appendChild(el("button", { type: "button" }, "Done"));
+  v.done.onclick = freeDone;
+  v.reset = row.appendChild(el("button", { type: "button", class: "lreset" }, "Reset history"));
+  v.reset.onclick = historyReset;
+  return v;
+}
 function cueLive(key, st) {
   const box = $("cueLive");
+  if (key !== cueViewKey) {
+    cueViewKey = key;
+    box.textContent = "";
+    cueView = key === "tap" ? { marks: box.appendChild(el("div", { class: "marks" })) }
+      : key.startsWith("pluck:") ? cueBuild(box) : null;
+  }
+  if (!cueView) return;
   if (key === "tap") {             // the setup taps: a check mark or an X for each, a circle for each still needed
     const taps = st.tap_live || [], good = taps.filter((x) => x.ok).length;
     const need = (st.measurement || {}).expected || 3;
-    const marks = taps.map((x) => x.ok ? "\u2713" : "\u2717").join("") + "\u25CB".repeat(Math.max(0, need - good));
-    const sig = "tap|" + marks;
-    if (sig === cueLiveSig) return;
-    cueLiveSig = sig;
-    box.textContent = "";
-    box.appendChild(el("div", { class: "marks", "aria-label": good + " of " + need + " taps counted" }, marks));
+    setText(cueView.marks, taps.map((x) => x.ok ? "\u2713" : "\u2717").join("") + "\u25CB".repeat(Math.max(0, need - good)));
+    cueView.marks.setAttribute("aria-label", good + " of " + need + " taps counted");
     return;
   }
-  if (!key.startsWith("pluck:")) { if (cueLiveSig) { box.textContent = ""; cueLiveSig = ""; } return; }
-  const b = st.belts || {}, plucks = st.belt_live || [], free = key === "pluck:free";
-  const shown = free ? plucks.filter((p) => p.ok && p.freq != null) : plucks;
+  const v = cueView, b = st.belts || {}, plucks = st.belt_live || [];
+  const shown = plucks.filter((p) => p.ok && p.freq != null);
   const last = shown.length ? shown[shown.length - 1] : null;
-  const okN = plucks.filter((p) => p.ok).length, need = b.plucks || 5;
-  let sub;
-  if (free) {
-    const d = last ? last.freq - b.target : null, tol = b.tol || 0.25;
-    sub = d == null ? "Target " + Number(b.target || 0).toFixed(0) + " Hz"
-      : Math.abs(d) <= tol ? "On target" : (d < 0 ? "-" : "+") + Math.abs(d).toFixed(1) + " Hz, " + (d < 0 ? "tighten" : "loosen");
-  } else {
-    sub = plucks.length ? Math.min(okN, need) + " of " + need + " counted" + (last && !last.ok ? " (last: " + (last.why || "not counted") + ")" : "")
-      : "Listening";
-  }
-  const a = key === "pluck:B" && b.A && b.A.freq != null ? "Belt A: " + fmtHz(b.A.freq) + " Hz" : "";
-  const hum = humText(st);
-  const sig = [key, last && last.freq, last && last.ok, sub, a, hum, accepting].join("|");
-  if (sig === cueLiveSig) return;
-  cueLiveSig = sig;
-  box.textContent = "";
-  box.appendChild(el("div", { class: "lhz" }, last && last.freq != null ? fmtHz(last.freq) + " Hz" : "..."));
-  box.appendChild(el("div", { class: "lsub" }, sub));
-  if (a) box.appendChild(el("div", { class: "lsub" }, a));
-  if (hum) box.appendChild(el("div", { class: "lsub" }, hum));
-  if (free) {
-    const done = el("button", { type: "button" }, accepting ? "Stopping..." : "Done");
-    done.disabled = accepting;
-    done.onclick = freeDone;
-    box.appendChild(done);
-  }
+  setText(v.hz, last && last.freq != null ? fmtHz(last.freq) + " Hz" : "...");
+  v.hz.className = "lhz" + (last && last.final === false ? " prov" : "");
+  v.box.classList.toggle("lit", heardNow());
+  v.age.hidden = !last;
+  setText(v.age, last ? ageText(ageOf(last)) : "");
+  const g = shownGroup(last);
+  setText(v.sub, last ? deltaText(last.freq, b)[1] : "Target " + Number(b.target || 0).toFixed(0) + " Hz");
+  setText(v.u, uText(g));
+  v.u.hidden = !v.u.textContent;
+  setText(v.hum, humText(st));
+  v.hum.hidden = !v.hum.textContent;
+  histUpdate(v.list);
+  setText(v.done, accepting ? "Stopping..." : "Done");
+  v.done.disabled = accepting;
+  v.reset.disabled = resetting;
 }
 function cueUpdate() {
   const st = pt(), m = st.measurement || {};
@@ -1229,12 +1308,7 @@ function cueUpdate() {
   let key = "";
   if (st.state === "listening" && phase === "background") key = "background";
   else if (kind === "tap" && (phase === "listening" || phase === "analysing")) key = "tap";
-  else if (st.state === "listening" && phase === "listening" && kind === "both")
-    key = m.step === "tap" ? "switch" : "pluck:" + (m.step === "B" ? "B" : "A");
-  else if (st.state === "listening" && phase === "listening" && ["A", "B", "free"].includes(kind)) key = "pluck:" + kind;
-  // the tap that switches to belt B was heard: a buzz, so the user knows without looking
-  if (cueLast === "switch" && key === "pluck:B" && navigator.vibrate) { try { navigator.vibrate(200); } catch (e) {} }
-  cueLast = key;
+  else if (st.state === "listening" && phase === "listening" && kind === "free") key = "pluck:free";
   cueSet(key);
   cueLive(key, st);
 }
@@ -1273,11 +1347,7 @@ function renderPrompt() {
     const body = $("pBody");
     body.textContent = "";
     let solo = null;
-    // After a belt is measured the next step's buttons go first, so they sit right under the numbers, no scrolling
-    const items = /^Chordata - belt/i.test(prompt.title || "")
-      ? prompt.items.filter((it) => it.type !== "text").concat(prompt.items.filter((it) => it.type === "text"))
-      : prompt.items;
-    for (const it of items) {
+    for (const it of prompt.items) {
       if (it.type === "button" && /STEP=start\b/.test(it.btn.gcode)) { howButton(body); solo = null; }
       if (it.type === "button" && /STEP=save\b/.test(it.btn.gcode) && !demo) {
         body.appendChild(jogPad());            // Set Target Frequency: the pad sits between Go and Save
@@ -1292,7 +1362,7 @@ function renderPrompt() {
       if (it.type === "text" && /^Target Frequency:/.test(it.text)) body.appendChild(targetBox(it.text));
       else if (it.type === "text" && /^Error:/.test(it.text)) {
         body.appendChild(el("p", { class: "ptext perr" }, it.text));
-        errorFlash(it.text.replace(/^Error:\s*/, "Error: "));
+        errorNote(it.text.replace(/^Error:\s*/, "Error: "));
       }
       else if (it.type === "text") body.appendChild(el("p", { class: "ptext" }, it.text));
       else if (it.type === "group" && it.list.some((b) => /\bDT=/.test(b.gcode))) continue;   // the box replaces them
@@ -1346,12 +1416,13 @@ function render() {
   if (how) $("prompt").hidden = true;
   renderMeasurements();
   cueUpdate();
+  noteCheck();
 }
 
 function measurementRows() {
   const state=pt(), belts=state.belts || {}, rows=[];
   for(const belt of ['A','B']) {
-    const samples=state.state==='listening' && state.belt_now===belt ? state.belt_live || [] : (belts[belt] || {}).plucks || [];
+    const samples=(belts[belt] || {}).plucks || [];
     samples.forEach((p,i)=>rows.push({belt,index:i+1,freq:p.freq,ok:!!p.ok,why:p.why || ''}));
   }
   return rows;
@@ -1361,8 +1432,8 @@ function measurementRows() {
 function measuring() {
   const s=pt();
   const t=(prompt && prompt.title) || '';
-  // (Tuner Mode has its own card for its plucks: the graph would show an earlier Guided run)
-  if(s.state==='listening') return ['A','B'].includes(s.belt_now);
+  // (Tuner Mode has its own card for its plucks)
+  if(s.state==='listening') return false;
   return /^Chordata - (belt \S+: |belts [\d.]+ \/ |belt results)/.test(t);
 }
 function renderMeasurements() {
