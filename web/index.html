@@ -1135,8 +1135,9 @@ function shownLast(plucks) {
   return p && pluckSig(p) === clearedSig ? null : p;
 }
 function markCleared(upto) {
-  const st = pt(), listening = st.state === "listening" && st.belt_now === "free";
-  const plucks = (listening ? st.belt_live : ((st.belts || {}).free || {}).plucks) || [];
+  // (the live plucks while there are any, as the cue card shows them; else the last listen's)
+  const st = pt(), live = st.belt_live || [];
+  const plucks = (live.length ? live : ((st.belts || {}).free || {}).plucks) || [];
   // (a double tap: only plucks up to it; one heard after it stays shown)
   const good = plucks.filter((p) => p.ok && p.freq != null && (upto == null || p.t <= upto));
   clearedSig = good.length ? pluckSig(good[good.length - 1]) : null;
@@ -1154,7 +1155,7 @@ function noteCheck() {
   if (!S.chordata) return;
   const n = pt().history_note, at = n ? n.at : null;
   if (noteAt === undefined) { noteAt = at; return; }      // (on load: an earlier note is no news)
-  if (at !== noteAt) { noteAt = at; if (n && n.text) { markCleared(n.upto); toast(n.text, true); } }
+  if (at !== noteAt) { noteAt = at; if (n && n.text) { markCleared(n.upto); toast(n.text, true); renderBelts(); cueUpdate(); } }
 }
 
 let beltViewKey = "", freeView = null;
