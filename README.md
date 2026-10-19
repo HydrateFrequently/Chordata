@@ -39,9 +39,10 @@ you close Chordata, when a print starts, or after 10 idle minutes.
 Where to put the toolhead, which stretch of belt to pluck and the target frequency all come from your
 printer's own documentation. Chordata can save the toolhead position for next time.
 
-![Chordata page (demo data)](docs/images/desktop-demo.png)
+![Chordata page after a Tuner Mode session (illustrative data)](docs/images/desktop-demo.png)
 
-*Demo data, not a real printer.* The **[user guide](docs/USER_GUIDE.md)** walks through setup and a full
+*Tuner Mode after a session: the last pluck, the average of the last 5 and the history (illustrative data,
+not a real printer).* The **[user guide](docs/USER_GUIDE.md)** walks through setup and a full
 measurement with screenshots; the **[troubleshooting guide](docs/TROUBLESHOOTING.md)** helps when something
 fails. To try the page without a printer, run `python3 -m http.server 8765 --directory web` in this folder
 and open `http://127.0.0.1:8765/?demo`.
