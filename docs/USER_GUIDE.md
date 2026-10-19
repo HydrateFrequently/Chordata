@@ -23,11 +23,14 @@ without it, the page tries to connect to Moonraker on the same host. Demo mode
 opens no printer connection and disables printer commands. Stop this preview
 server with Ctrl+C when finished. A static preview server does not measure belts.
 
-![Desktop demo of the Chordata page](images/desktop-demo.png)
+This is the page after a Tuner Mode session (illustrative data): the last pluck, the average of the last
+plucks that agree with its ±, and the session's history.
 
-For a narrow screen, the same interface stacks its controls and preserves the data:
+![The Chordata page after a Tuner Mode session](images/desktop-demo.png)
 
-<img src="images/mobile-demo.png" width="390" alt="Phone-sized Chordata demo">
+On a phone, while Chordata listens, the green card shows the same: pluck, read, turn, pluck again.
+
+<img src="images/mobile-demo.png" width="390" alt="Tuner Mode on a phone while listening">
 
 ## 2. Prepare the printer
 
