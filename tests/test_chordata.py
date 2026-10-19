@@ -537,7 +537,12 @@ class FanTests(unittest.TestCase):
     """Step 0: fans humming on the belt's note are turned off (never the safety fans) and
     turned back on when Chordata closes."""
 
-    def _fan_plugin(self, speeds):
+    class _All(dict):
+        """Every fan okayed by the user (the tests of turning fans off and back on)."""
+        def __contains__(self, key):
+            return True
+
+    def _fan_plugin(self, speeds, okayed=True):
         settings = {"fan": {}, "fan_generic exhaust_fan": {}, "heater_fan hotend_fan": {},
                     "controller_fan board": {}, "temperature_fan chamber": {}, "printer": {}}
         objects = {"configfile": status(settings=settings), "print_stats": status(state="standby")}
@@ -545,6 +550,7 @@ class FanTests(unittest.TestCase):
             objects[name] = status(speed=speed)
         obj = plugin(objects)
         obj._fans_off = {}
+        obj._fok = self._All() if okayed else {}
         obj.scripts = []
 
         def run(script):            # the fan takes the speed it is set to, as Kalico's would
@@ -701,6 +707,36 @@ class FanTests(unittest.TestCase):
         self.assertFalse(fans["fan_generic mainboard_fan"]["button"])
         self.assertTrue(fans["fan_generic exhaust_fan"]["button"])
 
+    def test_no_fan_is_turned_off_until_the_user_okays_it(self):
+        import tempfile
+        obj = self._fan_plugin({"fan": .5, "fan_generic exhaust_fan": .8, "heater_fan hotend_fan": 1.}, okayed=False)
+        obj.out_dir = tempfile.mkdtemp()
+        fans = {f["section"]: f for f in obj._fan_list()}
+        self.assertEqual([(fans[k]["button"], fans[k]["ask"]) for k in ("fan", "fan_generic exhaust_fan", "heater_fan hotend_fan")],
+                         [(False, True), (False, True), (False, False)])
+        order = [f["section"] for f in obj._fan_list()]
+        with self.assertRaisesRegex(ValueError, "not okayed"):
+            obj.cmd_CHORDATA_FAN(Command(INDEX=order.index("fan_generic exhaust_fan")))
+        self.assertEqual(obj.scripts, [])
+        # okayed: from then on it may be turned off, also after a restart (the choice is in a file)
+        obj.cmd_CHORDATA_FAN_OK(Command(INDEX=order.index("fan_generic exhaust_fan"), ALLOW=1))
+        del obj._fok
+        fans = {f["section"]: f for f in obj._fan_list()}
+        self.assertEqual((fans["fan_generic exhaust_fan"]["button"], fans["fan"]["button"]), (True, False))
+        obj.cmd_CHORDATA_FAN(Command(INDEX=order.index("fan_generic exhaust_fan")))
+        self.assertEqual(obj.scripts, ["SET_FAN_SPEED FAN=exhaust_fan SPEED=0.000"])
+        # and taken back, by its section name
+        obj.cmd_CHORDATA_FAN_OK(Command(SECTION="Fan_Generic Exhaust_Fan", ALLOW=0))
+        self.assertFalse({f["section"]: f for f in obj._fan_list()}["fan_generic exhaust_fan"]["button"])
+        # deleting the file takes every allowance back at once, without a restart
+        obj.cmd_CHORDATA_FAN_OK(Command(SECTION="fan", ALLOW=1))
+        self.assertTrue({f["section"]: f for f in obj._fan_list()}["fan"]["button"])
+        os.remove(obj._fans_ok_file())
+        self.assertFalse({f["section"]: f for f in obj._fan_list()}["fan"]["button"])
+        # a safety fan can't be okayed at all
+        with self.assertRaisesRegex(ValueError, "leaves it on"):
+            obj.cmd_CHORDATA_FAN_OK(Command(INDEX=order.index("heater_fan hotend_fan"), ALLOW=1))
+
     def test_safety_fans_are_never_turned_off(self):
         obj = self._fan_plugin({"heater_fan hotend_fan": 1., "controller_fan board": 1., "temperature_fan chamber": 1.})
         order = [f["section"] for f in obj._fan_list()]
@@ -709,9 +745,12 @@ class FanTests(unittest.TestCase):
                 obj.cmd_CHORDATA_FAN(Command(INDEX=order.index(k)))
         self.assertEqual(obj.scripts, [])
 
-    def test_a_hum_on_the_note_stops_the_tap_step(self):
+    def test_a_hum_from_a_fan_not_okayed_yet_stops_the_tap_step_to_ask(self):
+        self.test_a_hum_on_the_note_stops_the_tap_step(okayed=False)
+
+    def test_a_hum_on_the_note_stops_the_tap_step(self, okayed=True):
         from test_belts import quiet
-        obj = self._fan_plugin({"fan_generic exhaust_fan": 1.})
+        obj = self._fan_plugin({"fan_generic exhaust_fan": 1.}, okayed=okayed)
         q = quiet(fan=110.5)
         obj._record_quiet = lambda *a, **k: [(i / 3200., q[0][i], q[1][i], q[2][i]) for i in range(len(q[0]))]
         obj._accel_fs = 3200.
@@ -726,6 +765,8 @@ class FanTests(unittest.TestCase):
         self.assertEqual(obj.state, "idle")
         self.assertTrue(obj.belts["disturb"]["lines"])
         self.assertTrue(abs(obj.belts["disturb"]["lines"][0] - 110.5) < 0.5)
+        fan = next(f for f in obj.belts["disturb"]["fans"] if f["section"] == "fan_generic exhaust_fan")
+        self.assertEqual((fan["button"], fan["ask"]), (okayed, not okayed))
         # measure anyway: the taps are listened to (this fake accelerometer sends nothing)
         with self.assertRaisesRegex(ValueError, "no data"):
             obj.cmd_CHORDATA_TAP(Command(ANYWAY=1))
@@ -897,6 +938,23 @@ class HistoryTests(unittest.TestCase):
         self.assertEqual(calls, [(7.6, None), (.1, 3.)])
         self.assertEqual([(h["n"], h["ok"]) for h in obj.history], [(11, True)])     # only what came after
         self.assertEqual(obj.history_note["text"], "History cleared (double tap)")
+
+    def test_quick_double_tap_is_one_event_with_a_second_knock_in_it(self):
+        obj = self._filled()
+        with patch.object(belts, "toolhead_knock", lambda *a, **k: (True, 20., None)), \
+                patch.object(belts, "second_knock", lambda *a, **k: a[4] + 0.3):
+            obj._history_add(1, 0., [self.pk(9., ok=False), self.pk(10.5)], self.COLS, None, 12., final=True)
+        self.assertEqual([h["freq"] for h in obj.history], [110.])     # only the pluck after it
+        self.assertEqual(obj.history_note["text"], "History cleared (double tap)")
+
+    def test_a_live_look_without_the_next_event_does_not_keep_its_knock_answer(self):
+        obj = self._filled()
+        answers = iter([False, True])
+        with patch.object(belts, "toolhead_knock", lambda *a, **k: (next(answers), 20., None)), \
+                patch.object(belts, "second_knock", lambda *a, **k: None):
+            obj._history_add(1, 0., [self.pk(9., ok=False, final=True)], self.COLS, None, 9.8)   # live
+            obj._history_add(1, 0., [self.pk(9., ok=False)], self.COLS, None, 12., final=True)
+        self.assertEqual(obj._knocks.get(obj._key(1, 9.)), True)
 
     def test_double_tap_keeps_what_comes_after_and_earlier_plucks_stay_gone(self):
         obj = self._filled()

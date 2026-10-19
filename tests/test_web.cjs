@@ -72,6 +72,11 @@ const path = require('node:path');
     // the history: newest at the top, a refused pluck greyed with why
     assert.deepEqual(await page.locator('#cueLive .hist li').allTextContents(),['#2--a knock on the toolhead','#1111.0 Hz']);
     assert.equal(await page.locator('#cueLive .hist li.out').count(),1);
+    // a refused pluck that was the plucker's doing gets a word after its reason; a fan's doesn't
+    await page.evaluate(()=>{ S.chordata.history=S.chordata.history.concat([{n:3,freq:90,ok:false,why:'too weak',at:3},
+      {n:4,freq:null,ok:false,why:'steady hum, not a pluck',at:4},{n:6,freq:null,ok:false,why:'two plucks at once',at:6}]); render(); });
+    assert.deepEqual((await page.locator('#cueLive .hist li .why').allTextContents()).slice(0,3),
+      ['two plucks at once \u00b7 git good','steady hum, not a pluck','too weak \u00b7 skill issue']);
     // Reset history goes to the plugin through Moonraker (G-code is busy listening)
     await page.evaluate(()=>{ window.__rpc=[]; rpc=(m)=>{ window.__rpc.push(m); return Promise.resolve({}); }; });
     await page.locator('#cueLive button',{hasText:'Reset history'}).click();
@@ -79,17 +84,19 @@ const path = require('node:path');
     // a double tap's note shows as a notice over the card
     await page.evaluate(()=>{ S.chordata.history_note={text:'History cleared (double tap)',at:5}; render(); });
     assert.match(await page.locator('#toast').textContent(),/double tap/);
+    // and the big number goes blank until the next pluck
+    assert.match(await liveText(),/^\.\.\./);
     // the +-: how far one pluck can be trusted, from the run of clear plucks just before it lying within
     // twice the tolerance of each other (a pluck of the other belt ends the run; readings exactly alike
     // give none: an artefact repeating, not a sure reading); the shown pluck alone
     // says how far from the target
-    await page.evaluate(()=>{ S.chordata.history=[[1,110.4],[2,104.0],[3,110.1],[4,110.3],[5,110.2]].map(([n,f])=>({n,freq:f,ok:true,why:'',at:n}));
-      S.chordata.belt_live=[{freq:110.2,ok:true,t:5,final:true}]; render(); });
-    assert.match(await liveText(),/110\.2 Hz.*On target.*Average 110\.20 Hz of the last 3 \(within 0\.5 Hz\).*± 0\.5 Hz per pluck/);
-    assert.deepEqual(await page.locator('#cueLive .hist li .u').allTextContents(),["± 0.5"]);
+    await page.evaluate(()=>{ S.chordata.history=[[1,110.4],[2,104.0],[3,110.15],[4,110.1],[5,110.3],[6,110.2]].map(([n,f])=>({n,freq:f,ok:true,why:'',at:n}));
+      S.chordata.belt_live=[{freq:110.2,ok:true,t:6,final:true}]; render(); });
+    assert.match(await liveText(),/110\.2 Hz.*On target.*Average 110\.19 Hz of the last 4 \(within 1 Hz\).*± 0\.3 Hz per pluck/);
+    assert.deepEqual(await page.locator('#cueLive .hist li .u').allTextContents(),["± 0.3"]);
     assert.equal(await page.evaluate(()=>JSON.stringify([u1([90,90.1]),u1([89.67,89.67,89.67])])),'[null,null]');
-    await page.evaluate(()=>{ S.chordata.history=S.chordata.history.concat([[6,108.9]].map(([n,f])=>({n,freq:f,ok:true,why:'',at:n})));
-      S.chordata.belt_live=[{freq:108.9,ok:true,t:6,final:true}]; render(); });
+    await page.evaluate(()=>{ S.chordata.history=S.chordata.history.concat([[7,108.9]].map(([n,f])=>({n,freq:f,ok:true,why:'',at:n})));
+      S.chordata.belt_live=[{freq:108.9,ok:true,t:7,final:true}]; render(); });
     assert.match(await liveText(),/-1\.1 Hz, tighten/);
     assert.doesNotMatch(await liveText(),/Average|per pluck/);
     await page.evaluate(()=>{ S.chordata.state='idle'; S.chordata.measurement={phase:'idle',belt:null}; cueUpdate(); });
