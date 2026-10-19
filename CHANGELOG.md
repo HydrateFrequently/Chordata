@@ -3,6 +3,28 @@
 What changed in each update of Chordata's main branch, newest first.
 Update from Mainsail's Update Manager, then restart Klipper.
 
+## 2026-10-19 (2)
+
+- **A steadier average:** the average and the ± take the last plucks within 1 Hz of each other
+  (was 0.5 Hz, which a belt's own pluck-to-pluck scatter kept breaking).
+- **No more far-off hum warnings:** a refused pluck or tap is only said to be hidden by a steady
+  hum when that hum sits near the note (it said "hidden by a steady hum at 726 Hz" for a belt at
+  107 Hz and for toolhead taps).
+- **Only fans you allow are turned off:** Chordata no longer turns any fan off on its own guess
+  (also not the part cooling fan at the start, which it used to). When a fan hums on the belt's
+  note, the card asks to **Allow Chordata to turn off** it first; the choice is kept. Fans for the hotend, the stepper drivers and the electronics are never
+  offered, as before.
+- **Quicker double tap:** two taps on the toolhead up to 0.8 s apart now count as a double tap,
+  also quick ones 0.2-0.45 s apart (they had to be about half a second apart or more), and the
+  history clears sooner after them. After a clear, by double tap or Reset history, the big number
+  stays blank until the next pluck.
+- **Steadier Tuner card:** "Pluck either belt" and the number stay at the top; only the history
+  below them grows (the card scrolls on small phones). The ± per pluck shows from 4 agreeing
+  plucks (the average from 2).
+- **Target row:** "Target Frequency [110] Hz" on one line, Set centred below it.
+- **A word of encouragement:** a pluck refused for the plucker's own doing (too weak, two plucks
+  at once, a knock) now says "skill issue" or "git good" after its reason in the history.
+
 ## 2026-10-19
 
 - **No false "good" beside a fan line:** where twice a belt's note sits on a steady line (a fan

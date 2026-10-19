@@ -161,6 +161,7 @@ def synthetic():
     fans()
     wandering_line()
     uncertainty()
+    quick_double_tap(q)
 
 
 def real_fan(t, fr, amp, start=0.0, seed=3, wander=0.2):
@@ -450,6 +451,33 @@ def wandering_line():
         # either the right Hz, or no reading: never a wrong one
         check("2F on a wandering 184 Hz line (seed %d)" % seed,
               (r["freq"] is None or abs(r["freq"] - 91.0) <= 0.3) and all(abs(x - 91.0) <= 0.5 for x in fr), r)
+
+
+def quick_double_tap(q):
+    """A quick double tap (the second knock 0.2-0.4 s after the first, inside DEAD, where no new
+    onset is looked for) is found inside the first event; one knock, a pluck or a screwdriver
+    pluck never has a second knock found in it."""
+    main = {"freq": 104.5, "guard": 2.0}
+    for gap in (0.2, 0.3, 0.4):
+        t, ax, ay, az = rec([(1.0, "tap", 104.5, 3000.0, 0.0), (1.0 + gap, "tap", 104.5, 3000.0, 0.0)], 3.0)
+        on = belts.find_plucks([ax, ay, az], FS, belts.SEARCH[0], 0.45 * FS / 2.0, None)
+        s = belts.second_knock(t, ax, ay, az, on[0] / FS, main, quiet=q)
+        ok = s is not None and abs(s - (1.0 + gap)) < 0.03
+        print("%-4s %-46s %s" % ("ok" if ok else "FAIL", "quick double tap %.1f s apart" % gap, s))
+        if not ok:
+            FAILS.append("quick double tap %.1f" % gap)
+    for ev, name in (([(1.0, "tap", 104.5, 3000.0, 0.0)], "one knock"), ([(1.0, "pluck", 90.0, 1500.0, 3.0)], "a pluck"),
+                     ([(1.0, "hard", 90.0, 1500.0, 3.0)], "a screwdriver pluck"),
+                     ([(1.0, "tap", 104.5, 3000.0, 0.0), (1.25, "pluck", 90.0, 1500.0, 3.0)], "a knock, then a pluck"),
+                     ([(1.0, "pluck", 90.0, 1500.0, 3.0), (1.3, "tap", 104.5, 3000.0, 0.0)], "a pluck, then a knock"),
+                     ([(1.0, "tap", 104.5, 3000.0, 0.0), (1.25, "pluck", 52.25, 1500.0, 3.0)],
+                      "a knock, then a belt at half the note")):
+        t, ax, ay, az = rec(ev, 3.0)
+        on = belts.find_plucks([ax, ay, az], FS, belts.SEARCH[0], 0.45 * FS / 2.0, None)
+        s = belts.second_knock(t, ax, ay, az, on[0] / FS, main, quiet=q)
+        print("%-4s %-46s %s" % ("ok" if s is None else "FAIL", "no second knock in " + name, s))
+        if s is not None:
+            FAILS.append("second knock in " + name)
 
 
 def uncertainty():

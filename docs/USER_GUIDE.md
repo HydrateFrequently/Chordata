@@ -200,12 +200,13 @@ top (the last 100; about 20 show, scroll for more): each pluck's frequency, and 
 ones greyed with the reason. It carries on across Tuner Mode runs, and is cleared by a new
 session (Start), **Close Chordata** and **Reset history** (on the green card and the end
 card; it works while Chordata listens). A quick double tap on the toolhead, on the spot you
-tapped at the setup, does the same as **Reset history**: the whole history goes, so you can
-start over without touching the phone; the page says so for a moment. The double tap itself is
+tapped at the setup (two taps up to 0.8 s apart), does the same as **Reset history**: the whole
+history goes, so you can start over without touching the phone; the page says so for a moment,
+and the big number stays blank until your next pluck. The double tap itself is
 never counted.
 
 Under the number the page shows the **average** of the last plucks that agree (up to 5, all
-within twice the tolerance, 0.5 Hz by default), so you can pluck and turn on and on. Once three
+within 1 Hz of each other, or twice the tolerance if that is wider), so you can pluck and turn on and on. Once four
 or more lie together (and are not all exactly alike), it also shows **± Hz per pluck**: how far one reading can be off, at 95 %, judged
 from how much those plucks scatter. A real belt's tone varies 0.1-0.4 Hz from pluck to pluck, so
 pluck each belt a few times and go by where most land. Chordata doesn't know which belt you
@@ -220,6 +221,14 @@ still read. If a fan sits on the belt's note (within about 2 Hz), the green card
 result say "steady hum at X Hz on the belt's note (a fan?)": turn that fan off and measure
 again. The same goes for the toolhead taps: if a fan hides the toolhead's note, Measure
 Toolhead Frequency stops after three taps and says "Turn fans off".
+
+Chordata only turns off fans you have allowed. When a fan hums on the belt's note, the card
+offers **Allow Chordata to turn off** that fan; once allowed (the choice is kept, also after a
+restart) it gets a **Turn off** button there. Fans that cool the hotend, the stepper drivers or
+the electronics (heater, controller and temperature fans, and fans named like it) are never
+offered. To take an allowance back, run for example `_CHORDATA_FAN_OK SECTION="fan_generic aux_fan" ALLOW=0`
+(the fan's section name in printer.cfg; `SECTION=fan` for the part cooling fan), or delete
+`chordata/fans_ok.json` in the config folder to take all of them back.
 
 Cards never need a press on the phone (only Tuner Mode has a Done button): red means hands off, yellow means tap the
 toolhead, green means pluck, and each stays until that step is over.
