@@ -26,10 +26,17 @@ class ChordataWeb:
         # the page's "accept" while G-code is busy listening (a G-code command would wait for it)
         self.server.register_endpoint(
             "/server/chordata/accept", ["POST"], self._handle_accept)
+        # the page's Reset history, also while a listen runs
+        self.server.register_endpoint(
+            "/server/chordata/history_reset", ["POST"], self._handle_history_reset)
 
     async def _handle_accept(self, web_request):
         kapis = self.server.lookup_component("klippy_apis")
         return await kapis._send_klippy_request("chordata/accept", {})
+
+    async def _handle_history_reset(self, web_request):
+        kapis = self.server.lookup_component("klippy_apis")
+        return await kapis._send_klippy_request("chordata/history_reset", {})
 
     async def _handle_page(self, web_request):
         eventloop = self.server.get_event_loop()

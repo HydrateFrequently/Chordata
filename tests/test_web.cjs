@@ -25,47 +25,73 @@ const path = require('node:path');
       assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth <= innerWidth),true);
       await page.screenshot({path:'/tmp/chordata-demo-'+width+'.png',fullPage:true});
     }
-    await page.evaluate(()=>{ S.chordata.state='listening'; S.chordata.belt_now='A'; S.chordata.belt_live=[{freq:111.5,ok:true},{freq:null,ok:false,why:'No signal'}]; renderMeasurements(); });
+    await page.evaluate(()=>{ S.chordata.belts.A.plucks=[{freq:111.5,ok:true},{freq:null,ok:false,why:'No signal'}]; renderMeasurements(); });
     assert.equal(await page.locator('#measureRows tr').count(),5);
     assert.match(await page.locator('#measureRows').textContent(),/No signal/);
     const merged=await page.evaluate(()=>{const state={chordata:{state:'idle',belts:{A:{freq:110}},measurement:{stale:true}}}; merge(state,{chordata:{belts:{},measurement:{}}}); return state;});
     assert.deepEqual(merged,{chordata:{state:'idle',belts:{},measurement:{}}});
     // A rejected pluck with no frequency remains in data without inventing a chart point.
     assert.equal(await page.locator('#trend path').count(),0);
-    await page.evaluate(()=>{ S.chordata.belt_live[1].why='=unsafe,"quoted"'; });
+    await page.evaluate(()=>{ S.chordata.belts.A.plucks[1].why='=unsafe,"quoted"'; });
     assert.match(await page.evaluate(()=>csvMeasurements()),/'=unsafe,""quoted""/);
     // Cue cards: none closes on a timer or on a press on the phone; green stays for the whole plucking step, with the plucks on it
     const cue=(m,extra)=>page.evaluate(([m,extra])=>{ Object.assign(S.chordata,{state:'listening',belt_live:[],measurement:m},extra||{}); cueUpdate(); },[m,extra]);
     const shown=()=>page.evaluate(()=>!$('cue').hidden && $('cueBig').textContent);
     const liveText=()=>page.evaluate(()=>$('cueLive').textContent);
-    await cue({belt:'A',phase:'background'});
+    await cue({belt:'free',phase:'background'});
     await page.locator('#cue').click();
     await page.waitForTimeout(3500);
     assert.match(await shown(),/background noise/i);
-    await cue({belt:'A',phase:'listening',heard:0});
+    await cue({belt:'free',phase:'listening'},{belts:{target:110,tol:.25}});
     await page.waitForTimeout(3500);
-    assert.match(await shown(),/Pluck belt A/);
-    await cue({belt:'A',phase:'listening',heard:2},{belt_live:[{freq:114.6,ok:true},{freq:90,ok:false,why:'too weak'}]});
-    assert.match(await shown(),/Pluck belt A/);
-    assert.match(await liveText(),/90\.0 Hz.*1 of \d counted.*too weak/);
+    assert.match(await shown(),/Pluck either belt/);
+    // a pluck left out doesn't replace the number: the newest clear one stays
+    await cue({belt:'free',phase:'listening'},{belt_live:[{freq:114.6,ok:true,t:1},{freq:90,ok:false,why:'too weak',t:2}]});
+    assert.match(await shown(),/Pluck either belt/);
+    assert.match(await liveText(),/114\.6 Hz.*\+4\.6 Hz, loosen/);
     await page.locator('#cue').click();
-    assert.match(await shown(),/Pluck belt A/);
-    await cue({belt:'both',phase:'listening',step:'tap'});
-    await page.waitForTimeout(400);
-    assert.match(await shown(),/^Tap your toolhead$/);
-    assert.equal(await liveText(),'');
-    await cue({belt:'both',phase:'listening',step:'B'},{belts:{target:110,plucks:5,A:{freq:114.6}}});
-    await page.waitForTimeout(400);
-    assert.match(await shown(),/Pluck belt B/);
-    assert.match(await liveText(),/Belt A: 114\.6 Hz/);
+    assert.match(await shown(),/Pluck either belt/);
     await cue({belt:'tap',phase:'listening',expected:3},{tap_live:[{ok:true},{ok:false,why:'another spot'}]});
     await page.waitForTimeout(400);
     await page.locator('#cue').click();
     assert.match(await shown(),/^Tap your toolhead$/);
     assert.equal(await liveText(),'\u2713\u2717\u25CB\u25CB');
-    await cue({belt:'free',phase:'listening'},{belts:{target:110,tol:.25,plucks:5},belt_live:[{freq:111.0,ok:true}]});
+    await cue({belt:'free',phase:'listening'},{belts:{target:110,tol:.25},belt_live:[{freq:111.0,ok:true}]});
     await page.waitForTimeout(400);
-    assert.match(await liveText(),/111\.0 Hz.*\+1\.0 Hz, loosen.*Done/);
+    assert.match(await liveText(),/111\.0 Hz.*\+1\.0 Hz, loosen.*Done.*Reset history/);
+    // built once: Done and Reset history stay the same elements across renders (a tap never misses);
+    // only the box around the number lights up, for a moment, on each new pluck heard; no card flashes
+    await page.evaluate(()=>{ window.__btns=[...document.querySelectorAll('#cueLive button')];
+      S.chordata.history=[{n:1,freq:111,ok:true,why:'',at:1},{n:2,freq:null,ok:false,why:'a knock on the toolhead',at:2}];
+      S.chordata.belt_heard=(S.chordata.belt_heard||0)+1; cueUpdate(); });
+    assert.equal(await page.evaluate(()=>document.querySelector('#cueLive .lbox').classList.contains('lit')),true);
+    await page.waitForTimeout(700);
+    assert.equal(await page.evaluate(()=>document.querySelector('#cueLive .lbox').classList.contains('lit')),false);
+    assert.equal(await page.evaluate(()=>{ cueUpdate(); render(); return [...document.querySelectorAll('#cueLive button')].every((b,i)=>b===window.__btns[i]); }),true);
+    assert.equal(await page.evaluate(()=>document.getElementById('cue').className.includes('inv')),false);
+    // the history: newest at the top, a refused pluck greyed with why
+    assert.deepEqual(await page.locator('#cueLive .hist li').allTextContents(),['#2--a knock on the toolhead','#1111.0 Hz']);
+    assert.equal(await page.locator('#cueLive .hist li.out').count(),1);
+    // Reset history goes to the plugin through Moonraker (G-code is busy listening)
+    await page.evaluate(()=>{ window.__rpc=[]; rpc=(m)=>{ window.__rpc.push(m); return Promise.resolve({}); }; });
+    await page.locator('#cueLive button',{hasText:'Reset history'}).click();
+    assert.deepEqual(await page.evaluate(()=>window.__rpc),['server.chordata.history_reset']);
+    // a double tap's note shows as a notice over the card
+    await page.evaluate(()=>{ S.chordata.history_note={text:'History cleared (double tap)',at:5}; render(); });
+    assert.match(await page.locator('#toast').textContent(),/double tap/);
+    // the +-: how far one pluck can be trusted, from the run of clear plucks just before it lying within
+    // twice the tolerance of each other (a pluck of the other belt ends the run; readings exactly alike
+    // give none: an artefact repeating, not a sure reading); the shown pluck alone
+    // says how far from the target
+    await page.evaluate(()=>{ S.chordata.history=[[1,110.4],[2,104.0],[3,110.1],[4,110.3],[5,110.2]].map(([n,f])=>({n,freq:f,ok:true,why:'',at:n}));
+      S.chordata.belt_live=[{freq:110.2,ok:true,t:5,final:true}]; render(); });
+    assert.match(await liveText(),/110\.2 Hz.*On target.*Average 110\.20 Hz of the last 3 \(within 0\.5 Hz\).*± 0\.5 Hz per pluck/);
+    assert.deepEqual(await page.locator('#cueLive .hist li .u').allTextContents(),["± 0.5"]);
+    assert.equal(await page.evaluate(()=>JSON.stringify([u1([90,90.1]),u1([89.67,89.67,89.67])])),'[null,null]');
+    await page.evaluate(()=>{ S.chordata.history=S.chordata.history.concat([[6,108.9]].map(([n,f])=>({n,freq:f,ok:true,why:'',at:n})));
+      S.chordata.belt_live=[{freq:108.9,ok:true,t:6,final:true}]; render(); });
+    assert.match(await liveText(),/-1\.1 Hz, tighten/);
+    assert.doesNotMatch(await liveText(),/Average|per pluck/);
     await page.evaluate(()=>{ S.chordata.state='idle'; S.chordata.measurement={phase:'idle',belt:null}; cueUpdate(); });
     assert.equal(await shown(),false);
     const live=await browser.newPage();
@@ -108,23 +134,20 @@ const path = require('node:path');
     const order=await live.evaluate(()=>[...document.querySelectorAll('#pBody > *')].map(e=>e.id||e.className||e.tagName));
     assert.deepEqual(order,['ptarget','pbuttons','setupJog','pbuttons','pbuttons']);   // no -5..+5 buttons: the box   // the last: How it works
     assert.equal(await live.locator('#prompt .howlink').count(),1);
-    // no graph on the setup, even with plucks from an earlier measurement; it shows while measuring
+    // no graph on the setup, even with plucks from an earlier measurement, nor while Tuner Mode listens
     await live.evaluate(()=>{ S.chordata.state='idle'; S.chordata.belts=Object.assign(S.chordata.belts||{},{A:{plucks:[{freq:110,ok:true}]}}); render(); });
     assert.equal(await live.locator('#measurePanel').isVisible(),false);
-    await live.evaluate(()=>{ S.chordata.state='listening'; S.chordata.belt_now='A'; S.chordata.belt_live=[{freq:110,ok:true}]; render(); });
-    assert.equal(await live.locator('#measurePanel').isVisible(),true);
-    await live.evaluate(()=>{ S.chordata.belt_now='free'; render(); });
+    await live.evaluate(()=>{ S.chordata.state='listening'; S.chordata.belt_now='free'; S.chordata.belt_live=[{freq:110,ok:true}]; render(); });
     assert.equal(await live.locator('#measurePanel').isVisible(),false);     // Tuner Mode has its own card
     await live.evaluate(()=>{ S.chordata.state='idle'; S.chordata.belt_now=null; render(); });
-    // a target the accelerometer can't hear: red text, and the screen flashes red with it
+    // a target the accelerometer can't hear: red text and a notice, no full-screen card
     await live.evaluate(()=>{ for (const l of ['action:prompt_begin Set Target Frequency','action:prompt_text Target Frequency: 160 Hz',
       'action:prompt_text Accelerometer: LIS3DH, frequency range 0-149 Hz','action:prompt_text Error: frequency target out of range',
       'action:prompt_button Save belt tensioning position|_CHORDATA_BELTS STEP=save|secondary','action:prompt_show']) handleLine('// '+l); });
     assert.equal(await live.locator('#prompt .perr').textContent(),'Error: frequency target out of range');
-    assert.equal(await live.locator('#cue').isVisible(),true);
-    assert.match(await live.locator('#cueBig').textContent(),/frequency target out of range/);
+    assert.equal(await live.locator('#cue').isVisible(),false);
+    assert.match(await live.locator('#toast').textContent(),/frequency target out of range/);
     assert.equal(await live.locator('#prompt .howlink').count(),1);    // still there without Start
-    await live.waitForFunction(()=>document.getElementById('cue').hidden,null,{timeout:5000});
     await live.evaluate(()=>{ for (const l of ['action:prompt_begin Set Target Frequency','action:prompt_text Target Frequency: 110 Hz',
       'action:prompt_button Go to belt tensioning position|_CHORDATA_BELTS STEP=go|secondary',
       'action:prompt_button Save belt tensioning position|_CHORDATA_BELTS STEP=save|secondary','action:prompt_show']) handleLine('// '+l); });
@@ -162,6 +185,10 @@ const path = require('node:path');
     await live.waitForTimeout(500);
     await live.locator('#howBtn').click();
     await live.waitForFunction(()=>!document.getElementById('how').hidden);
+    // short numbered steps, each with its icon; the details behind More
+    assert.equal(await live.locator('#how .manual li').count(),7);
+    assert.equal(await live.locator('#how .manual li svg').count(),7);
+    assert.equal(await live.locator('#how details summary').textContent(),'More');
     assert.equal(await live.locator('#home').isVisible(),false);
     await live.locator('#howBack').click();
     await live.waitForFunction(()=>!document.getElementById('home').hidden);
@@ -186,7 +213,7 @@ const path = require('node:path');
     assert.equal(await pc.evaluate(()=>document.getElementById('measurePanel').parentNode.id),'prompt');
     assert.equal(await pc.evaluate(()=>document.documentElement.scrollWidth <= innerWidth),true);
     await pc.screenshot({path:'/tmp/chordata-pc-1280.png',fullPage:true});
-    await pc.evaluate(()=>{ S.chordata.state='listening'; S.chordata.measurement={belt:'A',phase:'listening'}; cueUpdate(); });
+    await pc.evaluate(()=>{ S.chordata.state='listening'; S.chordata.measurement={belt:'free',phase:'listening'}; cueUpdate(); });
     await pc.waitForTimeout(400);
     await pc.screenshot({path:'/tmp/chordata-pc-cue.png'});
     await pc.close();
@@ -195,6 +222,6 @@ const path = require('node:path');
     await live.waitForTimeout(300);
     assert.equal(await live.evaluate(()=>!!document.querySelector('video[aria-hidden=true]')),true);
     assert.deepEqual(errors,[]);
-    console.log('Web checks passed: offline demo, live replacement, rejected plucks, CSV escaping, phone and PC layouts, keep-awake, no JS errors.');
+    console.log('Web checks passed: offline demo, live replacement, rejected plucks, Tuner history and stable buttons, How it works steps, CSV escaping, phone and PC layouts, keep-awake, no JS errors.');
   } finally { await browser.close(); }
 })().catch(e=>{console.error(e);process.exit(1);});
