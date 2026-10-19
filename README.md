@@ -96,7 +96,7 @@ in moonraker.conf, and the sidebar link, backing up each file it changes (`*.bef
 
 ## How it was tested
 
-- The pluck analysis was checked on real recordings from a CoreXY printer, with both a Beacon and an NH36 toolhead board equipped with an ADXL345 mounted to the extruder. A Zoom H5 recorder with the XYH-5 microphone provided a reference, read over the same stretch of each pluck as Chordata reads: each belt's average agreed within 0.21 Hz, and the difference between the two belts (what tensioning matches) within 0.16 Hz. Bad plucks should be rejected and not counted. A good pluck needs to be at least 12db SINAD.
+- The pluck analysis was checked on real recordings from a CoreXY printer, with both a Beacon and an NH36 toolhead board equipped with an ADXL345 mounted to the extruder. A Zoom H5 recorder with the XYH-5 microphone provided a reference, read over the same stretch of each pluck as Chordata reads: each belt's average agreed within 0.21 Hz, and the difference between the two belts (what tensioning matches) within 0.16 Hz. Bad plucks should be rejected and not counted. A good pluck's tone (or twice the tone) must stand at least 12 dB above the background noise at that frequency, and the other at least 6 dB.
 
 Interesting detail: the accelerometer mostly hears the belt at twice its frequency, so Chordata looks for
   the tone and twice the tone together.
