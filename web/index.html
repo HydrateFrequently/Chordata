@@ -1020,7 +1020,7 @@ function freeBuild(box) {
   return v;
 }
 // How far one pluck's reading can be trusted: the scatter of the plucks just before it that lie
-// close together (all within twice the tolerance of each other, one after another back from it, at
+// close together (all within 1 Hz of each other, or twice the tolerance, one after another back from it, at
 // most U_N, stopping at the first that doesn't: Tuner Mode doesn't know which belt a pluck was, and
 // a tensioner turned in between moves the next one). The 95 % interval of ONE reading from that
 // scatter: Student's t for n - 1 degrees of freedom times s (n - 1 in the divisor). Only from 3
@@ -1048,7 +1048,7 @@ function agree(freqs, i, span) {
   }
   return { n: g.length, u: u1(g), span, mean: g.reduce((a, x) => a + x, 0) / g.length };
 }
-function runSpan() { return 2 * (((pt().belts || {}).tol) || 0.25); }
+function runSpan() { return Math.max(1.0, 2 * (((pt().belts || {}).tol) || 0.25)); }   // (a pluck scatters about +-0.3 Hz)
 // the shown reading's run: the history's clear plucks, and the shown one unless it is the history's
 // newest already (a provisional one never is; a final one may not be in yet, or was just cleared)
 function shownGroup(p) {

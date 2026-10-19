@@ -1061,7 +1061,13 @@ def analyse(t, ax, ay, az, target=None, expect=None, quiet=None, avoid=(), other
             # that line's level (a fan alone hums the same before and after). A thrown-out pluck
             # that did is hidden, not missing; a reading just beside the line, where the
             # spectrum still climbs towards it, is the hidden tone's skirt.
+            # (only a line where this belt's tone or twice it can be: a line far off, say at 726 Hz,
+            # rises with any knock or pluck's attack and hides nothing)
+            tlo, thi = ((F_BAND[0] * target, min(F_BAND[1] * target, max(F_MAX, 1.2 * target))) if target
+                        else (lo, F_MAX))
             for x in quiet_at + list(hum_at):
+                if not (tlo - 2.0 <= x <= thi + 2.0 or tlo - 2.0 <= x / 2.0 <= thi + 2.0):
+                    continue
                 if pk["ok"]:
                     if not (SPREAD < abs(fr - x) <= 6.0) or \
                             p[np.abs(f - x) <= 0.5].max() <= p[int(round(fr / df))]:
@@ -1321,9 +1327,13 @@ def analyse_taps(t, ax, ay, az, quiet=None, need=TAP_NEED, target=None):
             modes = [r["freq"] for r in ring]
             if not modes:
                 tap["why"] = "too soft"
-                # unless it rang a steady line (a fan on the toolhead's note): hidden by it
+                # unless it rang a steady line (a fan on the toolhead's note): hidden by it. Only a
+                # line where the toolhead rang on the other taps (or, before any, where a toolhead
+                # note can be: below twice the belt band); one far off rises with any tap's attack
+                rung = [x["freq"] for x in out["taps"] if x.get("freq")]
+                top = 2.0 * (min(F_BAND[1] * target, max(F_MAX, 1.2 * target)) if target else F_MAX)
                 for x in hum_lines():
-                    if _rises(axes, fs, on, x, 3.0):
+                    if (any(abs(x - r) <= 3.0 for r in rung) if rung else x <= top) and _rises(axes, fs, on, x, 3.0):
                         tap["why"] = "hidden by a steady hum at %.0f Hz" % x
                         break
             else:

@@ -56,7 +56,7 @@ class Chordata:
         if webhooks is not None:
             webhooks.register_endpoint("chordata/accept", self._handle_accept)
             webhooks.register_endpoint("chordata/history_reset", self._handle_history_reset)
-        for name in ("START", "FREE", "TAP", "POS", "FAN", "FANS"):
+        for name in ("START", "FREE", "TAP", "POS", "FAN", "FANS", "FAN_OK"):
             fn = getattr(self, "cmd_CHORDATA_" + name)
             self.gcode.register_command("_CHORDATA_" + name, fn,
                                         desc=getattr(self, "cmd_CHORDATA_%s_help" % name))
@@ -464,10 +464,10 @@ class Chordata:
                 q, getattr(self, "_accel_fs", None) or 3200., [self.belts.get("target")] + ([last] if last else []))
             fans = self._fan_list() if hums else []
             lines = [round(x, 1) for x, _ in hums]
-            # only stop when a fan Chordata can turn off is running: a hum from something it
+            # only stop when a fan Chordata can turn off (or could, once okayed) is running: a hum from something it
             # can't (the motors held, a controller fan, a fan it doesn't know) is noted, and the
             # plucks themselves tell the belt from it
-            stop = any(f["button"] and f["on"] for f in fans)
+            stop = any((f["button"] or f["ask"]) and f["on"] for f in fans)
             self.belts = dict(self.belts, disturb={"lines": lines, "fans": fans} if stop else None,
                               hum_note=lines if hums and not stop else [])
             if stop:
@@ -588,9 +588,69 @@ class Chordata:
         flat = "".join(words)
         return any(w in flat for w in self.SAFETY_NAMES) or any(w in words for w in self.SAFETY_WORDS)
 
+    # Which fans the user okayed Chordata to turn off: none until they say so (a fan that cools the
+    # stepper drivers, whatever its name, must never be stopped by Chordata on its own)
+    def _fans_ok_file(self):
+        return os.path.join(self.out_dir, "fans_ok.json")
+
+    def _fans_ok(self):
+        """{section (lowercase): True} for the fans the user okayed (kept across restarts; read
+        again when the file changes or goes, so deleting it takes every allowance back at once)."""
+        if getattr(self, "out_dir", None) is None:
+            return getattr(self, "_fok", {})
+        try:
+            stamp = os.stat(self._fans_ok_file()).st_mtime
+        except OSError:
+            stamp = None
+        if not hasattr(self, "_fok") or getattr(self, "_fok_stamp", "unread") != stamp:
+            self._fok, self._fok_stamp = {}, stamp
+            try:
+                with open(self._fans_ok_file()) as f:
+                    d = json.load(f)
+                self._fok = {str(k).lower(): True for k, v in d.items() if v is True}
+            except Exception:
+                pass
+        return self._fok
+
+    cmd_CHORDATA_FAN_OK_help = ("Chordata: allow (ALLOW=1) or forbid (ALLOW=0) Chordata to turn a fan off "
+                                "(SECTION: its config section, or INDEX: its place in the fan list); kept across restarts")
+
+    def cmd_CHORDATA_FAN_OK(self, gcmd):
+        fans = self._fan_list()
+        sec = gcmd.get("SECTION", None)
+        if sec is not None:          # by its config section, e.g. SECTION="fan_generic aux_fan"
+            i = next((j for j, f in enumerate(fans) if f["section"].lower() == sec.strip().lower()), -1)
+        else:
+            i = gcmd.get_int("INDEX", -1)
+        if not 0 <= i < len(fans):
+            raise gcmd.error("Chordata: no fan %s" % (sec if sec is not None else i))
+        fan, allow = fans[i], bool(gcmd.get_int("ALLOW", 1, minval=0, maxval=1))
+        if allow and not fan["ask"] and not fan["button"]:
+            raise gcmd.error("Chordata: the %s %s; Chordata leaves it on" % (fan["label"], fan["why"]))
+        ok = dict(self._fans_ok())
+        if allow:
+            ok[fan["section"].lower()] = True
+        else:
+            ok.pop(fan["section"].lower(), None)
+        try:
+            os.makedirs(self.out_dir, exist_ok=True)
+            with open(self._fans_ok_file() + ".part", "w") as f:
+                json.dump(ok, f)
+            os.replace(self._fans_ok_file() + ".part", self._fans_ok_file())
+            stamp = os.stat(self._fans_ok_file()).st_mtime
+        except OSError as error:
+            raise gcmd.error("Chordata: could not save the fan choice (%s)" % error)
+        self._fok, self._fok_stamp = ok, stamp
+        d = (self.belts or {}).get("disturb")
+        if d:                                # the card shows the change
+            self.belts = dict(self.belts, disturb=dict(d, fans=self._fan_list()))
+        gcmd.respond_info("Chordata: %s %s" % (fan["label"], "may be turned off by Chordata" if allow
+                                                   else "is never turned off by Chordata"))
+
     def _fan_list(self):
         """The printer's fans from its config, each with whether Chordata may turn it off and
-        whether it is on now: [{"section", "label", "kind", "button", "on", "why"}]."""
+        whether it is on now: [{"section", "label", "kind", "button", "ask", "on", "why"}]. button: it
+        may be turned off (the user okayed it); ask: it could be, once the user okays it."""
         try:
             settings = self.printer.lookup_object("configfile").get_status(
                 self.reactor.monotonic())["settings"]
@@ -622,8 +682,11 @@ class Chordata:
             if kind == "fan_generic" and self._safety_name(name):
                 # electronics and hotend fans are often a fan_generic a macro drives: by its name
                 button, why = False, "seems to cool the electronics or the hotend (by its name)"
-            out.append({"section": section, "label": label, "kind": kind,
-                        "button": button, "on": obj is not None and (speed is None or speed > 0.), "why": why})
+            ask = False
+            if button and section.lower() not in self._fans_ok():
+                button, ask, why = False, True, "is not okayed for Chordata to turn off"
+            out.append({"section": section, "label": label, "kind": kind, "button": button, "ask": ask,
+                        "on": obj is not None and (speed is None or speed > 0.), "why": why})
         return out
 
     def _fan_script(self, section, speed):

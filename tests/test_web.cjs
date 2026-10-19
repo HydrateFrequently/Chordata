@@ -92,7 +92,7 @@ const path = require('node:path');
     // says how far from the target
     await page.evaluate(()=>{ S.chordata.history=[[1,110.4],[2,104.0],[3,110.15],[4,110.1],[5,110.3],[6,110.2]].map(([n,f])=>({n,freq:f,ok:true,why:'',at:n}));
       S.chordata.belt_live=[{freq:110.2,ok:true,t:6,final:true}]; render(); });
-    assert.match(await liveText(),/110\.2 Hz.*On target.*Average 110\.19 Hz of the last 4 \(within 0\.5 Hz\).*± 0\.3 Hz per pluck/);
+    assert.match(await liveText(),/110\.2 Hz.*On target.*Average 110\.19 Hz of the last 4 \(within 1 Hz\).*± 0\.3 Hz per pluck/);
     assert.deepEqual(await page.locator('#cueLive .hist li .u').allTextContents(),["± 0.3"]);
     assert.equal(await page.evaluate(()=>JSON.stringify([u1([90,90.1]),u1([89.67,89.67,89.67])])),'[null,null]');
     await page.evaluate(()=>{ S.chordata.history=S.chordata.history.concat([[7,108.9]].map(([n,f])=>({n,freq:f,ok:true,why:'',at:n})));

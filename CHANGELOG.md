@@ -5,6 +5,16 @@ Update from Mainsail's Update Manager, then restart Klipper.
 
 ## Unreleased (dev)
 
+- **A steadier average:** the average and the ± take the last plucks within 1 Hz of each other
+  (was 0.5 Hz, which a belt's own pluck-to-pluck scatter kept breaking).
+- **No more far-off hum warnings:** a refused pluck or tap is only said to be hidden by a steady
+  hum when that hum sits near the note (it said "hidden by a steady hum at 726 Hz" for a belt at
+  107 Hz and for toolhead taps).
+- **Only fans you allow are turned off:** Chordata no longer turns any fan off on its own guess
+  (also not the part cooling fan at the start, which it used to).
+  When a fan hums on the belt's note, the card asks to **Allow Chordata to turn off** it first;
+  the choice is kept. Fans for the hotend, the stepper drivers and the electronics are never
+  offered, as before.
 - **Quicker double tap:** two taps on the toolhead up to 0.8 s apart now count as a double tap,
   also quick ones 0.2-0.45 s apart (they had to be about half a second apart or more), and the
   history clears sooner after them. After a clear, by double tap or Reset history, the big number
