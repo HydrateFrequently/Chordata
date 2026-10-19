@@ -5,6 +5,19 @@ Update from Mainsail's Update Manager, then restart Klipper.
 
 ## Unreleased (dev)
 
+- **Quicker double tap:** two taps on the toolhead up to 0.8 s apart now count as a double tap,
+  also quick ones 0.2-0.45 s apart (they had to be about half a second apart or more), and the
+  history clears sooner after them. After a clear, by double tap or Reset history, the big number
+  stays blank until the next pluck.
+- **Steadier Tuner card:** "Pluck either belt" and the number stay at the top; only the history
+  below them grows (the card scrolls on small phones). The ± per pluck shows from 4 agreeing
+  plucks (the average from 2).
+- **Target row:** "Target Frequency [110] Hz" on one line, Set centred below it.
+- **A word of encouragement:** a pluck refused for the plucker's own doing (too weak, two plucks
+  at once, a knock) now says "skill issue" or "git good" after its reason in the history.
+
+## 2026-10-19
+
 - **No false "good" beside a fan line:** where twice a belt's note sits on a steady line (a fan
   or motor line that wanders a few Hz, like 178-188 Hz on a Beacon), the reading could latch onto
   that line's skirt and read the same wrong number pluck after pluck (89.7 Hz for a belt the
@@ -23,8 +36,8 @@ Update from Mainsail's Update Manager, then restart Klipper.
   where plucks and tones are looked for.
 - **Pluck history in Tuner Mode:** the page lists the session's plucks, newest at the top, the
   refused ones greyed with the reason. **Reset history** clears it (also while listening), and so
-  does a double tap on the toolhead. Needs a Moonraker restart once (its
-  Chordata component has a new endpoint).
+  does a double tap on the toolhead. Needs a Moonraker restart once (its Chordata component has a
+  new endpoint).
 - **Calmer page:** no full-screen flashes any more; only the box around the number lights up for
   each pluck heard. The Done and Reset buttons no longer get rebuilt under your finger, and How it
   works is now seven short steps (the details behind More).

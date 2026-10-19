@@ -898,6 +898,23 @@ class HistoryTests(unittest.TestCase):
         self.assertEqual([(h["n"], h["ok"]) for h in obj.history], [(11, True)])     # only what came after
         self.assertEqual(obj.history_note["text"], "History cleared (double tap)")
 
+    def test_quick_double_tap_is_one_event_with_a_second_knock_in_it(self):
+        obj = self._filled()
+        with patch.object(belts, "toolhead_knock", lambda *a, **k: (True, 20., None)), \
+                patch.object(belts, "second_knock", lambda *a, **k: a[4] + 0.3):
+            obj._history_add(1, 0., [self.pk(9., ok=False), self.pk(10.5)], self.COLS, None, 12., final=True)
+        self.assertEqual([h["freq"] for h in obj.history], [110.])     # only the pluck after it
+        self.assertEqual(obj.history_note["text"], "History cleared (double tap)")
+
+    def test_a_live_look_without_the_next_event_does_not_keep_its_knock_answer(self):
+        obj = self._filled()
+        answers = iter([False, True])
+        with patch.object(belts, "toolhead_knock", lambda *a, **k: (next(answers), 20., None)), \
+                patch.object(belts, "second_knock", lambda *a, **k: None):
+            obj._history_add(1, 0., [self.pk(9., ok=False, final=True)], self.COLS, None, 9.8)   # live
+            obj._history_add(1, 0., [self.pk(9., ok=False)], self.COLS, None, 12., final=True)
+        self.assertEqual(obj._knocks.get(obj._key(1, 9.)), True)
+
     def test_double_tap_keeps_what_comes_after_and_earlier_plucks_stay_gone(self):
         obj = self._filled()
         with patch.object(belts, "toolhead_knock", lambda *a, **k: (True, 20., None)):

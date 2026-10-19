@@ -765,7 +765,7 @@ class Chordata:
 
     # ---------------- the session's pluck history (Tuner Mode) ----------------
     HISTORY_KEEP = 100  # entries kept
-    DTAP_GAP = (0.2, 0.8)   # s between the two knocks of a double tap
+    DTAP_GAP = (0.2, 0.8)   # s between the two knocks of a double tap (closer than DEAD: one event, see second_knock)
     KEY_STEP = 0.05     # s: a pluck is known by its listen and its time in it, rounded to this
     _hist_lock = threading.Lock()   # the live analysis (a thread) and the page's Reset both change it
 
@@ -796,7 +796,7 @@ class Chordata:
     def _history_add(self, listen, off, plucks, cols, quiet, dur, final=False):
         """Plucks whose window is all in, into the session history: a pluck seen live, then in
         its piece's final analysis, is one entry (the final verdict wins). Then a double tap on the
-        toolhead (two refused knocks 0.2-0.8 s apart) clears the history, as Reset history does.
+        toolhead (two knocks about 0.2-0.8 s apart) clears the history, as Reset history does.
         plucks: one analysis' plucks (t from the start of cols); live ones not final yet are left
         for later."""
         if not hasattr(self, "_hist"):
@@ -839,19 +839,56 @@ class Chordata:
         if not main:
             return False
 
-        def knock(key, at, until):
-            # toolhead_knock at most once per event (live and final share the answer)
-            k = self._known(key, self._knocks) or key
-            if k not in self._knocks:
-                try:
-                    self._knocks[k] = bool(belts.toolhead_knock(*cols, at, main, None, quiet=quiet,
-                                                                until=until)[0])
-                except Exception:
-                    logging.exception("chordata: double tap check")
-                    self._knocks[k] = False
-            return self._knocks[k]
+        def knock(key, at, until, attack=True):
+            # toolhead_knock at most once per event (live and final share the answer). Not kept
+            # while a live look may not hold the next event yet (until unknown): its window could
+            # still change; the next look, or the piece's final analysis, asks again
+            k = (self._known(key, self._knocks) or key)
+            ck = k if attack else ("noattack",) + k
+            if ck in self._knocks:
+                return self._knocks[ck]
+            if not attack and self._knocks.get(k):
+                return True                   # (a knock with its attack is one without it too)
+            try:
+                v = bool(belts.toolhead_knock(*cols, at, main, None, quiet=quiet, until=until, attack=attack)[0])
+            except Exception:
+                logging.exception("chordata: double tap check")
+                v = False
+            if until is not None or final:
+                self._knocks[ck] = v
+            return v
+
+        def quick(key, at, until):
+            # a quick double tap: the second knock inside the first one's dead time (never an
+            # event of its own); asked once per event, after the event is a knock (kept, as for
+            # knock(), only once the look holds all of the event's dead time)
+            k = ("quick",) + (self._known(key, self._knocks) or key)
+            if k in self._knocks:
+                return self._knocks[k]
+            try:
+                v = belts.second_knock(*cols, at, main, quiet=quiet)
+            except Exception:
+                logging.exception("chordata: quick double tap check")
+                v = None
+            if until is not None or final:
+                self._knocks[k] = v
+            return v
+
+        def clear(ka, kb, tb):
+            with self._hist_lock:
+                # the same as Reset history: all of it goes, the knocks too; only what comes
+                # after them stays (and nothing before them comes back with a later analysis)
+                keys = tuple(k for k in (ka, kb) if k is not None)
+                self._hist_gone.update(keys)
+                gone = [h for h in self._hist if (h[0], h[1]) <= (listen, tb) or self._known(h[2], keys)]
+                self._hist_gone.update(h[2] for h in gone)
+                self._hist = [h for h in self._hist if h not in gone]
+                self._hist_floor = max(self._hist_floor, (listen, tb + 0.5 * self.KEY_STEP))
+                self.history_note = {"text": "History cleared (double tap)", "at": round(time.time(), 2),
+                                     "upto": round(tb, 2)}     # (in the listen's time, as belt_live's t)
         # the events: (time in the listen, ok, key, knock?), the last piece's last one first
         ev = []
+        fired = False
         prev = getattr(self, "_dtap_prev", None)
         if prev and prev[0] == listen and prev[1] < off:
             ev.append((prev[1], prev[2], prev[3], lambda k=prev[3]: self._knocks.get(self._known(k, self._knocks))))
@@ -860,8 +897,18 @@ class Chordata:
                 break                         # (and every later one: not all in yet)
             nxt = plucks[i + 1]["t"] if i + 1 < len(plucks) else None
             key = self._key(listen, p["t"] + off)
-            ev.append((p["t"] + off, bool(p.get("ok")), key, lambda k=key, t=p["t"], n=nxt: knock(k, t, n)))
-        fired = False
+            # right after another event the first knock still rings: this one's note can't be
+            # asked to start here (its own attack is the onset found)
+            att = not (ev and p["t"] + off - ev[-1][0] <= self.DTAP_GAP[1])
+            ev.append((p["t"] + off, bool(p.get("ok")), key, lambda k=key, t=p["t"], n=nxt, a=att: knock(k, t, n, a)))
+            if not p.get("ok") and not (p.get("why") or "").startswith(("steady hum", "hidden by")) \
+                    and not self._known(key, self._hist_gone) and (listen, p["t"] + off) >= self._hist_floor:
+                # two quick knocks are one event: the second one inside it
+                if knock(key, p["t"], nxt):
+                    t2 = quick(key, p["t"], nxt)
+                    if t2 is not None:
+                        clear(key, None, t2 + off)
+                        fired = True
         for (ta, oka, ka, kna), (tb, okb, kb, knb) in zip(ev, ev[1:]):
             if oka or okb or not self.DTAP_GAP[0] <= tb - ta <= self.DTAP_GAP[1]:
                 continue
@@ -870,15 +917,7 @@ class Chordata:
                 continue                      # (acted on already, or from before a Reset)
             if not (kna() and knb()):
                 continue
-            with self._hist_lock:
-                # the same as Reset history: all of it goes, the two knocks too; only what comes
-                # after them stays (and nothing before them comes back with a later analysis)
-                self._hist_gone.update((ka, kb))
-                gone = [h for h in self._hist if (h[0], h[1]) <= (listen, tb) or self._known(h[2], (ka, kb))]
-                self._hist_gone.update(h[2] for h in gone)
-                self._hist = [h for h in self._hist if h not in gone]
-                self._hist_floor = max(self._hist_floor, (listen, tb + 0.5 * self.KEY_STEP))
-                self.history_note = {"text": "History cleared (double tap)", "at": round(time.time(), 2)}
+            clear(ka, kb, tb)
             fired = True
         if final:
             # the piece's last event, for the next piece's first: its knock asked now, with this

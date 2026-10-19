@@ -200,12 +200,13 @@ top (the last 100; about 20 show, scroll for more): each pluck's frequency, and 
 ones greyed with the reason. It carries on across Tuner Mode runs, and is cleared by a new
 session (Start), **Close Chordata** and **Reset history** (on the green card and the end
 card; it works while Chordata listens). A quick double tap on the toolhead, on the spot you
-tapped at the setup, does the same as **Reset history**: the whole history goes, so you can
-start over without touching the phone; the page says so for a moment. The double tap itself is
+tapped at the setup (two taps up to 0.8 s apart), does the same as **Reset history**: the whole
+history goes, so you can start over without touching the phone; the page says so for a moment,
+and the big number stays blank until your next pluck. The double tap itself is
 never counted.
 
 Under the number the page shows the **average** of the last plucks that agree (up to 5, all
-within twice the tolerance, 0.5 Hz by default), so you can pluck and turn on and on. Once three
+within twice the tolerance, 0.5 Hz by default), so you can pluck and turn on and on. Once four
 or more lie together (and are not all exactly alike), it also shows **± Hz per pluck**: how far one reading can be off, at 95 %, judged
 from how much those plucks scatter. A real belt's tone varies 0.1-0.4 Hz from pluck to pluck, so
 pluck each belt a few times and go by where most land. Chordata doesn't know which belt you

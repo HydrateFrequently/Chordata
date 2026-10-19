@@ -1378,11 +1378,83 @@ def analyse_taps(t, ax, ay, az, quiet=None, need=TAP_NEED, target=None):
     return out
 
 
-def toolhead_knock(t, ax, ay, az, at, main, belt, quiet=None, until=None):
+QUICK_GAP = 0.12          # s: a second knock this soon after a knock is not its own ringing
+
+
+def second_knock(t, ax, ay, az, at, main, quiet=None):
+    """A second knock on the toolhead right after the one at `at` (s after t[0]): a quick
+    double tap, whose second tap comes inside DEAD, where no new onset is looked for (a pluck's
+    own ringing must never count as a second pluck). A knock dies within 0.1-0.15 s, so a new
+    one stands out: the band level jumps 3x within 40 ms again (the way find_plucks finds an
+    onset), at least half as high as the first knock, between QUICK_GAP and DEAD after it, and
+    the toolhead's note is heard there as a knock (toolhead_knock). Returns its time or None."""
+    st = _setup(t, ax, ay, az, quiet)
+    if st is None or not main:
+        return None
+    axes, fs, q = st
+    env = _band(axes, fs, SEARCH[0], min(SEARCH[1], 0.45 * fs / 2.0), None)
+    on, back = int(round(at * fs)), max(1, int(0.04 * fs))
+    if on < 0 or on >= len(env):
+        return None
+    first = float(env[on:on + int(0.1 * fs)].max())
+    i0, i1 = on + int(QUICK_GAP * fs), min(len(env), on + int(DEAD * fs))
+    for i in range(max(i0, back), i1):
+        if env[i] > 3.0 * env[i - back] and env[i] >= 0.3 * first:
+            j = i - back + int(np.argmax(np.diff(env[i - back:min(len(env), i + back) + 1])))
+            at2 = j / fs
+            # and nothing rings louder there than the toolhead's note: a pluck right after a
+            # knock (or a knock right after a pluck) has its belt's line on top
+            ok = toolhead_knock(t, ax, ay, az, at2, main, _loudest_other(axes, fs, j, main), quiet=quiet,
+                                attack=False)[0]
+            # the first event too, up to the second: a knock with nothing louder than the
+            # toolhead's note (a pluck just before a knock is no double tap)
+            ok = ok and toolhead_knock(t, ax, ay, az, at, main, _loudest_other(axes, fs, on, main, j),
+                                       quiet=quiet, until=at2)[0]
+            # nor a belt at half the toolhead's note (its twice-the-tone would sit on the note)
+            ok = ok and not _half_line(axes, fs, j, main)
+            return at2 if ok else None
+    return None
+
+
+def _half_line(axes, fs, on, main):
+    """A line at half the toolhead's note just after onset `on`, within 15 dB of the note: a belt
+    tuned there rings its twice-the-tone on the note. A knock has nothing below its note."""
+    a0 = on + int(SKIP * fs)
+    a1 = min(len(axes[0]), a0 + int(0.3 * fs))
+    if a1 - a0 < int(0.08 * fs):
+        return False
+    f, p = _spectrum([a[a0:a1] for a in axes], fs, _nfft(fs))
+    m, g = float(main["freq"]), float(main.get("guard", TAP_GUARD))
+    near, half = np.abs(f - m) <= g, np.abs(f - m / 2.0) <= g / 2.0 + 1.0
+    if not near.any() or not half.any() or m / 2.0 < SEARCH[0]:
+        return False
+    return float(p[half].max()) >= 0.03 * float(p[near].max())
+
+
+def _loudest_other(axes, fs, on, main, end=None):
+    """The strongest line (Hz) just after onset `on` that is not the toolhead's note (within its
+    guard) nor twice it, in SEARCH: a belt's tone if one rings there. None: nothing found."""
+    a0 = on + int(SKIP * fs)
+    a1 = min(len(axes[0]), a0 + int(0.3 * fs), end if end is not None else len(axes[0]))
+    if a1 - a0 < int(0.08 * fs):
+        return None
+    nfft = _nfft(fs)
+    f, p = _spectrum([a[a0:a1] for a in axes], fs, nfft)
+    g = float(main.get("guard", TAP_GUARD)) + 1.0
+    m = float(main["freq"])
+    sel = (f >= SEARCH[0]) & (f <= min(SEARCH[1], 0.45 * fs / 2.0)) & (np.abs(f - m) > g) & (np.abs(f - 2 * m) > g)
+    if not sel.any():
+        return None
+    return float(f[np.flatnonzero(sel)[np.argmax(p[sel])]])
+
+
+def toolhead_knock(t, ax, ay, az, at, main, belt, quiet=None, until=None, attack=True):
     """Was the event at `at` (s after t[0]) a knock on the toolhead rather than a pluck? Its
     note (main, from the setup taps) must be clearly heard (STRONG_DB over the noise) and
     louder than the belt's note (belt: Hz, belt A's reading). until: when the next event
-    starts (s), so a double tap's second knock isn't heard in the first one's window.
+    starts (s), so a double tap's second knock isn't heard in the first one's window. attack:
+    the note must start here (not for a quick double tap's second knock, which comes while the
+    first still rings: second_knock checks its attack in the band level instead).
     Returns (yes, dB of the toolhead note, dB of the belt note)."""
     st = _setup(t, ax, ay, az, quiet)
     if st is None or not main:
@@ -1407,7 +1479,7 @@ def toolhead_knock(t, ax, ay, az, at, main, belt, quiet=None, until=None):
     # just before the event as well: no attack, no knock
     _, before, after = _levels(axes, fs, on, main["freq"])
     rise = None if before is None or after is None else _db(after / max(before, 1e-30))
-    if rise is not None and rise < ATTACK_DB:
+    if attack and rise is not None and rise < ATTACK_DB:
         return False, round(dm, 1), None
     # the belt rings as a line: a peak within SPREAD of its reading, not the slope of the
     # toolhead's broad note beside it. A belt inside the toolhead's guard can't be told apart.

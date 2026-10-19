@@ -165,8 +165,13 @@ input[type=text], input[type=number], input[type=password] {
 .how { margin: 8px 0; padding: 0 0 0 20px; }
 #howBtn, #exitBtn { background: var(--card); color: var(--primary); border: 2px solid var(--primary); }
 #prompt .perr { color: var(--err); font-weight: 700; font-size: 18px; }
-#prompt form.ptarget { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; margin: 4px 0 10px; font-size: 22px; font-weight: 700; }
-#prompt form.ptarget input { width: 5.5em; font-size: 22px; font-weight: 700; padding: 6px 10px; }
+/* "Target Frequency [110] Hz" on one line (the box holds three digits: no belt is tuned above
+   999 Hz), Set centred below it */
+#prompt form.ptarget { display: flex; flex-direction: column; align-items: center; gap: 10px; margin: 4px 0 10px; font-size: 22px; font-weight: 700; }
+#prompt form.ptarget .trow { display: flex; flex-wrap: nowrap; align-items: center; justify-content: center; gap: 10px; white-space: nowrap; }
+#prompt form.ptarget input { width: calc(3ch + 24px); font-size: 22px; font-weight: 700; padding: 6px 10px; text-align: center;
+  -moz-appearance: textfield; appearance: textfield; }
+#prompt form.ptarget input::-webkit-outer-spin-button, #prompt form.ptarget input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 #prompt form.ptarget button { min-width: 88px; }
 .jog .xy { display: grid; grid-template-columns: 1fr 1fr auto; gap: 6px; margin-top: 8px; align-items: end; }
 .jog .xy label { font-size: 14px; color: var(--muted); display: grid; gap: 2px; }
@@ -338,6 +343,12 @@ html.pc #cueLive .hist { max-height: 40vh; }
 }
 #cue.yellow { --cbg: #ffd600; --cfg: #111111; }
 #cue.green { --cbg: #2e7d32; --cfg: #ffffff; }
+/* Tuner Mode: "Pluck either belt" and the number stay put at the top; the lines under the number keep
+   their place whether they show anything or not, and only the history below grows */
+html:not(.pc) #cue.green { justify-content: flex-start; overflow-y: auto; }
+html:not(.pc) #cue.green #cueLive .lage[hidden], html:not(.pc) #cue.green #cueLive .lsub[hidden] { display: block !important; visibility: hidden; }
+html:not(.pc) #cue.green #cueLive .lage, html:not(.pc) #cue.green #cueLive .lsub { min-height: 1.35em; }
+html:not(.pc) #cue.green #cueLive .lage.u { min-height: 2.7em; }
 #cue .cbig {
   font-size: clamp(30px, 10vw, 64px); font-weight: 900; line-height: 1.1; letter-spacing: .02em;
   text-transform: uppercase; text-wrap: balance; max-width: 14em; }
@@ -812,10 +823,11 @@ function pressPromptButton(gcode) {
 function targetBox(text) {
   const now = (text.match(/([\d.]+)\s*Hz/) || [])[1] || "";
   const f = el("form", { class: "ptarget" });
-  f.appendChild(el("label", { for: "targetHz" }, "Target Frequency:"));
+  const row = f.appendChild(el("div", { class: "trow" }));
+  row.appendChild(el("label", { for: "targetHz" }, "Target Frequency"));
   const inp = el("input", { id: "targetHz", type: "number", inputmode: "numeric", min: "40", max: "300", step: "any", value: now });
-  f.appendChild(inp);
-  f.appendChild(el("span", {}, "Hz"));
+  row.appendChild(inp);
+  row.appendChild(el("span", {}, "Hz"));
   const set = el("button", { type: "submit", "data-g": "1" }, "Set");
   set.disabled = buttonsLocked;
   f.appendChild(set);
@@ -1019,7 +1031,7 @@ const T95 = [12.706, 4.303, 3.182, 2.776, 2.571, 2.447, 2.365, 2.306, 2.262, 2.2
 const U_N = 5;
 function u1(vals) {
   const n = vals.length;
-  if (n < 3) return null;
+  if (n < 4) return null;
   const m = vals.reduce((a, x) => a + x, 0) / n;
   const s2 = vals.reduce((a, x) => a + (x - m) * (x - m), 0) / (n - 1);
   if (Math.sqrt(s2) < 0.02) return null;          // (alike to the 0.01 Hz the readings are given in)
@@ -1061,8 +1073,7 @@ function deltaText(last, b) {
 function renderFree(v, b) {
   const listening = pt().state === "listening" && pt().belt_now === "free";
   const plucks = (listening ? pt().belt_live : (b.free || {}).plucks) || [];
-  const good = plucks.filter((p) => p.ok && p.freq != null);
-  const lastP = good.length ? good[good.length - 1] : null;
+  const lastP = shownLast(plucks);
   const last = lastP ? lastP.freq : null;
   setText(v.hz, last != null ? fmtHz(last) + " Hz" : (listening ? "..." : "--"));
   v.hz.className = hzClass("hz", lastP);
@@ -1101,18 +1112,40 @@ function histUpdate(list) {
     li.appendChild(el("span", { class: "f" }, e.freq != null ? fmtHz(e.freq) + " Hz" : "--"));
     const u = um.get(e);
     if (u != null) li.appendChild(el("span", { class: "u" }, "\u00b1 " + u.toFixed(1)));
-    if (!e.ok && e.why) li.appendChild(el("span", { class: "why" }, e.why));
+    if (!e.ok && e.why) li.appendChild(el("span", { class: "why" }, e.why + quip(e)));
     return li;
   }));
   list.hidden = !h.length;
 }
+// a refused pluck that was the plucker's doing (not a fan's, not the other belt's) gets a word
+// of encouragement after its reason, the same one each time for the same pluck
+const PLUCKER = ["too weak", "too soft", "two plucks at once", "a knock, not a belt"];
+function quip(e) {
+  return PLUCKER.includes(e.why) ? (e.n % 2 ? " \u00b7 skill issue" : " \u00b7 git good") : "";
+}
 // Reset history is not G-code either (a listen may be running): to the plugin through Moonraker
 let resetting = false;
+// after a clear (Reset history, a double tap) the number goes blank until the next clear pluck:
+// the reading before it is still true, but showing it looks as if nothing was cleared
+let clearedSig = null;
+function pluckSig(p) { return p ? String(p.t) : null; }    // (its time only: a provisional reading's Hz may still change)
+function shownLast(plucks) {
+  const good = plucks.filter((p) => p.ok && p.freq != null);
+  const p = good.length ? good[good.length - 1] : null;
+  return p && pluckSig(p) === clearedSig ? null : p;
+}
+function markCleared(upto) {
+  const st = pt(), listening = st.state === "listening" && st.belt_now === "free";
+  const plucks = (listening ? st.belt_live : ((st.belts || {}).free || {}).plucks) || [];
+  // (a double tap: only plucks up to it; one heard after it stays shown)
+  const good = plucks.filter((p) => p.ok && p.freq != null && (upto == null || p.t <= upto));
+  clearedSig = good.length ? pluckSig(good[good.length - 1]) : null;
+}
 function historyReset() {
   if (resetting) return;
   resetting = true;
   render();
-  rpc("server.chordata.history_reset", {}).then(() => toast("History cleared", true), (e) => toast(errText(e)))
+  rpc("server.chordata.history_reset", {}).then(() => { markCleared(); toast("History cleared", true); }, (e) => toast(errText(e)))
     .finally(() => { resetting = false; render(); });
 }
 // A double tap on the toolhead cleared the history: said once, as a short notice
@@ -1121,7 +1154,7 @@ function noteCheck() {
   if (!S.chordata) return;
   const n = pt().history_note, at = n ? n.at : null;
   if (noteAt === undefined) { noteAt = at; return; }      // (on load: an earlier note is no news)
-  if (at !== noteAt) { noteAt = at; if (n && n.text) toast(n.text, true); }
+  if (at !== noteAt) { noteAt = at; if (n && n.text) { markCleared(n.upto); toast(n.text, true); } }
 }
 
 let beltViewKey = "", freeView = null;
@@ -1283,8 +1316,7 @@ function cueLive(key, st) {
     return;
   }
   const v = cueView, b = st.belts || {}, plucks = st.belt_live || [];
-  const shown = plucks.filter((p) => p.ok && p.freq != null);
-  const last = shown.length ? shown[shown.length - 1] : null;
+  const last = shownLast(plucks);
   setText(v.hz, last && last.freq != null ? fmtHz(last.freq) + " Hz" : "...");
   v.hz.className = "lhz" + (last && last.final === false ? " prov" : "");
   v.box.classList.toggle("lit", heardNow());
