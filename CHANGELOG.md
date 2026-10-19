@@ -3,6 +3,53 @@
 What changed in each update of Chordata's main branch, newest first.
 Update from Mainsail's Update Manager, then restart Klipper.
 
+## 2026-10-19
+
+- **No false "good" beside a fan line:** where twice a belt's note sits on a steady line (a fan
+  or motor line that wanders a few Hz, like 178-188 Hz on a Beacon), the reading could latch onto
+  that line's skirt and read the same wrong number pluck after pluck (89.7 Hz for a belt the
+  microphone heard at 90.9). Twice the note is now no evidence there, and a reading is always the
+  top of a spectral line, never its slope. That belt now reads 91.0 Hz.
+- **Average of the last plucks:** under the number, Tuner Mode shows the average of the last
+  plucks that agree (up to 5, within twice the tolerance), so you can pluck and turn on and on
+  and still see where the belt sits.
+- **Each reading shows how far it can be trusted:** Tuner Mode and the history show **± Hz per
+  pluck**, the 95 % interval of one reading from the scatter of the plucks just before it that
+  lie close together (all within twice the tolerance, one after another, at most 5; from 3 plucks
+  on). It is how much a belt's tone varies from pluck to pluck, not the engine's own bias. "On
+  target" still goes by the pluck shown.
+- **Smaller engine changes:** with a set number of plucks, the latest ones now count (a belt just
+  tensioned still settles); the accelerometer's reliable range from its datasheet now limits
+  where plucks and tones are looked for.
+- **Pluck history in Tuner Mode:** the page lists the session's plucks, newest at the top, the
+  refused ones greyed with the reason. **Reset history** clears it (also while listening), and so
+  does a double tap on the toolhead. Needs a Moonraker restart once (its Chordata component has a
+  new endpoint).
+- **Calmer page:** no full-screen flashes any more; only the box around the number lights up for
+  each pluck heard. The Done and Reset buttons no longer get rebuilt under your finger, and How it
+  works is now seven short steps (the details behind More).
+- **One way to measure: Tuner Mode.** Guided Mode and Pluck - Tap - Pluck Mode are gone. After
+  the toolhead taps, Tuner Mode shows every clear pluck of either belt: turn the tensioners until
+  both are on target and match. Simpler, and fewer refusals (no counting to 5, no switch tap).
+- **Belt detection: back to the proven engine.** The fitted-tone engine tried on dev counted only
+  about half the real plucks on a Nebula 370 and analysed 6-30 times slower (a Pi 5 couldn't keep
+  up live); measured against a microphone, the earlier engine found 94 % of real plucks with no
+  tap or knock counted on an ADXL345. Its taps now learn the toolhead's note from the note most
+  taps ring, not the first tap's loudest line (a Beacon rings a higher mode first now and then).
+- **Fan off buttons:** when a fan hums near the belt's note, Chordata offers to turn it off for
+  the measurement. Mainboard, hotend and other safety fans never get a button. Fans come back on
+  when Chordata is closed, after 10 idle minutes, or when a print starts; in a print the part
+  fan is left to the slicer.
+- The analysis runs beside Klipper's main loop, so a slow host never holds up the printer.
+- Fixed: fans named with capitals (`[fan_generic Bed_Fan]`) couldn't be turned off and showed
+  as on; Chordata now uses each fan's own name.
+- The hum check before the taps only stops for a hum within about 2.7 Hz of the belt's note.
+  A steady hum further off, or near twice the note (like a stepper's holding buzz), no longer
+  blocks the measurement.
+- A hum near the belt's note from something Chordata can't turn off (the motors held, a
+  controller fan, a fan without an off button) no longer stops the tap step: it is noted on the
+  card and the taps are listened to. The step only stops while a fan with an off button runs.
+
 ## 2026-10-18
 
 - Fixed: Kalico refused to load `chordata.cfg` ("Missing end of comment tag" in `_CHORDATA_BELTS`), so a printer

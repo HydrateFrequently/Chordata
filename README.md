@@ -18,19 +18,17 @@ next to the belt: the sensor is already on the printer, and you keep both hands 
    how long and how broad each line is. Toolheads differ a lot (a plastic one rings briefly in broad lines,
    a stiff all-metal one rings long in sharp lines), so each line is guarded as wide as it is, and plucks
    that come while a long-ringing toolhead still rings from a knock are still found. A knock is never taken
-   for a belt, and only a knock at the toolhead's own note switches from belt A to belt B. The taps can't be
-   skipped: the belts are only measured once 3 good taps were heard.
-2. **Pluck.** You pluck belt A, then belt B. Each pluck is judged: loud enough, not a
-   knock, not the other belt ringing along. Bad plucks are left out, and Chordata keeps listening until
-   5 good plucks are counted ("3 of 5 counted").
-3. **Read and adjust.** For each belt you get its frequency, how far it is from your target, and which way to
-   turn. CoreXY belts pull on each other, so both are measured again after every adjustment. A belt is good
-   when the average of 5 good plucks is within 0.25 Hz of the target.
+   for a belt. The taps can't be skipped: the belts are only measured once 3 good taps were heard.
+2. **Tune (Tuner Mode).** Pluck either belt. Each clear pluck shows its frequency, how far it is from your
+   target and which way to turn; a weak pluck or a knock is left out. Turn the tensioner a little between
+   plucks until the belt is on target (within 0.25 Hz), then do the other belt.
+3. **Match.** CoreXY belts pull on each other, so turning one moves the other a little: pluck both once
+   more at the end. Done when both are on target, and so match each other.
 
 Where to put the toolhead, which stretch of belt to pluck and the target frequency all come from your
 printer's own documentation. Chordata can save the toolhead position for next time.
 
-![Chordata page with both belts, the pluck chart and the measurement data (demo data)](docs/images/desktop-demo.png)
+![Chordata page (demo data)](docs/images/desktop-demo.png)
 
 *Demo data, not a real printer.* The **[user guide](docs/USER_GUIDE.md)** walks through setup and a full
 measurement with screenshots; the **[troubleshooting guide](docs/TROUBLESHOOTING.md)** helps when something
@@ -57,11 +55,9 @@ The installer links the plugin into Klipper (`klippy/extras`, or Kalico's `klipp
 an update entry for Mainsail's update manager. It also adds the **Chordata page**, served by Moonraker (a small
 component, `[chordata_web]`), with a link in Mainsail's sidebar. Open it on a phone at
 `http://<printer>/server/chordata` and lay the phone near the printer: it shows big signal-colour cards for what
-your hands do, each pluck live in big numbers, both belts against the target, and a pad to move the toolhead to
+your hands do, each pluck live in big numbers against the target, and a pad to move the toolhead to
 your belt tensioning position. The screen stays on while the page is open. On a PC the page looks like Mainsail's
-own pop-ups. A chart and a table show every pluck heard, counted or
-left out with its reason, and **Export CSV** saves them. The same steps also run as prompts from the
-**CHORDATA** macro in Mainsail or Fluidd.
+own pop-ups. The same steps also run as prompts from the **CHORDATA** macro in Mainsail or Fluidd.
 
 Settings (`chordata_settings.cfg`): `belt_target` (Hz, default 110; you can also change it on the first prompt)
 and `belt_tolerance` (Hz, default 0.25). Every recording is saved in `chordata/recordings/` in the config
