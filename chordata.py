@@ -191,6 +191,14 @@ class Chordata:
         acc = self._accel()
         return self._off_reactor(belts.analyse, *cols, hears=acc["hi"] if acc else None, **kw)
 
+    @staticmethod
+    def _warm(q, fs):
+        import chordata_belts as belts
+        try:
+            belts.warm(q, fs)
+        except Exception:
+            logging.exception("chordata: warming the noise spectra")
+
     def _off_reactor(self, fn, *args, **kw):
         """fn(*args, **kw), in a thread when called on Kalico's own (reactor) thread, which
         keeps running meanwhile: an analysis can take seconds on a small Pi, and a reactor
@@ -306,6 +314,10 @@ class Chordata:
             q = [[s[i] for s in quiet] for i in (1, 2, 3)]
             avoid = self.belts.get("tap_ring") or self.belts.get("tap", [])
             kw = dict(quiet=q, avoid=avoid, target=self.belts["target"], free=True)
+            # the noise spectra the first plucks need, made while the user gets ready to pluck
+            fs_q = getattr(self, "_accel_fs", None)
+            if fs_q:
+                threading.Thread(target=self._warm, args=(q, fs_q), daemon=True).start()
             # in short pieces: an open-ended listen would pile up samples (memory on a small Pi)
             # and the live analysis would slow down as the recording grows
             plucks, t_off, samples, hum = [], 0.0, None, []

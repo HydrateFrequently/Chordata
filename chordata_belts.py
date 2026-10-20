@@ -11,6 +11,7 @@
 # Copyright (C) 2026  Chordata contributors
 # This file may be distributed under the terms of the GNU GPLv3 license.
 import math
+import time
 
 import numpy as np
 
@@ -40,6 +41,23 @@ def _running_median(x, n):
     return np.median(view, axis=1)
 
 
+def _pct(a, qs):
+    """np.percentile(a, qs, axis=0) for a few rows (the same numbers, bit for bit: numpy's
+    linear rule), by one sort: several times quicker than numpy's own for this shape."""
+    s = np.sort(a, axis=0)
+    m = s.shape[0]
+    out = []
+    for q in qs:
+        idx = q / 100.0 * (m - 1)
+        lo = int(math.floor(idx))
+        hi = min(lo + 1, m - 1)
+        g = idx - lo
+        lo_v, hi_v = s[lo], s[hi]
+        d = hi_v - lo_v
+        out.append(np.where(g >= 0.5, hi_v - d * (1 - g), lo_v + d * g))
+    return out
+
+
 def _nfft(fs):
     return 1 << int(math.ceil(math.log2(8 * fs)))       # ~0.1 Hz bins after zero padding
 
@@ -61,7 +79,7 @@ def _background(axes, fs, n, nfft, pct):
         return None
     specs = [_spectrum([a[k:k + n] for a in axes], fs, nfft)[1]
              for k in range(0, total - n + 1, max(1, n // 4))]
-    return np.percentile(np.array(specs), pct, axis=0)
+    return _pct(np.array(specs), [pct])[0]
 
 
 def steady_lines(axes, fs):
@@ -146,7 +164,7 @@ def steady_in(axes, fs, quiet=None, onsets=()):
     nfft = 1 << int(math.ceil(math.log2(2 * seg)))      # ~0.4 Hz bins: a 1 s window resolves ~1 Hz anyway
     specs = np.array([_spectrum([a[k:k + seg] for a in axes], fs, nfft)[1]
                       for k in range(0, total - seg + 1, seg // 2)])
-    lo, hi = np.percentile(specs, [20, 80], axis=0)
+    lo, hi = _pct(specs, [20, 80])
     f = np.fft.rfftfreq(nfft, 1.0 / fs)
     df = f[1] - f[0]
     d = max(1, int(0.5 / df))                         # floor on a coarser grid: quicker
@@ -199,12 +217,15 @@ def _flat(axes, fs, fr):
     t = np.arange(n) / fs
     w = np.hanning(n)
     c, s_ = w * np.cos(2 * math.pi * fr * t), w * np.sin(2 * math.pi * fr * t)
-    lv = []
-    for i in range(0, len(axes[0]) - n + 1, n // 2):
-        lv.append(sum(np.dot(a[i:i + n] - a[i:i + n].mean(), c) ** 2 + np.dot(a[i:i + n] - a[i:i + n].mean(), s_) ** 2
-                      for a in axes))
-    if len(lv) < 4:
+    starts = np.arange(0, len(axes[0]) - n + 1, n // 2)
+    if len(starts) < 4:
         return False
+    lv = 0
+    for a in axes:          # all slices at once: each slice less its mean, against cos and sin
+        a = np.asarray(a, float)
+        fr = np.lib.stride_tricks.as_strided(a, (len(starts), n), (a.strides[0] * (n // 2), a.strides[0]))
+        fr = fr - fr.mean(axis=1, keepdims=True)
+        lv = lv + (fr @ c) ** 2 + (fr @ s_) ** 2
     p20, p80 = np.percentile(lv, [20, 80])
     return p80 <= 2.0 * p20
 
@@ -239,16 +260,18 @@ def find_plucks(axes, fs, lo, hi, mask, base=None, env=None):
     # pluck among loud ones (-30 dB) is still found
     thr = max(5.0 * base, 0.03 * float(env.max()))
     # an onset: above the threshold AND a sharp rise (not the tail of the last pluck)
-    onsets, i, n = [], 0, len(env)
+    onsets, n = [], len(env)
     dead, back = int(DEAD * fs), max(1, int(0.04 * fs))
-    while i < n:
-        if env[i] > thr and env[i] > 3.0 * env[max(0, i - back)]:
-            j0 = max(0, i - back)
-            j1 = min(n - 1, i + back)
-            onsets.append(j0 + int(np.argmax(np.diff(env[j0:j1 + 1]))))
-            i += dead
-        else:
-            i += 1
+    prior = np.concatenate([np.full(min(back, n), env[0]), env[:max(0, n - back)]])     # env[max(0, i - back)]
+    cand = np.flatnonzero((env > thr) & (env > 3.0 * prior))
+    i = 0
+    for c in cand:                        # the first candidate at or after i, then skip DEAD
+        if c < i:
+            continue
+        j0 = max(0, c - back)
+        j1 = min(n - 1, c + back)
+        onsets.append(j0 + int(np.argmax(np.diff(env[j0:j1 + 1]))))
+        i = c + dead
     return onsets
 
 
@@ -797,7 +820,7 @@ def _steady(axes, fs, n, nfft):
         return None
     specs = np.array([_spectrum([a[k:k + n] for a in axes], fs, nfft)[1]
                       for k in range(0, total - n + 1, max(1, n // 4))])
-    lo, hi = np.percentile(specs, [20, 80], axis=0)
+    lo, hi = _pct(specs, [20, 80])
     df = fs / nfft
     d = max(1, int(0.5 / df))                         # floor on a coarser grid: quicker
     floor = _running_median(lo[::d], int(40.0 / (d * df)) | 1)
@@ -840,7 +863,9 @@ def _spectra(axes, q, fs, nfft, f, mask, a0, a1, cache, keep=True):
     for b0, b1 in ((a0, a1), (a0, (a0 + a1) // 2), ((a0 + a1) // 2, a0 + 2 * ((a1 - a0) // 2))):
         make = lambda: _spectrum([a[b0:b1] for a in axes], fs, nfft)[1].astype(np.float32)
         p = _memo(("spec", nfft) + _fp(axes, b0, b1), make, _SPEC) if keep else make()
-        nz = _noise(axes, q, fs, b1 - b0, nfft, cache, keep)
+        # (the noise for a window length is kept even for a window still growing: lengths go in
+        # STEP steps, so the next pluck asks for the same ones again)
+        nz = _noise(axes, q, fs, b1 - b0, nfft, cache, True)
         if nz is None:
             return None
         nz = _smooth(nz, sm)
@@ -1596,6 +1621,30 @@ def disturbing(quiet, fs, notes):
                 out.append((round(float(f[k]), 2), y))
                 break
     return out
+
+
+def warm(quiet, fs):
+    """Makes ahead what the first plucks would wait for: the quiet recording's noise spectrum
+    for every window length a pluck can have (STEP steps, and their halves) and its steady
+    lines. Called while the listen starts (Tuner Mode), so the first pluck's reading isn't
+    held up by them; the same entries the analysis would make itself (_memo)."""
+    q = [np.asarray(a, float) for a in quiet]
+    if len(q) != 3 or len(q[0]) <= int(0.5 * fs) or not all(np.isfinite(a).all() for a in q):
+        return
+    nfft = _nfft(fs)
+    step = max(1, int(STEP * fs))
+    top = int(WINDOW * fs) // step * step
+    lengths = set()
+    for n in range(step, top + 1, step):
+        if n >= int(0.15 * fs):
+            lengths.update((n, n // 2))
+    fp = _fp(q)
+    _memo(("steady", round(fs, 1)) + fp, lambda: steady_lines(q, fs) or False)
+    # shortest first: a new pluck is first read from its shortest window
+    for n in sorted(lengths):
+        if len(q[0]) >= n:
+            _memo(("bg", n, nfft) + fp, lambda n=n: _background(q, fs, n, nfft, 50))
+            time.sleep(0.005)     # (a thread beside Kalico's own: let it run between pieces)
 
 
 def clear_cache(windows_only=False):
