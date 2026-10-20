@@ -450,7 +450,7 @@ def _late(halves, f, df, fc):
     return k is not None and pl[k] / max(nh[k], 1e-30) >= 10.0 ** (WEAK_DB / 10.0)
 
 
-def pluck_freq(f, p, noise, df, lo, hi, avoid=(), target=None, prev=None, halves=None, blind=None):
+def pluck_freq(f, p, noise, df, lo, hi, avoid=(), target=None, prev=None, halves=None, blind=None, late=None):
     """Belt tone from one pluck's spectrum p, given the noise spectrum (same window
     length, no pluck). The carriage feels a belt at its tone and at twice it (the pull
     changes twice per swing), so the tone F is where F and 2F together stand highest
@@ -459,8 +459,9 @@ def pluck_freq(f, p, noise, df, lo, hi, avoid=(), target=None, prev=None, halves
     long each line rings. blind: bins (over f) where a steady line or its skirt in this
     window sits (_blind): there twice the tone is no evidence for a belt (the skirt of a
     fan line that wanders past its mask stands far above the noise, and a tone picked so
-    that twice it lands there is that skirt, not a belt). Returns (freq or None, dB at F,
-    dB at 2F)."""
+    that twice it lands there is that skirt, not a belt). late: for a window still growing,
+    reads the picked line again from after the early glide (see LATE), or None. Returns (freq
+    or None, dB at F, dB at 2F)."""
     snr = p / np.maximum(noise, 1e-30)
     top = f[-1] / 2.0 - 2.0
     flo, fhi = lo, min(hi, top, F_MAX)
@@ -612,11 +613,25 @@ def pluck_freq(f, p, noise, df, lo, hi, avoid=(), target=None, prev=None, halves
     if j is not None and db2 > db1 and not _on_mode(2 * fk, ringing2) \
             and not (blind is not None and blind[max(0, j - 2):j + 3].any()):
         fk = _peak(f, p, j, df) / 2.0          # the sharper line: twice the tone (unless a toolhead line pulls it)
+        if late is not None:
+            v = late(float(f[j]))
+            fk = fk if v is None else v / 2.0
+    elif late is not None:
+        v = late(float(f[k]))
+        fk = fk if v is None else v
     if fk < lo + 2 * df or fk > hi - 2 * df:
         return None, db1, db2         # at the edge of what is searched: not a belt reading
     return fk, db1, db2
 
 
+# A plucked belt's pitch starts high (the swing stiffens it) and settles within ~0.1-0.15 s
+# (plucks2, both the accelerometer and the microphone). A live look reads a pluck whose window
+# is still growing; read from the onset on, that first number is 1.5-2.5 Hz high and only
+# comes within 0.1 Hz of the final reading after ~0.5 s. So a growing window is read from
+# LATE on, once there is LIVE_LEAST of window (a pluck's first number at ~0.25 s, within
+# ~0.2 Hz of its final reading); the final reading itself (the whole window) is unchanged.
+LATE = 0.12               # s after the onset
+LIVE_LEAST = 0.25         # s of window (from SKIP) before a growing window is read
 LONG_ON = 0.6             # Hz: a reading (with the lines fitted out) this close to a long-ringing line is that line
 REFINE_NEAR = 4.0         # Hz: a long-ringing mode this close to the tone (or twice it) pulls the reading
 
@@ -791,7 +806,10 @@ def _windows(axes, fs, onsets):
         a0 = on + int(SKIP * fs)
         a1 = min(a0 + win, n_all, (onsets[j + 1] - int(0.01 * fs)) if j + 1 < len(onsets) else n_all)
         a1 = a0 + (a1 - a0) // step * step
-        if a1 - a0 >= int(0.15 * fs):
+        # a window still growing (a live look) is read once it reaches past the early glide
+        # far enough for LATE (see there); one the next pluck cut short is read from 0.15 s
+        least = 0.15 if j + 1 < len(onsets) else LIVE_LEAST
+        if a1 - a0 >= int(least * fs) or (j + 1 >= len(onsets) and a1 - a0 >= int(win) // step * step):
             yield on, a0, a1
 
 
@@ -1029,7 +1047,13 @@ def analyse(t, ax, ay, az, target=None, expect=None, quiet=None, avoid=(), other
             continue
         p, nz, halves = sp
         blind = _blind(f, mask, a1 - a0, fs, cache)
-        fr, d1, d2 = pluck_freq(f, p, nz, df, lo, hi, pick_avoid, target, prev, halves, blind)
+        late = None
+        if not _complete(fs, a0, a1, k + 1 < len(onsets)) and a1 - (on + int(LATE * fs)) >= int(0.1 * fs):
+            def late(fc, l0=on + int(LATE * fs), a1=a1):
+                pl = _spectrum([a[l0:a1] for a in axes], fs, nfft)[1]
+                j = _near(f, pl, fc, df, 0.6)
+                return None if j is None else _peak(f, pl, j, df)
+        fr, d1, d2 = pluck_freq(f, p, nz, df, lo, hi, pick_avoid, target, prev, halves, blind, late)
         tone_only = False
         if fr is not None and ringing:
             # a toolhead line that rings on next to the tone pulls the spectrum's peak:
