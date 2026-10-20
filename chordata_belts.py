@@ -610,7 +610,12 @@ def pluck_freq(f, p, noise, df, lo, hi, avoid=(), target=None, prev=None, halves
         return None, None, None       # the toolhead ringing by itself
     if guarded2(2 * fk) and (snr[k] < strong or not own(k)):
         return None, None, None       # only the toolhead ringing at "twice the tone": no tone of its own
-    if j is not None and db2 > db1 and not _on_mode(2 * fk, ringing2) \
+    # a toolhead line closer to the tone than the window resolves (+-2/T: a Hann window's main
+    # lobe) pulls the tone's peak towards it; the toolhead's own ringing has nothing at twice
+    # it, so there twice the tone, when clear, is the cleaner reading of the belt
+    res = 2.0 / (2.0 * halves[3]) if halves is not None else 0.0
+    pulled = j is not None and snr[j] >= strong and own(j) and any(abs(fk - m) <= res for m, _ in modes)
+    if j is not None and (db2 > db1 or pulled) and not _on_mode(2 * fk, ringing2) \
             and not (blind is not None and blind[max(0, j - 2):j + 3].any()):
         fk = _peak(f, p, j, df) / 2.0          # the sharper line: twice the tone (unless a toolhead line pulls it)
         if late is not None:
