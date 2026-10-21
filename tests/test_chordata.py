@@ -79,28 +79,36 @@ class SafetyTests(unittest.TestCase):
                       "resonance_tester": SimpleNamespace(accel_chips=[("adxl345", chip)]),
                       "toolhead": SimpleNamespace(wait_moves=lambda: None)})
         obj._record_quiet = lambda *args, **kw: [(0., 0., 0., 0.)] * 10
-        pieces = []
+        looks = []
 
-        def record(chip, toolhead, secs, live=None, stop=None):
-            t0 = 8. * len(pieces)
-            pieces.append(secs)
-            return [(t0, 0., 0., 0.), (t0 + 8., 0., 0., 0.)]
+        def record(chip, toolhead, secs, live=None, stop=None, keep=None, sink=None):
+            # the stream: a look every second at its last `keep` s, the new second to the sink
+            for k in range(1, 1000):
+                t1 = float(k)
+                rows = [(max(0., t1 - keep) + i * .01, 0., 0., 0.) for i in range(int(min(t1, keep) * 100))]
+                sink([(t1 - 1. + i * .01, 0., 0., 0.) for i in range(100)])
+                live(rows)
+                looks.append(t1)
+                if stop():
+                    return rows
+            return rows
         obj._record = record
         saved = []
         obj._save_recording = lambda name, samples, append=False: saved.append((name, append))
-        first = {"plucks": [{"t": 1., "ok": True, "freq": 110., "why": ""}]}
         calls = []
 
         def analyse(*args, **kw):
+            # one pluck at 0.5 s into the stream, heard by the first looks only
             calls.append(1)
-            return first if len(calls) == 1 else {"plucks": []}
+            return {"plucks": [{"t": .5, "ok": True, "freq": 110., "why": ""}], "onsets": [.5]} \
+                if len(calls) <= 2 else {"plucks": [], "onsets": []}
         with patch.object(belts, "analyse", analyse):
             obj.cmd_CHORDATA_FREE(Command())
-        # the last pluck at 1 s: it stops at the first piece that ends 60 s or more after it
-        self.assertEqual(len(pieces), 8)
+        # the last pluck at 0.5 s: it stops once more than 60 s passed after it
+        self.assertEqual(looks[-1], 61.)
         self.assertEqual(obj.state, "idle")
-        # every piece goes into one file
-        self.assertEqual(len(saved), 8)
+        # the whole listen goes into one file, as it comes
+        self.assertEqual(len(saved), len(looks))
         self.assertEqual(len({n for n, _ in saved}), 1)
         self.assertTrue(all(a for _, a in saved))
 
@@ -111,7 +119,7 @@ class SafetyTests(unittest.TestCase):
         obj._record_quiet = lambda *args, **kw: [(0., 0., 0., 0.)] * 10
         stops = []
 
-        def record(chip, toolhead, secs, live=None, stop=None):
+        def record(chip, toolhead, secs, live=None, stop=None, keep=None, sink=None):
             live([(0., 0., 0., 0.)] * 300)
             stops.append(stop())
             return [(0., 0., 0., 0.)] * 300
@@ -851,7 +859,7 @@ class HistoryTests(unittest.TestCase):
         obj._save_recording = lambda *args, **kw: None
         part = [(i * .01, 0., 0., 0.) for i in range(800)]
 
-        def record(chip, toolhead, secs, live=None, stop=None):
+        def record(chip, toolhead, secs, live=None, stop=None, keep=None, sink=None):
             live(part)                    # heard live (its window all in), then in the final analysis
             return part
         obj._record = record
@@ -1005,11 +1013,12 @@ class RecordingBufferTests(unittest.TestCase):
         self.obj.reactor = SimpleNamespace(monotonic=lambda: 100., NEVER=1e30,
                                            register_timer=lambda cb, when: "timer")
         self.obj._rec_buf, self.obj._rec_prev, self.obj._rec_timer = {}, None, None
+        self.obj.state = "idle"
 
     def files(self):
         self.obj._rec_prev and self.obj._rec_prev.join()
         d = os.path.join(self.dir, "recordings")
-        return sorted(os.listdir(d)) if os.path.isdir(d) else []
+        return sorted(n for n in os.listdir(d) if not n.startswith(".")) if os.path.isdir(d) else []
 
     def piece(self, t0):
         return [(t0 + i / 3200., 1., 2., 9806.65) for i in range(3200)]
@@ -1034,6 +1043,22 @@ class RecordingBufferTests(unittest.TestCase):
         with open(os.path.join(self.dir, "recordings", "free-2.csv")) as f:
             lines = f.read().splitlines()
         self.assertEqual(len(lines), 1 + 3 * 3200)     # one header, every sample once, in order
+        ts = [float(x.split(",")[0]) for x in lines[1:]]
+        self.assertTrue(all(b > a for a, b in zip(ts, ts[1:])))
+
+    def test_while_listening_no_csv_full_ram_set_aside_as_numbers(self):
+        self.obj._rec_limit = lambda: 200000
+        self.obj.state = "listening"
+        for k in range(3):
+            self.obj._save_recording("free-3", self.piece(k), append=True)
+        d = os.path.join(self.dir, "recordings")
+        self.assertEqual(sorted(os.listdir(d)), [".free-3.bin"])        # numbers, no CSV yet
+        self.obj.state = "idle"
+        self.obj._flush_recordings()
+        self.assertEqual(self.files(), ["free-3.csv"])                    # the .bin is gone
+        with open(os.path.join(d, "free-3.csv")) as f:
+            lines = f.read().splitlines()
+        self.assertEqual(len(lines), 1 + 3 * 3200)
         ts = [float(x.split(",")[0]) for x in lines[1:]]
         self.assertTrue(all(b > a for a, b in zip(ts, ts[1:])))
 
