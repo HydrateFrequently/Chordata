@@ -22,6 +22,8 @@ import sys
 import threading
 import time
 
+import numpy as np
+
 HERE = os.path.dirname(os.path.realpath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
@@ -47,6 +49,8 @@ class Chordata:
         self.tap_live = []        # the setup taps so far, each good or not
         self.measurement = {"phase": "idle", "belt": None}
         self._fans_off = {}       # fans Chordata turned off this session: section -> speed before
+        self.printer.register_event_handler("klippy:disconnect", lambda: self._flush_recordings(wait=True))
+        self.printer.register_event_handler("klippy:shutdown", self._flush_recordings)
         self._fans_timer = None   # brings them back FANS_IDLE s after Chordata was last used
         self._fans_until = 0.
         self._tool_info = None
@@ -729,6 +733,7 @@ class Chordata:
 
     def cmd_CHORDATA_FANS(self, gcmd):
         import chordata_belts as belts
+        self._flush_recordings()             # (Close Chordata: the session's recordings go to disk)
         self._restore_fans()
         self._history_clear()
         belts.clear_cache()                  # (Close Chordata: the session's cached fits go)
@@ -1108,47 +1113,98 @@ class Chordata:
         return None
 
     _rec_prev = None    # the last writer thread: each waits for it, so pieces go in in order
+    # Recordings are kept in RAM while a session runs and written when it closes (Close Chordata),
+    # after REC_IDLE s without a new one, when Klipper shuts down, or when they would take more
+    # than REC_RAM_SHARE of the free RAM (REC_RAM_MAX at most): an SD card is written seldom, in
+    # whole files, instead of a piece every few seconds
+    REC_RAM_SHARE = 0.10
+    REC_RAM_MAX = 64 << 20      # bytes
+    REC_RAM_MIN = 8 << 20
+    REC_IDLE = 600.             # s
+    _rec_lock = threading.Lock()    # recordings waiting in RAM, _rec_buf (the live analysis thread adds too)
 
-    def _save_recording(self, name, samples, append=False):
-        """Write samples as ACCELEROMETER_MEASURE's CSV into chordata/recordings. append: add
-        to that file (a free tune is recorded in pieces, and all of it is kept)."""
+    def _rec_limit(self):
+        """Bytes of recordings that may wait in RAM: REC_RAM_SHARE of what Linux says is available."""
+        try:
+            with open("/proc/meminfo") as f:
+                avail = next(int(l.split()[1]) * 1024 for l in f if l.startswith("MemAvailable:"))
+        except (OSError, StopIteration, ValueError):
+            return self.REC_RAM_MIN
+        return int(max(self.REC_RAM_MIN, min(self.REC_RAM_MAX, self.REC_RAM_SHARE * avail)))
+
+    def _save_recording(self, name, samples, append=False, now=False):
+        """Keep samples for chordata/recordings/NAME.csv (ACCELEROMETER_MEASURE's CSV). append: add
+        to that recording (a free tune is recorded in pieces, and all of it is kept). now: write
+        at once (CHORDATA_RECORD: the user asked for the file). Otherwise it waits in RAM (see
+        REC_RAM_SHARE)."""
         if not samples:
             return None
+        path = os.path.join(self.out_dir, "recordings", name + ".csv")
+        rows = np.asarray([s[:4] for s in samples], dtype=float)
+        buf = self.__dict__.setdefault("_rec_buf", {})
+        with self._rec_lock:
+            e = buf.get(name)
+            if e is None or not append:
+                buf[name] = e = {"chunks": [], "append": append}
+            e["chunks"].append(rows)
+            self._rec_used = time.monotonic()
+            size = sum(c.nbytes for v in buf.values() for c in v["chunks"])
+        if now or size > self._rec_limit():
+            self._flush_recordings()
+        elif getattr(self, "_rec_timer", None) is None:
+            self._rec_timer = self.reactor.register_timer(self._rec_idle, self.reactor.monotonic() + 30.0)
+        return path
+
+    def _rec_idle(self, eventtime):
+        """Every 30 s while recordings wait: written once none came for REC_IDLE s."""
+        if time.monotonic() - getattr(self, "_rec_used", 0.0) >= self.REC_IDLE:
+            self._flush_recordings()
+            self._rec_timer = None
+            return self.reactor.NEVER
+        return eventtime + 30.0
+
+    def _flush_recordings(self, wait=False):
+        """Write every recording waiting in RAM, in a thread (in order, one after another).
+        wait: return once written (Klipper shutting down)."""
+        with self._rec_lock:
+            buf, self._rec_buf = getattr(self, "_rec_buf", {}), {}
+        if not buf:
+            return
         d = os.path.join(self.out_dir, "recordings")
-        path = os.path.join(d, name + ".csv")
         keep = self.REC_KEEP
 
         def write():
-            # in a thread like Kalico's own writer: a 30 s recording takes a while on a Pi.
-            # One at a time and in order (a lock would not keep the order), so the pieces of
-            # a free tune go in in sequence.
+            # in a thread like Kalico's own writer: a long recording takes a while on a Pi
             if prev is not None:
                 prev.join()
-            try:
-                os.makedirs(d, exist_ok=True)
-                rows = ("%.6f,%.6f,%.6f,%.6f\n" % tuple(s[:4]) for s in samples)
-                if append:
-                    new = not os.path.exists(path)
-                    with open(path, "a") as f:
-                        if new:
+            for name, e in buf.items():
+                path = os.path.join(d, name + ".csv")
+                try:
+                    os.makedirs(d, exist_ok=True)
+                    rows = np.concatenate(e["chunks"])
+                    if e["append"] and os.path.exists(path):
+                        with open(path, "a") as f:        # (a part written before, the RAM limit)
+                            np.savetxt(f, rows, fmt="%.6f", delimiter=",")
+                    else:
+                        with open(path + ".part", "w") as f:
                             f.write("#time,accel_x,accel_y,accel_z\n")
-                        f.writelines(rows)
-                else:
-                    with open(path + ".part", "w") as f:
-                        f.write("#time,accel_x,accel_y,accel_z\n")
-                        f.writelines(rows)
-                    os.replace(path + ".part", path)
+                            np.savetxt(f, rows, fmt="%.6f", delimiter=",")
+                        os.replace(path + ".part", path)
+                except (OSError, ValueError) as err:
+                    logging.warning("chordata: could not save recording %s: %s", name, err)
+            try:
                 old = sorted((os.path.getmtime(os.path.join(d, n)), n)
                              for n in os.listdir(d) if n.endswith(".csv"))
                 for _, n in old[:-keep]:
                     os.remove(os.path.join(d, n))
-            except OSError as e:
-                logging.warning("chordata: could not save recording %s: %s", name, e)
+            except OSError:
+                pass
         prev = self._rec_prev
         t = threading.Thread(target=write, daemon=True)
         self._rec_prev = t
         t.start()
-        return path
+        if wait:
+            t.join(30.0)
 
     cmd_CHORDATA_RECORD_help = ("Chordata: record an accelerometer for SECONDS and save it where "
                                 "Mainsail can download it (CHIP=, SECONDS=, NAME=)")
@@ -1177,7 +1233,7 @@ class Chordata:
             self._end_measurement(error=error)
             raise
         self._end_measurement()
-        path = self._save_recording(label, samples)
+        path = self._save_recording(label, samples, now=True)
         gcmd.respond_info("Chordata: saving %d samples to %s" % (
             len(samples), os.path.relpath(path, self.cfg_dir)))
 

@@ -5,6 +5,10 @@ Update from Mainsail's Update Manager, then restart Klipper.
 
 ## Unreleased (dev)
 
+- **Easier on SD cards:** the raw recordings of a session are kept in RAM and written to
+  `chordata/recordings` in whole files when you close Chordata (or after 10 minutes without a new
+  one, when Klipper shuts down, or when they would take more than 10 % of the free RAM, 64 MB at
+  most), instead of a piece every few seconds while you pluck. CHORDATA_RECORD still writes at once.
 - **A steadier average:** the average and the ± take the last plucks within 1 Hz of each other
   (was 0.5 Hz, which a belt's own pluck-to-pluck scatter kept breaking).
 - **No more far-off hum warnings:** a refused pluck or tap is only said to be hidden by a steady

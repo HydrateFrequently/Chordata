@@ -993,6 +993,55 @@ class HistoryTests(unittest.TestCase):
         self.assertIsNone(obj.history_note)
 
 
+class RecordingBufferTests(unittest.TestCase):
+    """Recordings wait in RAM and reach the disk in whole files: at Close Chordata, after a long
+    idle, or when they would take too much RAM (an SD card written seldom, not every few seconds)."""
+
+    def setUp(self):
+        import tempfile
+        self.dir = tempfile.mkdtemp()
+        self.obj = plugin()
+        self.obj.out_dir = self.dir
+        self.obj.reactor = SimpleNamespace(monotonic=lambda: 100., NEVER=1e30,
+                                           register_timer=lambda cb, when: "timer")
+        self.obj._rec_buf, self.obj._rec_prev, self.obj._rec_timer = {}, None, None
+
+    def files(self):
+        self.obj._rec_prev and self.obj._rec_prev.join()
+        d = os.path.join(self.dir, "recordings")
+        return sorted(os.listdir(d)) if os.path.isdir(d) else []
+
+    def piece(self, t0):
+        return [(t0 + i / 3200., 1., 2., 9806.65) for i in range(3200)]
+
+    def test_pieces_wait_in_ram_until_close(self):
+        for k in range(3):
+            self.obj._save_recording("free-1", self.piece(k), append=True)
+        self.assertEqual(self.files(), [])
+        self.obj._flush_recordings()
+        self.assertEqual(self.files(), ["free-1.csv"])     # (files() waits for the writer)
+        with open(os.path.join(self.dir, "recordings", "free-1.csv")) as f:
+            lines = f.read().splitlines()
+        self.assertEqual(lines[0], "#time,accel_x,accel_y,accel_z")
+        self.assertEqual(len(lines), 1 + 3 * 3200)
+
+    def test_too_much_for_ram_is_written_and_appended_to(self):
+        self.obj._rec_limit = lambda: 200000          # bytes: about two pieces
+        for k in range(3):
+            self.obj._save_recording("free-2", self.piece(k), append=True)
+        self.obj._flush_recordings()
+        self.assertEqual(self.files(), ["free-2.csv"])
+        with open(os.path.join(self.dir, "recordings", "free-2.csv")) as f:
+            lines = f.read().splitlines()
+        self.assertEqual(len(lines), 1 + 3 * 3200)     # one header, every sample once, in order
+        ts = [float(x.split(",")[0]) for x in lines[1:]]
+        self.assertTrue(all(b > a for a, b in zip(ts, ts[1:])))
+
+    def test_a_recording_asked_for_is_written_at_once(self):
+        self.obj._save_recording("accel-now", self.piece(0), now=True)
+        self.assertEqual(self.files(), ["accel-now.csv"])
+
+
 class ConfigLoadTest(unittest.TestCase):
     """chordata.cfg read as Klipper reads it (" #" starts an inline comment) and every macro
     compiled as Klipper compiles it: a {# ... #} comment lost its closing tag that way once."""
