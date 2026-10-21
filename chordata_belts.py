@@ -614,7 +614,10 @@ def pluck_freq(f, p, noise, df, lo, hi, avoid=(), target=None, prev=None, halves
     # lobe) pulls the tone's peak towards it; the toolhead's own ringing has nothing at twice
     # it, so there twice the tone, when clear, is the cleaner reading of the belt
     res = 2.0 / (2.0 * halves[3]) if halves is not None else 0.0
-    pulled = j is not None and snr[j] >= strong and own(j) and any(abs(fk - m) <= res for m, _ in modes)
+    # (not when the taps found a toolhead line at twice the tone too: a toolhead that rings
+    # there as well, as some may, gives twice the tone no advantage)
+    pulled = j is not None and snr[j] >= strong and own(j) and any(abs(fk - m) <= res for m, _ in modes) \
+        and not guarded2(2 * fk)
     if j is not None and (db2 > db1 or pulled) and not _on_mode(2 * fk, ringing2) \
             and not (blind is not None and blind[max(0, j - 2):j + 3].any()):
         fk = _peak(f, p, j, df) / 2.0          # the sharper line: twice the tone (unless a toolhead line pulls it)
