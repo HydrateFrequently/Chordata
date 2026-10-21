@@ -640,6 +640,134 @@ def pluck_freq(f, p, noise, df, lo, hi, avoid=(), target=None, prev=None, halves
 # ~0.2 Hz of its final reading); the final reading itself (the whole window) is unchanged.
 LATE = 0.12               # s after the onset
 LIVE_LEAST = 0.25         # s of window (from SKIP) before a growing window is read
+# How big the glide is and how long it takes differs per printer and per pluck: on the lab bench a
+# 5 % glide settling over 0.09 s reads 0.35 Hz high from the whole window, over 0.15 s 0.9 Hz. For a
+# complete window whose reading clearly sinks when read from later on (the glide is there), the
+# pluck is fitted as a belt whose pitch settles, f0 + D exp(-t/tg) (its tone and twice it, each axis
+# its own amplitude), and the settled pitch f0 is the reading - only if that fits clearly better than
+# a steady pitch (GLIDE_GAIN), and only downwards (a swing raises the pitch, never lowers it), by at
+# most GLIDE_MAX. Lab bench: rms error 0.23 -> 0.06 Hz (5 %, 0.06 s), 1.26 -> 0.45 Hz (8 %, 0.15 s),
+# no change without a glide.
+GLIDE_SINK = 0.05         # Hz the reading must sink from SKIP to LATE on before a glide is fitted
+GLIDE_GAIN = 1.2          # residual of a steady pitch over that of the gliding one
+GLIDE_MAX = 1.5           # Hz
+GLIDE_SINK_X = 3.0        # the fit may lower the reading by at most this x how far it sank
+
+
+def _nm(fun, x0, steps, it):
+    """Nelder-Mead minimisation (numpy only)."""
+    n = len(x0)
+    pts = [np.array(x0, float)] + [np.array(x0, float) + np.eye(n)[i] * steps[i] for i in range(n)]
+    vals = [fun(x) for x in pts]
+    for _ in range(it):
+        o = np.argsort(vals)
+        pts = [pts[i] for i in o]
+        vals = [vals[i] for i in o]
+        if vals[-1] - vals[0] <= 1e-7 * max(abs(vals[0]), 1e-30):
+            break
+        c = np.mean(pts[:-1], axis=0)
+        xr = c + (c - pts[-1])
+        fr = fun(xr)
+        if fr < vals[0]:
+            xe = c + 2 * (c - pts[-1])
+            fe = fun(xe)
+            pts[-1], vals[-1] = (xe, fe) if fe < fr else (xr, fr)
+        elif fr < vals[-2]:
+            pts[-1], vals[-1] = xr, fr
+        else:
+            xc = c + 0.5 * (pts[-1] - c)
+            fc = fun(xc)
+            if fc < vals[-1]:
+                pts[-1], vals[-1] = xc, fc
+            else:
+                pts = [pts[0] + 0.5 * (x - pts[0]) for x in pts]
+                vals = [fun(x) for x in pts]
+    i = int(np.argmin(vals))
+    return pts[i], vals[i]
+
+
+def _line_at(axes, fs, b0, b1, fc, half=0.8, step=0.02):
+    """The line near fc in axes[b0:b1] (Hann window): a fine search (step Hz) of the summed
+    power within +-half Hz, then a parabola through the top three; and how clearly it stands
+    out (its power over the lower quarter of 3-8 main lobes away on both sides, a stand-in for
+    the noise there: a fan line there is left out). Direct
+    DFT at those few frequencies only (quicker than a padded FFT for this)."""
+    n = b1 - b0
+    w = np.hanning(n)
+    T = n / fs
+    g = fc + np.arange(-half, half + step / 2, step)
+    side = fc + np.array([-8.0, -7.0, -6.0, -5.0, -4.0, -3.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]) * 2.0 / T
+    e = np.exp(-2j * math.pi * np.outer(np.concatenate([g, side]), np.arange(n)) / fs)
+    p = 0
+    for a in axes:
+        x = np.asarray(a[b0:b1], float)
+        p = p + np.abs(e @ ((x - x.mean()) * w)) ** 2
+    p, ps = p[:len(g)], p[len(g):]
+    k = int(np.argmax(p))
+    fk = float(g[k])
+    if 0 < k < len(p) - 1:
+        y0, y1, y2 = np.log(p[k - 1:k + 2] + 1e-30)
+        den = y0 - 2 * y1 + y2
+        if den < 0:
+            fk = float(g[k] + max(-0.5, min(0.5, 0.5 * (y0 - y2) / den)) * step)
+    return fk, float(p[k] / max(np.percentile(ps, 25), 1e-30)), T
+
+
+def _glide_fix(axes, fs, on, a0, a1, fr):
+    """The settled pitch of a pluck whose window holds its glide (see GLIDE_SINK), or fr."""
+    l0 = on + int(LATE * fs)
+    if a1 - l0 < int(0.2 * fs):
+        return fr
+    h0, h1 = _line_at(axes, fs, a0, a1, fr)[0], _line_at(axes, fs, l0, a1, fr)[0]
+    if h0 - h1 < GLIDE_SINK:
+        return fr
+    n = a1 - a0
+    fq = np.fft.rfftfreq(n, 1.0 / fs)
+    y = []
+    for a in axes:           # the band of the tone and twice it, then fewer samples
+        x = np.asarray(a[a0:a1], float)
+        X = np.fft.rfft(x - x.mean())
+        X[(fq < 0.5 * fr) | (fq > 2.6 * fr)] = 0
+        y.append(np.fft.irfft(X, n))
+    d = max(1, int(fs / (6.0 * fr)))
+    Y = np.array(y).T[::d]
+    t = np.arange(len(Y)) * d / fs + (a0 - on) / fs          # from the onset
+    lt0, lt1, lu0, lu1 = math.log(0.01), math.log(0.4), math.log(0.05), math.log(2.0)
+
+    def sg(v):
+        return 1.0 / (1.0 + math.exp(-max(-60.0, min(60.0, v))))
+
+    def resid(f0, dl, tg, tau):
+        ph = 2 * math.pi * (f0 * t + dl * tg * (1 - np.exp(-t / tg)))
+        e1 = np.exp(-t / tau)
+        e2 = e1 * e1
+        A = np.column_stack([e1 * np.cos(ph), e1 * np.sin(ph), e2 * np.cos(2 * ph), e2 * np.sin(2 * ph)])
+        c, *_ = np.linalg.lstsq(A, Y, rcond=None)
+        r = Y - A @ c
+        return float((r * r).sum())
+
+    def glide(x):
+        return resid(fr + GLIDE_MAX * math.tanh(x[0]), 0.12 * fr * sg(x[1]),
+                     math.exp(lt0 + (lt1 - lt0) * sg(x[2])), math.exp(lu0 + (lu1 - lu0) * sg(x[3])))
+
+    def steady(x):
+        return resid(fr + GLIDE_MAX * math.tanh(x[0]), 0.0, 0.1, math.exp(lu0 + (lu1 - lu0) * sg(x[1])))
+    best = None
+    for tg0 in (0.03, 0.12):
+        xt = math.log((math.log(tg0) - lt0) / (lt1 - math.log(tg0)))
+        x, v = _nm(glide, [0.0, -2.0, xt, 0.0], [0.3, 1.0, 0.8, 0.8], 200)
+        if best is None or v < best[1]:
+            best = (x, v)
+    _, v0 = _nm(steady, [0.0, 0.0], [0.3, 0.8], 120)
+    f0 = fr + GLIDE_MAX * math.tanh(best[0][0])
+    # and it must agree with how far the reading sank: a fit that pulls the reading far below
+    # that (other lines beating with the tone, not a glide) is not taken
+    if v0 < GLIDE_GAIN * best[1] or not (-GLIDE_SINK_X * (h0 - h1) <= f0 - fr <= 0.05) \
+            or f0 - fr <= -0.95 * GLIDE_MAX:
+        return fr
+    return f0
+
+
 LONG_ON = 0.6             # Hz: a reading (with the lines fitted out) this close to a long-ringing line is that line
 REFINE_NEAR = 4.0         # Hz: a long-ringing mode this close to the tone (or twice it) pulls the reading
 
@@ -1081,6 +1209,18 @@ def analyse(t, ax, ay, az, target=None, expect=None, quiet=None, avoid=(), other
             elif any(abs(2 * fr - m) <= TAP_GUARD for m, _ in ringing):
                 d2 = None                     # twice the tone is that line: the tone alone decides
                 tone_only = True
+        if fr is not None and _complete(fs, a0, a1, k + 1 < len(onsets)) and \
+                not any(min(abs(fr - m), abs(2 * fr - m)) <= REFINE_NEAR for m, _g, _t in _modes(avoid, True)):
+            # a pluck whose pitch is still settling in its window: read where it settles to
+            # (not next to a toolhead line: that is handled above)
+            key = ("glide", a1 - a0, float(axes[0][a0]), float(axes[1][a0]), float(axes[2][a1 - 1]), round(fr, 2))
+            v = _REFINED.get(key)
+            if v is None:
+                if len(_REFINED) > 200:
+                    _REFINED.clear()
+                v = _glide_fix(axes, fs, on, a0, a1, fr)
+                _REFINED[key] = v
+            fr = v
         pk = {"t": round(float(on / fs), 2), "freq": None if fr is None else round(fr, 2),
               "db": None if d1 is None else round(d1, 1), "db2": None if d2 is None else round(d2, 1),
               "ok": False, "why": ""}
