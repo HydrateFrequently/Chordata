@@ -6,11 +6,6 @@ Pluck a belt like a guitar string. The accelerometer on the toolhead hears it, a
 frequency, so you can tension both CoreXY belts to the same, known value. No phone app, no holding a microphone
 next to the belt: the sensor is already on the printer, and you keep both hands free.
 
-> **Status: very early in development.** Chordata was written entirely with an AI assistant ("vibecoded").
-> It comes without any warranty (GPL-3.0): you use it at your own risk, and no responsibility is accepted for
-> anything that happens to your printer. Chordata only measures; it never prints, and it moves the toolhead
-> only when you press one of its move buttons (Home, the arrows, Move for a typed X/Y, or Go to belt tensioning position).
-
 ## What it does
 
 1. **Tap.** You tap one solid spot on the toolhead lightly until 3 taps count (each shows a check mark or an X).
@@ -130,5 +125,12 @@ tuning wizard for Kalico/Klipper, and is now available on its own. The live char
 safety interlocks, the installer hardening, the guides and the test suite were contributed by
 [alextverdyy](https://github.com/alextverdyy). An optional AI measurement review lives on the
 [`ai-review`](https://github.com/HydrateFrequently/Chordata/tree/ai-review) branch; `main` makes no AI decisions.
+
+## Disclaimer
+
+Chordata was written entirely with an AI assistant ("vibecoded"). It comes without any warranty
+(GPL-3.0): you use it at your own risk, and no responsibility is accepted for anything that happens to your
+printer. Chordata only measures; it never prints, and it moves the toolhead only when you press one of its
+move buttons (Home, the arrows, Move for a typed X/Y, or Go to belt tensioning position).
 
 License: GPL-3.0-or-later.
