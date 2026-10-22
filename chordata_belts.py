@@ -1229,6 +1229,22 @@ def _knock(f, df, halves, fr, d1, d2, avoid):
     return _tau(halves, f, df, fr) < KNOCK_TAU
 
 
+SKIRT_REACH = 20.0        # Hz: how far from a toolhead line its skirt is looked at (_on_skirt)
+
+
+def _on_skirt(f, p, df, fc, modes):
+    """At fc no line of its own but the skirt of a toolhead line (learned from the taps) close by:
+    the top within 1 Hz of fc is not the top within 3 Hz (pluck_freq's own()), and a toolhead
+    line lies within SKIRT_REACH Hz."""
+    if not any(abs(fc - m) <= SKIRT_REACH for m, _ in modes):
+        return False
+    j = _near(f, p, fc, df, 1.0)
+    if j is None:
+        return False
+    wo = max(1, int(3.0 / df))
+    return bool(p[j] < p[max(0, j - wo):j + wo + 1].max())
+
+
 def _complete(fs, a0, a1, more):
     """A window that can't grow any more: its full length, or a next onset after it (more)."""
     step = max(1, int(STEP * fs))
@@ -1532,9 +1548,11 @@ def analyse(t, ax, ay, az, target=None, expect=None, quiet=None, avoid=(), other
               "db": None if d1 is None else round(d1, 1), "db2": None if d2 is None else round(d2, 1),
               "ok": False, "why": ""}
         if fr is not None and ((bmask is not None and bool(bmask(np.array([2 * fr]))[0]))
-                               or (blind is not None and bool(blind[max(0, int(round(2 * fr / df)) - 2):int(round(2 * fr / df)) + 3].any()))):
-            # twice the tone sits on a steady line (a fan, the sensor's own): it can't
-            # be told from the noise there, so the tone alone decides
+                               or (blind is not None and bool(blind[max(0, int(round(2 * fr / df)) - 2):int(round(2 * fr / df)) + 3].any()))
+                               or (d2 is not None and _on_skirt(f, p, df, 2 * fr, _modes(avoid)))):
+            # twice the tone sits on a steady line (a fan, the sensor's own), or on the skirt of
+            # the toolhead's own ringing (a knock rings it loud enough to stand far above the
+            # noise Hz away): it can't be told from that there, so the tone alone decides
             d2 = None
             pk["db2"] = None
         if fr is None:
