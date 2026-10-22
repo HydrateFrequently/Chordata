@@ -1226,17 +1226,51 @@ def _hum(axes, fs, on, fr):
     return earlier is None or earlier < 10 ** (DECAY_DB / 10.0) * before
 
 
-def _knock(f, df, halves, fr, d1, d2, avoid):
+def _knock(f, df, halves, fr, d1, d2, avoid, pull=False):
     """A knock on the toolhead or the frame, not a pluck: a clear tone with no pull at
     twice it (or only the toolhead's own ringing there, learned from a tap) that dies
     fast. Belts ring long, so this needs no tap learned first."""
-    on_mode = _on_mode(2 * fr, _modes(avoid))
+    on_mode = _on_mode(2 * fr, _modes(avoid)) and not pull       # (pull: the belt's own, see _pull_line)
     if not on_mode and (d1 < STRONG_DB or (d2 >= WEAK_DB and d1 < d2 + 20.0)):
         return False                  # a belt's pull at twice the tone is there
     return _tau(halves, f, df, fr) < KNOCK_TAU
 
 
 SKIRT_REACH = 20.0        # Hz: how far from a toolhead line its skirt is looked at (_on_skirt)
+
+
+PULL_GLIDE = 3.0          # Hz above twice the tone where a fast-dying pull's line may sit (_pull_line)
+
+
+def _pull_line(f, p, nz, df, halves, fr, avoid):
+    """The belt's pull at twice the tone, where a line there can't be read as one (on a steady
+    line, or beside the toolhead's own ringing). A pluck that dies fast puts its pull a little
+    above twice the settled tone (its pitch glides down while it rings, and the pull - the
+    square of the swing - is mostly the loud start), and a window this short spreads it: so the
+    band from 0.6 Hz below to PULL_GLIDE Hz above twice the tone, its level above the noise
+    (a steady line's own level is part of the noise). It is the pull when it stands WEAK above
+    the noise, dies no slower than the tone, and - beside a toolhead line learned from the taps -
+    much faster than the nearest one rings (half its time or less). Returns its dB, or None."""
+    if halves is None or fr is None:
+        return None
+    sel = np.flatnonzero((f >= 2 * fr - 0.6) & (f <= 2 * fr + PULL_GLIDE))
+    if len(sel) < 3:
+        return None
+    db = _db(float((p[sel] / np.maximum(nz[sel], 1e-30)).max()))
+    pe, pl, nh, h = halves
+    ee = float((pe[sel] / np.maximum(nh[sel], 1e-30)).max()) - 1.0      # above the noise only
+    el = max(float((pl[sel] / np.maximum(nh[sel], 1e-30)).max()) - 1.0, 0.1)
+    if db < WEAK_DB or ee + 1.0 < 10.0 ** (WEAK_DB / 10.0) or ee <= el:
+        return None
+    t2, t1 = 2.0 * h / math.log(ee / el), _tau(halves, f, df, fr)
+    if not t2 <= t1:
+        return None
+    # (the toolhead line it sits on or beside: the nearest one)
+    near = sorted((abs(2 * fr - float(m["freq"])), float(m["tau"])) for m in (avoid or ())
+                  if isinstance(m, dict) and m.get("tau") and abs(2 * fr - float(m["freq"])) <= SKIRT_REACH)
+    if near and not t2 < 0.5 * near[0][1]:
+        return None
+    return db
 
 
 def _on_skirt(f, p, df, fc, modes):
@@ -1533,7 +1567,13 @@ def analyse(t, ax, ay, az, target=None, expect=None, quiet=None, avoid=(), other
                 return None if j is None else _peak(f, pl, j, df)
         fr, d1, d2 = pluck_freq(f, p, nz, df, lo, hi, pick_avoid, target, prev, halves, blind, late)
         tone_only = False
-        if fr is not None and ringing:
+        # (the fit models only the belt and the toolhead's ringing: a steady line - a fan - right
+        # by twice the tone, where it fits a toolhead line too, would be pulled into them and
+        # move the reading instead of fixing it)
+        steady_near = fr is not None and bmask is not None and bool(bmask(
+            np.arange(2 * fr - REFINE_NEAR, 2 * fr + REFINE_NEAR, 0.25)).any()) and any(
+            abs(2 * fr - m) <= REFINE_NEAR for m, _ in ringing)
+        if fr is not None and ringing and not steady_near:
             # a toolhead line that rings on next to the tone pulls the spectrum's peak:
             # fit it out (the live count analyses the recording again every second, so a
             # pluck heard to the end of its window is fitted once)
@@ -1554,14 +1594,20 @@ def analyse(t, ax, ay, az, target=None, expect=None, quiet=None, avoid=(), other
         pk = {"t": round(float(on / fs), 2), "freq": None if fr is None else round(fr, 2),
               "db": None if d1 is None else round(d1, 1), "db2": None if d2 is None else round(d2, 1),
               "ok": False, "why": ""}
-        if fr is not None and ((bmask is not None and bool(bmask(np.array([2 * fr]))[0]))
-                               or (blind is not None and bool(blind[max(0, int(round(2 * fr / df)) - 2):int(round(2 * fr / df)) + 3].any()))
-                               or (d2 is not None and _on_skirt(f, p, df, 2 * fr, _modes(avoid)))):
+        steady2 = fr is not None and ((bmask is not None and bool(bmask(np.array([2 * fr]))[0]))
+                                      or (blind is not None and bool(blind[max(0, int(round(2 * fr / df)) - 2):int(round(2 * fr / df)) + 3].any())))
+        # a pull that a pluck dying fast puts a little above twice the tone (see _pull_line): it
+        # dies, so it is told from a steady line there as well as from the toolhead's ringing
+        pull = _pull_line(f, p, nz, df, halves, fr, avoid)
+        if fr is not None and pull is None and (steady2 or (d2 is not None and _on_skirt(f, p, df, 2 * fr, _modes(avoid)))):
             # twice the tone sits on a steady line (a fan, the sensor's own), or on the skirt of
             # the toolhead's own ringing (a knock rings it loud enough to stand far above the
             # noise Hz away): it can't be told from that there, so the tone alone decides
             d2 = None
             pk["db2"] = None
+        elif pull is not None and (d2 is None or d2 < pull):
+            d2 = pull
+            pk["db2"] = round(d2, 1)
         if fr is None:
             pk["why"] = "no belt tone"
         elif d2 is None:
@@ -1571,13 +1617,13 @@ def analyse(t, ax, ay, az, target=None, expect=None, quiet=None, avoid=(), other
                 pk["why"] = "no belt tone"        # no line of its own there
             elif tone_only and not _fresh(axes, fs, on, fr):
                 pk["why"] = "a knock, not a belt"  # the last pluck still ringing: the knock rang the toolhead
-            elif _knock(f, df, halves, fr, d1, d1, avoid):
+            elif _knock(f, df, halves, fr, d1, d1, avoid, pull is not None):
                 pk["why"] = "a knock, not a belt"
             elif judge_hum and _hum(axes, fs, on, fr):
                 pk["why"] = "steady hum, not a pluck"
             else:
                 pk["ok"] = True
-        elif _knock(f, df, halves, fr, d1, d2, avoid):
+        elif _knock(f, df, halves, fr, d1, d2, avoid, pull is not None):
             pk["why"] = "a knock, not a belt"
         elif max(d1, d2) < STRONG_DB or min(d1, d2) < WEAK_DB:
             pk["why"] = "too weak"

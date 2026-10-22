@@ -684,6 +684,29 @@ def streaming():
     (ok if sorted(got) == [100, 108, 115] else fail)("stream: plucks beside a long toolhead ring", got)
 
 
+def loose_belt():
+    """A loose belt rings briefly, and twice its tone can land on a steady background line (a
+    fan) right beside a toolhead line the tap learned: its pull there still counts (it dies like
+    a pull, not like the toolhead's ringing or a fan), and the reading is the belt's. Knocks that
+    ring the same frame line and toolhead line stay refused."""
+    avoid = [{"freq": 187.5, "guard": 4.9, "tau": 0.22, "width": 4.0}]
+    q = quiet(fan=188.0)
+    plk = [(1.0 + 1.3 * i, "pluck", 94.5 + rng.uniform(-0.2, 0.2), 1500.0, 3.0, 0.12) for i in range(4)]
+    r = belts.analyse(*rec(plk, 6.5, fan=188.0), quiet=q, avoid=avoid, target=110.0, free=True, hears=1440)
+    got = [(p["freq"], p["ok"]) for p in r["plucks"]]
+    good = len(got) == 4 and all(ok and abs(fr - e[2]) <= 0.1 for (fr, ok), e in zip(got, plk))
+    print("%-4s %-46s %s" % ("ok" if good else "FAIL", "loose belt, pull on a fan beside a toolhead line", got))
+    if not good:
+        FAILS.append("loose belt")
+    kn = [(1.0 + 1.3 * i, "ring", 94.5, 1500.0, 0.0, 0.12) for i in range(4)] + \
+         [(1.0 + 1.3 * i, "tap", 187.5, 6000.0, 0.0, 0.22) for i in range(4)]
+    r = belts.analyse(*rec(sorted(kn), 6.5, fan=188.0), quiet=q, avoid=avoid, target=110.0, free=True, hears=1440)
+    bad = [(p["freq"], p["why"]) for p in r["plucks"] if p["ok"]]
+    print("%-4s %-46s %s" % ("ok" if not bad else "FAIL", "knocks there stay refused", [(p["freq"], p["why"]) for p in r["plucks"]]))
+    if bad:
+        FAILS.append("loose belt knocks")
+
+
 def tap_spot():
     """The spot's note is the one most taps ring: a first tap whose loudest line is another
     mode (a Beacon now and then) doesn't make the next taps "another spot"."""
@@ -706,6 +729,7 @@ if __name__ == "__main__":
     synthetic()
     background_hum()
     tap_spot()
+    loose_belt()
     streaming()
     tensioning()
     real_mic()
