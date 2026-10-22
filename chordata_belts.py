@@ -242,6 +242,13 @@ class Stream:
         t = np.asarray(t, float)
         if not len(t):
             return
+        axes = np.asarray(axes, float).reshape(3, -1)
+        cut = np.flatnonzero(np.diff(t) > self.GAP)
+        if len(cut):
+            # samples missing inside this batch: each stretch on its own, as separate batches
+            for a, b_ in zip(np.r_[0, cut + 1], np.r_[cut + 1, len(t)]):
+                self.feed(t[a:b_], axes[:, a:b_])
+            return
         if self.fed is not None and t[0] - self.fed > self.GAP:
             # (a gap would be read as a step in the signal: what came before is done)
             done = self.step(last=True)        # (with the reads not handed out yet)
