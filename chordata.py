@@ -538,7 +538,7 @@ class Chordata:
 
             def live(part):
                 # as often as the live pacing allows: each tap so far, good or not; it stops at 3 good ones
-                r = belts.analyse_taps(*self._cols(part), quiet=q, target=self.belts.get("target"))
+                r = belts.analyse_taps(*self._cols(part), quiet=q, target=self.belts.get("target"), belts=self._belt_notes())
                 if st.get("final"):             # a late live result can't overwrite the final marks
                     return
                 self.tap_live = r["taps"]
@@ -560,7 +560,8 @@ class Chordata:
             raise gcmd.error("Chordata: the accelerometer sent no data")
         self._save_recording("tap-%s-quiet" % stamp, quiet)
         try:
-            res = self._off_reactor(belts.analyse_taps, *self._cols(samples), quiet=q, target=self.belts.get("target"))
+            res = self._off_reactor(belts.analyse_taps, *self._cols(samples), quiet=q, target=self.belts.get("target"),
+                                    belts=self._belt_notes())
         except ValueError as error:
             raise gcmd.error("Chordata: invalid accelerometer recording: %s" % error)
         self.tap_live = res["taps"]
@@ -861,6 +862,25 @@ class Chordata:
                     logging.exception("chordata: restoring %s", section)
 
     # ---------------- the background (fans, motors): recorded once per session, at the tap step ----------------
+    def _belt_notes(self):
+        """Both belts' last readings, for the tap step (a line on one is a belt the tap set ringing):
+        Tuner Mode doesn't know which belt was plucked, so the last reading and the latest one more
+        than 1.5 Hz from it."""
+        out = []
+        try:
+            for e in reversed(list(getattr(self, "history", None) or [])):
+                fr = e.get("freq") if e.get("ok") else None
+                if fr is not None and all(abs(float(fr) - x) > 1.5 for x in out):
+                    out.append(float(fr))
+                if len(out) == 2:
+                    break
+            if not out:
+                last = (self.belts.get("free") or {}).get("last")
+                out = [float(last)] if last is not None else []
+        except (TypeError, ValueError, AttributeError):
+            return ()
+        return tuple(out)
+
     def _record_quiet(self, chip, toolhead, fresh=False):
         """The background is recorded once, when the toolhead is tapped, and used for every
         measure after it: a fan that comes on later is told from the belt by the plucks

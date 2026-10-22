@@ -523,7 +523,7 @@ def real_mic():
     """The real plucks2 recordings (cut short: tests/data/plucks2.npz, kept out of the public repo), judged by
     the microphone that was recording beside them. A Nebula 370 with an ADXL345 and a Beacon,
     the right belt plucked, then the left. The mic's pitch at each counted pluck is read over
-    the same stretch the engine used (0.03 s after the onset, 0.6 s or up to the next pluck):
+    the same stretch the engine used (from where it read it, to 0.6 s or up to the next pluck):
     a plucked belt's tone sinks as it rings down, so a longer or later window reads lower.
     Checked: a reading for each belt, near the mic (within 0.3 Hz: the tone at twice the note
     weighs the louder start more), and above all the two belts' difference, which is what
@@ -534,8 +534,10 @@ def real_mic():
     d = np.load(DATA)
     mfs = float(d["mic_fs"])
 
-    def mic(y, t, n_s, c):
-        seg = y[int((t + belts.SKIP) * mfs):][:int(n_s * mfs)].astype(float)
+    def mic(y, t, n_s, c, st=belts.SKIP):
+        # (from where the engine read the pluck: a reading at twice the tone is taken after the
+        # glide, see SETTLED - its window ends where the engine's did)
+        seg = y[int((t + st) * mfs):][:int((n_s - (st - belts.SKIP)) * mfs)].astype(float)
         n = 1 << 18
         sp = np.abs(np.fft.rfft((seg - seg.mean()) * np.hanning(len(seg)), n)) ** 2
         f = np.fft.rfftfreq(n, 1 / mfs)
@@ -559,7 +561,7 @@ def real_mic():
             for i, p in enumerate(r["plucks"]):
                 if p["ok"]:
                     w = min(belts.WINDOW, ts[i + 1] - p["t"] - belts.SKIP - 0.01) if i + 1 < len(ts) else belts.WINDOW
-                    err.append((p["freq"], mic(d[chip + "_" + side + "_mic"], p["t"], w, ref)))
+                    err.append((p["freq"], mic(d[chip + "_" + side + "_mic"], p["t"], w, ref, p.get("from") or belts.SKIP)))
             res[side] = (r, err)
             e = [a - b for a, b in err]
             check("%s %s: reading near the mic (%+.2f Hz)" % (chip, side, np.mean(e) if e else 99),
@@ -571,7 +573,7 @@ def real_mic():
             for i, p in enumerate(r["plucks"]):
                 if p["ok"]:
                     w = min(belts.WINDOW, ts[i + 1] - p["t"] - belts.SKIP - 0.01) if i + 1 < len(ts) else belts.WINDOW
-                    fe.append((p["t"], round(p["freq"] - mic(d[chip + "_" + side + "_mic"], p["t"], w, ref), 2)))
+                    fe.append((p["t"], round(p["freq"] - mic(d[chip + "_" + side + "_mic"], p["t"], w, ref, p.get("from") or belts.SKIP), 2)))
             bad = {x[0] for x in fe if abs(x[1]) > FREE_ERR}
             known = KNOWN_WRONG.get((chip, side), set())
             ok = len(fe) - len(bad) >= MIN_RIGHT[(chip, side)] and bad == known
@@ -721,6 +723,25 @@ def pulled_tone():
         FAILS.append("pulled tone")
 
 
+def faint_pull_knock():
+    """A tap on the toolhead rings its note, dies fast and leaves only a little at twice it (its
+    click, the toolhead's other lines): refused, while plucks dying as fast with their pull read."""
+    q = quiet()
+    kn = [(1.0 + 1.3 * i, "harm", 105.6, (8000.0, 8000.0, 0.0), 0.0, 0.1) for i in range(4)]   # (twice it ~16 dB under)
+    r = belts.analyse(*rec(kn, 6.5), quiet=q, target=110.0, free=True, hears=1440)
+    bad = [(p["freq"], p["why"]) for p in r["plucks"] if p["ok"]]
+    print("%-4s %-46s %s" % ("ok" if not bad else "FAIL", "a tap with a faint pull is a knock", [(p["freq"], p["why"]) for p in r["plucks"]]))
+    if bad:
+        FAILS.append("faint pull knock")
+    plk = [(1.0 + 1.3 * i, "pluck", 104.3, 1500.0, 1.0, 0.15) for i in range(4)]
+    r = belts.analyse(*rec(plk, 6.5), quiet=q, target=110.0, free=True, hears=1440)
+    got = [(p["freq"], p["ok"]) for p in r["plucks"]]
+    good = len(got) == 4 and all(ok and abs(fr - 104.3) <= 0.25 for fr, ok in got)
+    print("%-4s %-46s %s" % ("ok" if good else "FAIL", "fast-dying plucks with their pull read", got))
+    if not good:
+        FAILS.append("fast plucks")
+
+
 def tap_spot():
     """The spot's note is the one most taps ring: a first tap whose loudest line is another
     mode (a Beacon now and then) doesn't make the next taps "another spot"."""
@@ -745,6 +766,7 @@ if __name__ == "__main__":
     tap_spot()
     loose_belt()
     pulled_tone()
+    faint_pull_knock()
     streaming()
     tensioning()
     real_mic()

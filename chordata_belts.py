@@ -10,6 +10,7 @@
 #
 # Copyright (C) 2026  Chordata contributors
 # This file may be distributed under the terms of the GNU GPLv3 license.
+import logging
 import math
 import time
 
@@ -172,6 +173,7 @@ class Stream:
 
     def __init__(self, fs, quiet, target, avoid=(), hears=None):
         self.fs, self.target, self.avoid, self.hears = fs, target, tuple(avoid or ()), hears
+        self.gaps = []            # tone over twice it (dB) of the last accepted plucks (the session's knock gap)
         self.d, self.band_hi = decim_plan(fs, target, hears)
         self.fsd = fsd = fs / self.d
         q = np.asarray(quiet, float)
@@ -448,15 +450,24 @@ class Stream:
         only = [o - self.i0 - w0 for o in live + fin if o >= self.i0 + w0]
         # hums judged on this stretch, its plucks too (one that starts at them is a belt), as analyse() would
         m, new = steady_in(list(self.y[:, w0:]), self.fsd, self.q, on)
+        gap = session_gap(self.gaps)
         r = analyse(t, *self.y[:, w0:], quiet=self.q, avoid=self.avoid, target=self.target, free=True,
                     hears=self.hears, band_hi=self.band_hi,
-                    stream={"onsets": on, "env": env, "rise": rise, "hum": (m, new) if m is not None else None, "only": only})
+                    stream={"onsets": on, "env": env, "rise": rise, "hum": (m, new) if m is not None else None, "only": only,
+                            "gap": gap})
         fset = {o - self.i0 - w0 for o in fin}
         for p in r["plucks"]:
             # (its onset: the nearest read; onsets are DEAD apart, its t rounded to 0.01 s)
             k = min(only, key=lambda k: abs(p["t"] * self.fsd - k))
             p["final"] = k in fset
             p["at"] = float(t[k])         # its onset's own time in the stream (the same at every read)
+            if p["final"] and p.get("db") is not None and p.get("db2") is not None:
+                g = p["db"] - p["db2"]
+                if p["ok"] and g <= PULL_GAP:
+                    self.gaps = (self.gaps + [g])[-30:]
+                elif p["why"] == "a knock, not a belt" and GREY_GAP[0] <= g <= GREY_GAP[1]:
+                    # (the gap thresholds come from one printer: these are the ones to look at on others)
+                    logging.info("chordata: %.2f Hz refused as a knock by its pull %.1f dB under the tone", p["freq"], g)
         for o in live:
             self.read[o] = 1
             self.lread[o] = self.i0 + len(self.t)
@@ -807,6 +818,18 @@ MIN_GOOD = 3              # fewer accepted plucks than this: no reading
 # rings out within ~0.15-0.3 s, a belt much longer. The pull at twice the tone goes
 # with the swing squared, so it dies twice as fast as the tone itself.
 KNOCK_TAU = 0.2           # s: a tone dying faster than this (1/e of its level) is a knock
+PULL_GAP = 12.0           # dB: a pull this far under a tone that dies that fast is no belt's (see _knock)
+PULL_GAP_SESSION = 8.0    # dB: a printer whose own plucks show their pull far under the tone allows its
+                          # knocks this much more than their median (never less than PULL_GAP)
+GAP_MIN_N = 5             # plucks heard before their gaps count
+GREY_GAP = (12.0, 20.0)   # dB: knocks refused by a gap in this range are logged (thresholds from one printer)
+# Engine rules from the 22 Oct review (switchable for the A/B; see each):
+SETTLED = False           # a reading at twice the tone is taken after the glide (from the pluck's own ring time)
+SETTLE = (0.10, 0.25)     # s: where that late reading starts, at most and at least
+SETTLE_LEAST = 0.35       # s of ringing left after it, else the whole window
+SKIRT_SCALE = True        # a toolhead line's skirt reaches 3x its width (SKIRT_REACH at most)
+GAP_SESSION = True        # the knock gap follows the session's own plucks (never below PULL_GAP)
+TAP_WIDE = True           # the tap step learns no impulse (a line far wider than a mode ringing that long) nor a belt
 HARM_TAU = 1.4            # a tone and twice it: the lower rings at least this much longer
 OCT_TIE = 0.7             # scores this close: the one nearer the belt's last reading wins
 
@@ -933,7 +956,8 @@ def _pulled_up(fk, f2):
     return fk - f2 > PULL2_DIFF
 
 
-def pluck_freq(f, p, noise, df, lo, hi, avoid=(), target=None, prev=None, halves=None, blind=None, late=None):
+def pluck_freq(f, p, noise, df, lo, hi, avoid=(), target=None, prev=None, halves=None, blind=None, late=None, info=None,
+               late2=None):
     """Belt tone from one pluck's spectrum p, given the noise spectrum (same window
     length, no pluck). The carriage feels a belt at its tone and at twice it (the pull
     changes twice per swing), so the tone F is where F and 2F together stand highest
@@ -943,8 +967,10 @@ def pluck_freq(f, p, noise, df, lo, hi, avoid=(), target=None, prev=None, halves
     window sits (_blind): there twice the tone is no evidence for a belt (the skirt of a
     fan line that wanders past its mask stands far above the noise, and a tone picked so
     that twice it lands there is that skirt, not a belt). late: for a window still growing,
-    reads the picked line again from after the early glide (see LATE), or None. Returns (freq
-    or None, dB at F, dB at 2F)."""
+    reads the picked line again from after the early glide (see LATE), or None. late2: the same
+    for a reading at twice the tone only (SETTLED), or None. info: a dict given gets "src", the
+    line the reading came from (F, 2F or pull2). Returns (freq or None, dB at F, dB at 2F)."""
+    info = {} if info is None else info
     snr = p / np.maximum(noise, 1e-30)
     top = f[-1] / 2.0 - 2.0
     flo, fhi = lo, min(hi, top, F_MAX)
@@ -1109,8 +1135,10 @@ def pluck_freq(f, p, noise, df, lo, hi, avoid=(), target=None, prev=None, halves
     j2 = None
     if PULL2 and (j is None or not (db2 > db1 or pulled)):
         j2 = _pull2(f, p, snr, df, fk, res, strong, own, modes2, ringing2, blind)
+    info["src"] = "F"
     if j is not None and (db2 > db1 or pulled) and not _on_mode(2 * fk, ringing2) \
             and not (blind is not None and blind[max(0, j - 2):j + 3].any()):
+        info["src"] = "2F"
         # the sharper line: twice the tone (unless a toolhead line pulls it). Its top, not the bin
         # at twice a peak that a line beside the tone pulled: a pulled tone's twice lands on the
         # pull's slope, as far off as the tone was pulled (res at most, so 2 res there)
@@ -1119,15 +1147,19 @@ def pluck_freq(f, p, noise, df, lo, hi, avoid=(), target=None, prev=None, halves
             if jt is not None and _pulled_up(fk, _peak(f, p, jt, df) / 2.0):
                 j = jt
                 db2 = _db(snr[j])
+                info["src"] = "pull2"
         fk = _peak(f, p, j, df) / 2.0
-        if late is not None:
-            v = late(float(f[j]))
+        rd = late if late is not None else late2
+        if rd is not None:
+            v = rd(float(f[j]))
             fk = fk if v is None else v / 2.0
     elif j2 is not None:
+        info["src"] = "pull2"
         db2 = _db(snr[j2])
         fk = _peak(f, p, j2, df) / 2.0
-        if late is not None:
-            v = late(float(f[j2]))
+        rd = late if late is not None else late2
+        if rd is not None:
+            v = rd(float(f[j2]))
             fk = fk if v is None else v / 2.0
     elif late is not None:
         v = late(float(f[k]))
@@ -1296,14 +1328,27 @@ def _hum(axes, fs, on, fr):
     return earlier is None or earlier < 10 ** (DECAY_DB / 10.0) * before
 
 
-def _knock(f, df, halves, fr, d1, d2, avoid, pull=False):
+def _knock(f, df, halves, fr, d1, d2, avoid, pull=False, gap=None):
     """A knock on the toolhead or the frame, not a pluck: a clear tone with no pull at
     twice it (or only the toolhead's own ringing there, learned from a tap) that dies
-    fast. Belts ring long, so this needs no tap learned first."""
+    fast. Belts ring long, so this needs no tap learned first. gap: how far under the tone
+    a pull may be (dB; PULL_GAP when not given)."""
     on_mode = _on_mode(2 * fr, _modes(avoid)) and not pull       # (pull: the belt's own, see _pull_line)
-    if not on_mode and (d1 < STRONG_DB or (d2 >= WEAK_DB and d1 < d2 + 20.0)):
+    if not on_mode and (d1 < STRONG_DB or (d2 >= WEAK_DB and d1 < d2 + (PULL_GAP if gap is None else gap))):
         return False                  # a belt's pull at twice the tone is there
+    # (a knock rings the toolhead at its own note, and its click and the toolhead's other lines
+    # leave a little at twice it: PULL_GAP under the tone. A plucked belt's pull stands within
+    # that of its tone, or rings on long)
     return _tau(halves, f, df, fr) < KNOCK_TAU
+
+
+def session_gap(gaps):
+    """The knock gap (dB) from the gaps (tone over twice it) of the plucks accepted so far, or
+    None (PULL_GAP): their median + PULL_GAP_SESSION once GAP_MIN_N are in, never below
+    PULL_GAP. Only plucks with a gap within PULL_GAP are given, so it can't creep up on knocks."""
+    if not GAP_SESSION or len(gaps) < GAP_MIN_N:
+        return None
+    return max(PULL_GAP, float(np.median(gaps)) + PULL_GAP_SESSION)
 
 
 SKIRT_REACH = 20.0        # Hz: how far from a toolhead line its skirt is looked at (_on_skirt)
@@ -1343,11 +1388,19 @@ def _pull_line(f, p, nz, df, halves, fr, avoid):
     return db
 
 
-def _on_skirt(f, p, df, fc, modes):
+def _on_skirt(f, p, df, fc, avoid):
     """At fc no line of its own but the skirt of a toolhead line (learned from the taps) close by:
     the top within 1 Hz of fc is not the top within 3 Hz (pluck_freq's own()), and a toolhead
-    line lies within SKIRT_REACH Hz."""
-    if not any(abs(fc - m) <= SKIRT_REACH for m, _ in modes):
+    line lies within its reach: SKIRT_REACH Hz, or 3x its width when that is less (SKIRT_SCALE:
+    a sharp line's skirt doesn't reach that far)."""
+    reach = []
+    for m in avoid or ():
+        if isinstance(m, dict):
+            w = float(m.get("width") or 0.0)
+            reach.append((float(m["freq"]), min(SKIRT_REACH, 3.0 * w) if SKIRT_SCALE and w > 0 else SKIRT_REACH))
+        else:
+            reach.append((float(m), SKIRT_REACH))
+    if not any(abs(fc - m) <= r for m, r in reach):
         return False
     j = _near(f, p, fc, df, 1.0)
     if j is None:
@@ -1619,6 +1672,8 @@ def analyse(t, ax, ay, az, target=None, expect=None, quiet=None, avoid=(), other
         rise[bk:] = (env[bk:] > max(5.0 * ((float(np.percentile(env, 10)) if base is None else base) or 1e-9), 0.03 * float(env.max()))) \
             & (env[bk:] > 3.0 * env[:-bk])
     only = None if stream is None else set(stream["only"])
+    gap = None if stream is None else stream.get("gap")      # (the knock gap, from the session's plucks)
+    gaps = []                 # (a guided measurement: from its own plucks so far, the same rule)
     for on, a0, a1 in _windows(axes, fs, onsets):
         if only is not None and on not in only:
             continue
@@ -1629,13 +1684,30 @@ def analyse(t, ax, ay, az, target=None, expect=None, quiet=None, avoid=(), other
             continue
         p, nz, halves = sp
         blind = _blind(f, mask, a1 - a0, fs, cache)
-        late = None
-        if not _complete(fs, a0, a1, k + 1 < len(onsets)) and a1 - (on + int(LATE * fs)) >= int(0.1 * fs):
-            def late(fc, l0=on + int(LATE * fs), a1=a1):
-                pl = _spectrum([a[l0:a1] for a in axes], fs, nfft)[1]
-                j = _near(f, pl, fc, df, 0.6)
-                return None if j is None else _peak(f, pl, j, df)
-        fr, d1, d2 = pluck_freq(f, p, nz, df, lo, hi, pick_avoid, target, prev, halves, blind, late)
+        def reread(fc, l0, a1=a1):
+            pl = _spectrum([a[l0:a1] for a in axes], fs, nfft)[1]
+            j = _near(f, pl, fc, df, 0.6)
+            return None if j is None else _peak(f, pl, j, df)
+        late = late2 = None
+        complete = _complete(fs, a0, a1, k + 1 < len(onsets))
+        if not complete and a1 - (on + int(LATE * fs)) >= int(0.1 * fs):
+            def late(fc, l0=on + int(LATE * fs)):
+                return reread(fc, l0)
+        elif complete and SETTLED:
+            def late2(fc, on=on):
+                # twice the tone weighs the loud, sharp start of a pluck (its pull goes with the
+                # swing squared): read it once the glide is over - the glide's excess pitch goes
+                # with the swing squared too, so after the tone's own ring time it is down to
+                # e^-2 - if enough ringing is left (SETTLE_LEAST), else the whole window
+                tf = _tau(halves, f, df, fc / 2.0)
+                st = min(SETTLE[1], max(SETTLE[0], tf if 0.0 < tf < float("inf") else SETTLE[1]))
+                l0 = on + int(st * fs)
+                if a1 - l0 < int(SETTLE_LEAST * fs):
+                    return None
+                info["from"] = round(st, 3)
+                return reread(fc, l0)
+        info = {}
+        fr, d1, d2 = pluck_freq(f, p, nz, df, lo, hi, pick_avoid, target, prev, halves, blind, late, info, late2)
         tone_only = False
         # (the fit models only the belt and the toolhead's ringing: a steady line - a fan - right
         # by twice the tone, where it fits a toolhead line too, would be pulled into them and
@@ -1661,7 +1733,8 @@ def analyse(t, ax, ay, az, target=None, expect=None, quiet=None, avoid=(), other
             elif any(abs(2 * fr - m) <= TAP_GUARD for m, _ in ringing):
                 d2 = None                     # twice the tone is that line: the tone alone decides
                 tone_only = True
-        pk = {"t": round(float(on / fs), 2), "freq": None if fr is None else round(fr, 2),
+        pk = {"t": round(float(on / fs), 2), "freq": None if fr is None else round(fr, 2), "src": info.get("src") if fr is not None else None,
+              "from": info.get("from", SKIP) if fr is not None else None,
               "db": None if d1 is None else round(d1, 1), "db2": None if d2 is None else round(d2, 1),
               "ok": False, "why": ""}
         steady2 = fr is not None and ((bmask is not None and bool(bmask(np.array([2 * fr]))[0]))
@@ -1669,7 +1742,7 @@ def analyse(t, ax, ay, az, target=None, expect=None, quiet=None, avoid=(), other
         # a pull that a pluck dying fast puts a little above twice the tone (see _pull_line): it
         # dies, so it is told from a steady line there as well as from the toolhead's ringing
         pull = _pull_line(f, p, nz, df, halves, fr, avoid)
-        if fr is not None and pull is None and (steady2 or (d2 is not None and _on_skirt(f, p, df, 2 * fr, _modes(avoid)))):
+        if fr is not None and pull is None and (steady2 or (d2 is not None and _on_skirt(f, p, df, 2 * fr, avoid))):
             # twice the tone sits on a steady line (a fan, the sensor's own), or on the skirt of
             # the toolhead's own ringing (a knock rings it loud enough to stand far above the
             # noise Hz away): it can't be told from that there, so the tone alone decides
@@ -1693,8 +1766,11 @@ def analyse(t, ax, ay, az, target=None, expect=None, quiet=None, avoid=(), other
                 pk["why"] = "steady hum, not a pluck"
             else:
                 pk["ok"] = True
-        elif _knock(f, df, halves, fr, d1, d2, avoid, pull is not None):
+        elif _knock(f, df, halves, fr, d1, d2, avoid, pull is not None,
+                    gap if stream is not None else session_gap(gaps)):
             pk["why"] = "a knock, not a belt"
+            if stream is None and GREY_GAP[0] <= d1 - d2 <= GREY_GAP[1]:
+                logging.info("chordata: %.2f Hz refused as a knock by its pull %.1f dB under the tone", fr, d1 - d2)
         elif max(d1, d2) < STRONG_DB or min(d1, d2) < WEAK_DB:
             pk["why"] = "too weak"
         elif judge_hum and _hum(axes, fs, on, fr):
@@ -1738,6 +1814,8 @@ def analyse(t, ax, ay, az, target=None, expect=None, quiet=None, avoid=(), other
                 hit = np.flatnonzero(rise[s1:a1]) + s1
                 if any(env[i] > 1.1 * top[i - bk - b0] for i in hit):
                     pk["ok"], pk["why"] = False, "two plucks at once"
+        if pk["ok"] and d2 is not None and d1 - d2 <= PULL_GAP:
+            gaps.append(d1 - d2)
         plucks.append(pk)
     ok = [x for x in plucks if x["ok"]]
     if other and ok:
@@ -1849,8 +1927,9 @@ def analyse_tap(t, ax, ay, az, quiet=None):
             "note": "" if modes else "the tap rang nothing clearly"}
 
 
-def _tap_lines(f, sp, df, lo, hi, rises=None):
-    """The toolhead's own lines in one tap's window (see analyse_tap), strongest first."""
+def _tap_lines(f, sp, df, lo, hi, rises=None, belts=()):
+    """The toolhead's own lines in one tap's window (see analyse_tap), strongest first. belts:
+    the belts' last readings (Hz): a line on one of them is the belt the tap set ringing."""
     p, nz, halves = sp
     snr = p / np.maximum(nz, 1e-30)
     sel = np.flatnonzero((f >= lo) & (f <= hi))
@@ -1888,14 +1967,21 @@ def _tap_lines(f, sp, df, lo, hi, rises=None):
             # (and it starts with the tap: a fan's line at twice the toolhead's note doesn't count)
             return j is not None and _db(snr[j]) >= WEAK_DB and p[j] >= p[max(0, j - w):j + w + 1].max() \
                 and (rises is None or rises(float(f[j])))
-        if own(j2):
+        tau = _tau(halves, f, df, fk)
+        # (a line at twice it PULL_GAP under it, on a line that dies fast, is no belt's pull: the
+        # tap's click and the toolhead's other lines leave that much there, see _knock)
+        belt = TAP_WIDE and any(abs(fk - b) <= OTHER_GUARD for b in belts or ())
+        if own(j2) and (belt or not (tau < KNOCK_TAU and snr[j2] * 10.0 ** (PULL_GAP / 10.0) <= snr[k])):
             continue
         if fk / 2.0 >= lo and own(jh):
             continue
-        tau = _tau(halves, f, df, fk)
         if math.isinf(tau):
             continue
         wd = _width(f, p, k, df)
+        if TAP_WIDE and 0.0 < tau < float("inf") and wd > 2.0 * (math.sqrt(3.0) / (math.pi * tau) + 1.0 / halves[3]):
+            # far wider than a mode ringing that long can be (-6 dB: sqrt(3)/(pi tau), plus the
+            # window's own spread, 2/T): the knock's impulse, no mode to learn
+            continue
         modes.append(round(fk, 1))
         ring.append({"freq": round(fk, 1), "tau": round(float(tau), 2), "width": round(float(wd), 1),
                      "guard": round(float(min(GUARD_MAX, max(TAP_GUARD, wd / 2.0))), 1)})
@@ -1925,7 +2011,7 @@ def _tap_ref(taps):
     return best
 
 
-def analyse_taps(t, ax, ay, az, quiet=None, need=TAP_NEED, target=None):
+def analyse_taps(t, ax, ay, az, quiet=None, need=TAP_NEED, target=None, belts=()):
     """Judge each tap in a recording and learn the toolhead's fingerprint from the first
     `need` good ones. Returns taps (each: t, ok, why, freq = its loudest note), good (count),
     bad (count), main (the toolhead's note: freq, guard, ...), modes, ring and tau (as
@@ -1965,7 +2051,7 @@ def analyse_taps(t, ax, ay, az, quiet=None, need=TAP_NEED, target=None):
         elif sp is None:
             tap["why"] = "not enough background"
         else:
-            modes, ring = _tap_lines(f, sp, df, lo, hi, lambda fr, on=on: _rises(axes, fs, on, fr))
+            modes, ring = _tap_lines(f, sp, df, lo, hi, lambda fr, on=on: _rises(axes, fs, on, fr), belts)
             # a tap starts the toolhead's ringing: a line already there just before (a fan
             # humming) is not the toolhead
             ring = [r for r in ring if _rises(axes, fs, on, r["freq"])]
