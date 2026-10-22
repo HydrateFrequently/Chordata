@@ -1085,7 +1085,10 @@ function renderFree(v, b) {
   if (last != null) { const [cls, t] = deltaText(last, b); v.d.className = "d " + cls; setText(v.d, t); }
   setText(v.u, uText(g));
   v.u.hidden = !v.u.textContent;
-  setText(v.sub, "Target " + Number(b.target).toFixed(0) + " Hz" + (listening ? "  ·  " + (pt().message || "Listening") : ""));
+  // (a listen that ran into its longest time: say so, it didn't just stop)
+  const capped = !listening && (b.free || {}).stopped === "limit";
+  setText(v.sub, "Target " + Number(b.target).toFixed(0) + " Hz" + (listening ? "  ·  " + (pt().message || "Listening")
+    : (capped ? "  ·  Stopped after " + b.free.max_min + " minutes: start Tuner Mode again to go on" : "")));
   setText(v.hum, humText());
   v.hum.hidden = !v.hum.textContent;
   histUpdate(v.list);

@@ -128,10 +128,40 @@ class SafetyTests(unittest.TestCase):
         # the last pluck at 0.5 s: it stops once more than 60 s passed after it
         self.assertEqual(looks[-1], 61.)
         self.assertEqual(obj.state, "idle")
+        self.assertEqual(obj.belts["free"]["stopped"], "idle")
         # the whole listen goes into one file, as it comes
         self.assertEqual(len(saved), len(looks))
         self.assertEqual(len({n for n, _ in saved}), 1)
         self.assertTrue(all(a for _, a in saved))
+
+    def test_free_tune_says_when_it_ran_into_its_longest_listen(self):
+        obj = plugin({"print_stats": status(state="standby"),
+                      "resonance_tester": SimpleNamespace(accel_chips=[("adxl345", object())]),
+                      "toolhead": SimpleNamespace(wait_moves=lambda: None)})
+        obj._record_quiet = lambda *args, **kw: [(i * .01, 0., 0., 0.) for i in range(150)]
+        obj._save_recording = lambda *args, **kw: None
+        obj.FREE_MAX = 5.
+        said = []
+
+        def record(chip, toolhead, secs, live=None, stop=None, keep=None, sink=None):
+            # plucked every second until the listen's time is up
+            for k in range(1, int(secs) + 1):
+                rows = [(k - 1. + i * .01, 0., 0., 0.) for i in range(100)]
+                live(rows)
+                self.assertFalse(stop())
+            return rows
+
+        def plan(stream, last):
+            stream.heard += 1
+            stream.last_on = stream.steps - .5
+            return []
+        obj._record = record
+        cmd = Command()
+        cmd.respond_info = said.append
+        with patch.object(belts, "Stream", FakeStream), patch.object(FakeStream, "plan", staticmethod(plan)):
+            obj.cmd_CHORDATA_FREE(cmd)
+        self.assertEqual(obj.belts["free"]["stopped"], "limit")
+        self.assertTrue(any("longest Tuner Mode listens" in m for m in said), said)
 
     def _tap_plugin(self, result):
         obj = plugin({"print_stats": status(state="standby"),

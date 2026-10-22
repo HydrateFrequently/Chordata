@@ -273,7 +273,7 @@ class Chordata:
 
     cmd_CHORDATA_FREE_help = ("Chordata: Tuner Mode: show every pluck's frequency until a minute after the "
                               "last pluck, Done on the page, or SECONDS")
-    FREE_MAX = 600.     # s: a free tune nobody ends from the page stops by itself after this
+    FREE_MAX = 1800.    # s: a free tune nobody ends from the page stops by itself after this (the page says so)
     STREAM_KEEP = 6.0   # s of full-rate samples kept while Tuner Mode listens (the history's double-tap
                         # check reads them beside the stream's analysed stretch, Stream.KEEP s)
     FREE_IDLE = 60.     # s: with no pluck heard for this long, a free tune ends by itself
@@ -383,6 +383,10 @@ class Chordata:
             self._listen_t0 = (listen, 0.0, self.reactor.monotonic())
             rows = self._record(chip, toolhead, limit, live=look, stop=stop, keep=self.STREAM_KEEP, sink=sink)
             self._listen_t0 = (listen, st["now"], None)
+            # why it ended: Done on the page, FREE_IDLE without a pluck, or the time limit
+            last_on = 0.0 if stream.last_on is None else stream.last_on - (st["t0"] or 0.0)
+            stopped = "done" if self._accept else ("idle" if st["now"] - last_on > self.FREE_IDLE
+                                                   else ("limit" if not secs else "seconds"))
             if not rows:
                 raise gcmd.error("Chordata: the accelerometer sent no data")
             try:
@@ -399,15 +403,19 @@ class Chordata:
             raise gcmd.error("Chordata: the accelerometer sent no data")
         ok = [p["freq"] for p in plucks if p["ok"] and p.get("freq") is not None]
         res = {"freq": ok[-1] if ok else None, "plucks": plucks, "used": len(ok), "heard": len(plucks), "hum": hum,
-               "verdict": "free" if ok else "none", "note": "%d of %d plucks clear" % (len(ok), len(plucks))}
+               "verdict": "free" if ok else "none", "note": "%d of %d plucks clear" % (len(ok), len(plucks)),
+               "stopped": stopped}
         self.belt_live = plucks[-40:]
         self.belt_hum = hum
-        self.belts = dict(self.belts, free={"plucks": plucks[-40:], "last": ok[-1] if ok else None, "hum": hum})
+        self.belts = dict(self.belts, free={"plucks": plucks[-40:], "last": ok[-1] if ok else None, "hum": hum,
+                                            "stopped": stopped, "max_min": round(self.FREE_MAX / 60.0)})
         self._end_measurement(result=res)
+        why = (" Stopped after %d minutes, the longest Tuner Mode listens: start it again to go on."
+               % round(self.FREE_MAX / 60.0)) if stopped == "limit" else ""
         if ok:
-            gcmd.respond_info("Chordata: Tuner Mode: last pluck %.1f Hz (%s)" % (ok[-1], ", ".join("%.1f" % f for f in ok)))
+            gcmd.respond_info("Chordata: Tuner Mode: last pluck %.1f Hz (%s).%s" % (ok[-1], ", ".join("%.1f" % f for f in ok), why))
         else:
-            gcmd.respond_info("Chordata: Tuner Mode: no clear pluck heard")
+            gcmd.respond_info("Chordata: Tuner Mode: no clear pluck heard.%s" % why)
 
     # ---------------- belt tensioning position (the user's own, saved from the jog pad) ----------------
     def _belt_pos_file(self):
