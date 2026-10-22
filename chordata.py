@@ -1073,7 +1073,7 @@ class Chordata:
         timer = None
         if live is not None:
             busy = []
-            pace = {"dt": self.LIVE_MIN}       # how long the last live analysis took
+            pace = {"dt": self.LIVE_MIN, "next": 0.}    # how long the last live analysis took; the next may start then
             got = {"msgs": 0, "rows": []}       # the samples gathered so far (only new messages are read)
             self._live_gen = gen_now = getattr(self, "_live_gen", 0) + 1
 
@@ -1086,37 +1086,39 @@ class Chordata:
                     logging.exception("chordata: live belt analysis")
                 finally:
                     pace["dt"] = time.monotonic() - t0
+                    # never more than a third of the time analysing: the analysis thread holds
+                    # Python's GIL while it runs, and Kalico's own work shares the process with it
+                    pace["next"] = time.monotonic() + 2.0 * pace["dt"]
                     busy.clear()
 
             def tick(eventtime):
                 try:
-                    if not busy:
-                        msgs = list(client.msgs)
-                        if len(msgs) < got["msgs"]:          # (the helper started its list over)
-                            got["msgs"], got["rows"] = 0, []
-                        new = [x for m in msgs[got["msgs"]:] for x in m["data"] if x[0] >= client.request_start_time]
-                        got["rows"].extend(new)
-                        got["msgs"] = len(msgs)
-                        if sink is not None and new:
-                            sink(new)
-                        if keep is not None and got["rows"]:
-                            # the stream: only the last keep s stay (the helper's own list too)
-                            cut = got["rows"][-1][0] - keep
-                            i = next((k for k, x in enumerate(got["rows"]) if x[0] >= cut), len(got["rows"]))
-                            if i:
-                                del got["rows"][:i]
-                            del client.msgs[:got["msgs"]]
-                            got["msgs"] = 0
-                        if len(got["rows"]) > 200:
-                            busy.append(1)
-                            threading.Thread(target=work, args=(list(got["rows"]),), daemon=True).start()
+                    # the samples are taken in (and let go of: keep) every tick, also while the
+                    # last live analysis still runs: on a slow host it may take longer than keep s,
+                    # and a listen would otherwise pile up all its samples for the final analysis
+                    msgs = list(client.msgs)
+                    if len(msgs) < got["msgs"]:          # (the helper started its list over)
+                        got["msgs"], got["rows"] = 0, []
+                    new = [x for m in msgs[got["msgs"]:] for x in m["data"] if x[0] >= client.request_start_time]
+                    got["rows"].extend(new)
+                    got["msgs"] = len(msgs)
+                    if sink is not None and new:
+                        sink(new)
+                    if keep is not None and got["rows"]:
+                        # the stream: only the last keep s stay (the helper's own list too)
+                        cut = got["rows"][-1][0] - keep
+                        i = next((k for k, x in enumerate(got["rows"]) if x[0] >= cut), len(got["rows"]))
+                        if i:
+                            del got["rows"][:i]
+                        del client.msgs[:got["msgs"]]
+                        got["msgs"] = 0
+                    if not busy and len(got["rows"]) > 200 and time.monotonic() >= pace["next"]:
+                        busy.append(1)
+                        threading.Thread(target=work, args=(list(got["rows"]),), daemon=True).start()
                 except Exception:
                     logging.exception("chordata: live belt samples")
                     return self.reactor.NEVER
-                # as often as LIVE_MIN, but never more than a third of the time analysing: the
-                # analysis thread holds Python's GIL while it runs, and Kalico's own work shares
-                # the process with it
-                return eventtime + max(self.LIVE_MIN, 3.0 * pace["dt"])
+                return eventtime + self.LIVE_MIN
         try:
             if live is not None:
                 timer = self.reactor.register_timer(tick, self.reactor.monotonic() + 0.5)
@@ -1149,7 +1151,11 @@ class Chordata:
             new = [x for m in list(client.msgs)[got["msgs"]:] for x in m["data"] if x[0] >= client.request_start_time]
             if sink is not None and new:
                 sink(new)
-            return got["rows"] + new
+            rows = got["rows"] + new
+            if rows:
+                cut = rows[-1][0] - keep
+                rows = rows[next((k for k, x in enumerate(rows) if x[0] >= cut), 0):]
+            return rows
         return client.get_samples()
 
     def _find_chip(self, name):
