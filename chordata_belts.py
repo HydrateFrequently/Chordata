@@ -885,6 +885,54 @@ def _late(halves, f, df, fc):
     return k is not None and pl[k] / max(nh[k], 1e-30) >= 10.0 ** (WEAK_DB / 10.0)
 
 
+PULL2 = True              # read the pull at twice the tone when a line beside the tone pulls its peak
+PULL2_DIFF = 0.25         # Hz: the tone from the pull this far from the peak, at least
+
+
+def _top(p, j, span):
+    """The top of the line whose slope bin j is on: climb while the spectrum rises, at most span
+    bins; None if it doesn't reach a top within that."""
+    j0 = j
+    while abs(j - j0) <= span and 0 < j < len(p) - 1:
+        if p[j + 1] > p[j] and p[j + 1] >= p[j - 1]:
+            j += 1
+        elif p[j - 1] > p[j]:
+            j -= 1
+        else:
+            return j
+    return None
+
+
+def _pull2(f, p, snr, df, fk, res, strong, own, modes2, ringing2, blind):
+    """Bin of the pull at twice the tone when the tone's peak is a blend (see pluck_freq), or None:
+    the top of the spectrum within 2 res of twice the peak, a clean line of its own (STRONG, not on
+    a toolhead line, a ringing one or a steady line), putting the tone PULL2_DIFF to res below
+    the peak (see _pulled_up)."""
+    if res <= 0:
+        return None
+    sel = np.flatnonzero(np.abs(f - 2 * fk) <= 2 * res)
+    if len(sel) < 3:
+        return None
+    j = int(sel[np.argmax(p[sel])])
+    if j in (sel[0], sel[-1]) or snr[j] < strong or not own(j):
+        return None
+    f2 = _peak(f, p, j, df) / 2.0
+    d = fk - f2                       # how far the peak was pulled, and which way
+    if not PULL2_DIFF < d <= res:
+        return None
+    if _on_mode(2 * f2, modes2) or _on_mode(2 * f2, ringing2) or (blind is not None and blind[max(0, j - 2):j + 3].any()):
+        return None
+    return j
+
+
+def _pulled_up(fk, f2):
+    """The tone's peak at fk reads above f2, the tone the pull at twice it gives, by more than
+    PULL2_DIFF: only a line beside the tone pulling its peak up does that. A belt's stiffness
+    makes its overtones sharp, and the pitch glide weighs the pull (which dies twice as fast)
+    towards the higher early pitch, so both put f2 above the tone, never below it."""
+    return fk - f2 > PULL2_DIFF
+
+
 def pluck_freq(f, p, noise, df, lo, hi, avoid=(), target=None, prev=None, halves=None, blind=None, late=None):
     """Belt tone from one pluck's spectrum p, given the noise spectrum (same window
     length, no pluck). The carriage feels a belt at its tone and at twice it (the pull
@@ -1053,11 +1101,33 @@ def pluck_freq(f, p, noise, df, lo, hi, avoid=(), target=None, prev=None, halves
     # there as well, as some may, gives twice the tone no advantage)
     pulled = j is not None and snr[j] >= strong and own(j) and any(abs(fk - m) <= res for m, _ in modes) \
         and not guarded2(2 * fk)
+    # Any line beside the tone (the other belt ringing along, a toolhead note the taps missed)
+    # closer than the window resolves blends with it into one peak, pulled towards it. At twice
+    # the tone the two are twice as far apart: the pull there, a clean line of its own, then
+    # reads the belt. Taken when it puts the tone more than PULL2_DIFF from the peak, within
+    # what a blend can pull (res), with such a line beside the tone.
+    j2 = None
+    if PULL2 and (j is None or not (db2 > db1 or pulled)):
+        j2 = _pull2(f, p, snr, df, fk, res, strong, own, modes2, ringing2, blind)
     if j is not None and (db2 > db1 or pulled) and not _on_mode(2 * fk, ringing2) \
             and not (blind is not None and blind[max(0, j - 2):j + 3].any()):
-        fk = _peak(f, p, j, df) / 2.0          # the sharper line: twice the tone (unless a toolhead line pulls it)
+        # the sharper line: twice the tone (unless a toolhead line pulls it). Its top, not the bin
+        # at twice a peak that a line beside the tone pulled: a pulled tone's twice lands on the
+        # pull's slope, as far off as the tone was pulled (res at most, so 2 res there)
+        if PULL2 and res > 0:
+            jt = _top(p, j, max(1, int(round(2 * res / df))))
+            if jt is not None and _pulled_up(fk, _peak(f, p, jt, df) / 2.0):
+                j = jt
+                db2 = _db(snr[j])
+        fk = _peak(f, p, j, df) / 2.0
         if late is not None:
             v = late(float(f[j]))
+            fk = fk if v is None else v / 2.0
+    elif j2 is not None:
+        db2 = _db(snr[j2])
+        fk = _peak(f, p, j2, df) / 2.0
+        if late is not None:
+            v = late(float(f[j2]))
             fk = fk if v is None else v / 2.0
     elif late is not None:
         v = late(float(f[k]))

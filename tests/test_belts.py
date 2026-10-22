@@ -707,6 +707,20 @@ def loose_belt():
         FAILS.append("loose belt knocks")
 
 
+def pulled_tone():
+    """The other belt ringing along a few Hz above (unresolved in a short window) pulls the tone's
+    peak up; its pull at twice the tone is clear of it and reads the plucked belt."""
+    q = quiet()
+    plk = [(1.0 + 1.3 * i, "pluck", 104.3 + rng.uniform(-0.2, 0.2), 1500.0, 3.0, 0.3) for i in range(4)]
+    ev = plk + [(e[0], "ring", 106.9, 1200.0, 0.0, 0.3) for e in plk]
+    r = belts.analyse(*rec(sorted(ev), 6.5), quiet=q, target=110.0, free=True, hears=1440)
+    got = [(p["freq"], p["ok"]) for p in r["plucks"]]
+    good = len(got) == 4 and all(ok and abs(fr - e[2]) <= 0.25 for (fr, ok), e in zip(got, plk))
+    print("%-4s %-46s %s" % ("ok" if good else "FAIL", "tone pulled up by a line beside it", [(round(e[2], 2), g) for e, g in zip(plk, got)]))
+    if not good:
+        FAILS.append("pulled tone")
+
+
 def tap_spot():
     """The spot's note is the one most taps ring: a first tap whose loudest line is another
     mode (a Beacon now and then) doesn't make the next taps "another spot"."""
@@ -730,6 +744,7 @@ if __name__ == "__main__":
     background_hum()
     tap_spot()
     loose_belt()
+    pulled_tone()
     streaming()
     tensioning()
     real_mic()
