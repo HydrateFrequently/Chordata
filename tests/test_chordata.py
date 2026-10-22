@@ -55,6 +55,26 @@ def status(**values):
     return SimpleNamespace(get_status=lambda now: values)
 
 
+class FakeStream:
+    """Stands in for chordata_belts.Stream: plan(stream, last) gives each step()'s reads."""
+    made = []
+    plan = staticmethod(lambda stream, last: [])
+
+    def __init__(self, fs, quiet, target, avoid=(), hears=None):
+        FakeStream.made.append(quiet)
+        self.heard, self.last_on, self.steps, self.fed = 0, None, 0, 0
+
+    def warm(self):
+        pass
+
+    def feed(self, t, axes):
+        self.fed += len(t)
+
+    def step(self, last=False):
+        self.steps += 1
+        return FakeStream.plan(self, last)
+
+
 class SafetyTests(unittest.TestCase):
     def test_all_direct_commands_reject_printing_and_paused(self):
         for state in ("printing", "paused"):
@@ -78,7 +98,7 @@ class SafetyTests(unittest.TestCase):
         obj = plugin({"print_stats": status(state="standby"),
                       "resonance_tester": SimpleNamespace(accel_chips=[("adxl345", chip)]),
                       "toolhead": SimpleNamespace(wait_moves=lambda: None)})
-        obj._record_quiet = lambda *args, **kw: [(0., 0., 0., 0.)] * 10
+        obj._record_quiet = lambda *args, **kw: [(i * .01, 0., 0., 0.) for i in range(150)]
         looks = []
 
         def record(chip, toolhead, secs, live=None, stop=None, keep=None, sink=None):
@@ -95,14 +115,15 @@ class SafetyTests(unittest.TestCase):
         obj._record = record
         saved = []
         obj._save_recording = lambda name, samples, append=False: saved.append((name, append))
-        calls = []
 
-        def analyse(*args, **kw):
-            # one pluck at 0.5 s into the stream, heard by the first looks only
-            calls.append(1)
-            return {"plucks": [{"t": .5, "ok": True, "freq": 110., "why": ""}], "onsets": [.5]} \
-                if len(calls) <= 2 else {"plucks": [], "onsets": []}
-        with patch.object(belts, "analyse", analyse):
+        def plan(stream, last):
+            # one pluck at 0.5 s into the stream: found, then read final at the first step
+            if stream.steps == 1:
+                stream.heard, stream.last_on = 1, .5
+                return [(0., {"plucks": [{"t": .5, "at": .5, "ok": True, "freq": 110., "why": "", "final": True}],
+                              "onsets": [.5], "hum": []}, 1.)]
+            return []
+        with patch.object(belts, "Stream", FakeStream), patch.object(FakeStream, "plan", staticmethod(plan)):
             obj.cmd_CHORDATA_FREE(Command())
         # the last pluck at 0.5 s: it stops once more than 60 s passed after it
         self.assertEqual(looks[-1], 61.)
@@ -116,7 +137,7 @@ class SafetyTests(unittest.TestCase):
         obj = plugin({"print_stats": status(state="standby"),
                       "resonance_tester": SimpleNamespace(accel_chips=[("adxl345", object())]),
                       "toolhead": SimpleNamespace(wait_moves=lambda: None)})
-        obj._record_quiet = lambda *args, **kw: [(0., 0., 0., 0.)] * 10
+        obj._record_quiet = lambda *args, **kw: [(i * .01, 0., 0., 0.) for i in range(150)]
         stops = []
 
         def record(chip, toolhead, secs, live=None, stop=None, keep=None, sink=None):
@@ -240,13 +261,12 @@ class SafetyTests(unittest.TestCase):
             return [(i * secs / 99., float(len(lengths)), 0., 0.) for i in range(100)]
         obj._record = record
         obj._save_recording = lambda *args, **kw: None
-        def analysis(*args, **kwargs):
-            quiets.append(kwargs["quiet"])
-            return {"hum": [], "plucks": [{"t": 1., "ok": True, "why": "", "freq": 110.}]}
-        with patch("chordata_belts.analyse", side_effect=analysis):
+        FakeStream.made = quiets
+        with patch.object(belts, "Stream", FakeStream):
             obj.cmd_CHORDATA_FREE(Command(SECONDS=8.))
             obj.cmd_CHORDATA_FREE(Command(SECONDS=8.))
         self.assertEqual(lengths.count(1.5), 1)          # one background, then only the plucks
+        self.assertEqual(len(quiets), 2)
         self.assertEqual(quiets[0], quiets[1])
 
     def _accel_plugin(self, settings):
@@ -855,7 +875,7 @@ class HistoryTests(unittest.TestCase):
         obj = plugin({"print_stats": status(state="standby"),
                       "resonance_tester": SimpleNamespace(accel_chips=[("adxl345", object())]),
                       "toolhead": SimpleNamespace(wait_moves=lambda: None)})
-        obj._record_quiet = lambda *args, **kw: [(0., 0., 0., 0.)] * 10
+        obj._record_quiet = lambda *args, **kw: [(i * .01, 0., 0., 0.) for i in range(150)]
         obj._save_recording = lambda *args, **kw: None
         part = [(i * .01, 0., 0., 0.) for i in range(800)]
 
@@ -863,11 +883,56 @@ class HistoryTests(unittest.TestCase):
             live(part)                    # heard live (its window all in), then in the final analysis
             return part
         obj._record = record
-        res = {"plucks": [self.pk(1.)], "onsets": [1.]}
-        with patch.object(belts, "analyse", lambda *a, **k: res):
+
+        def plan(stream, last):
+            # each run: the pluck at 1 s read live, then final (at the end)
+            p = dict(self.pk(1.), at=1., final=last)
+            return [(0., {"plucks": [p], "onsets": [1.], "hum": []}, 7.99)]
+        with patch.object(belts, "Stream", FakeStream), patch.object(FakeStream, "plan", staticmethod(plan)):
             obj.cmd_CHORDATA_FREE(Command(SECONDS=8.))
             obj.cmd_CHORDATA_FREE(Command(SECONDS=8.))
         self.assertEqual([h["n"] for h in obj.history], [1, 2])     # one per run, kept across runs
+
+    def test_a_tuner_run_with_the_real_stream(self):
+        # three plucks played in at 0.2 s a look, as the recorder hands them over: each read
+        # once (final) into the history and the page's list, at its own time, in the right order
+        fs, secs = 3200., 6.
+        rng = np.random.default_rng(5)
+        t = np.arange(int(secs * fs)) / fs
+        ax, ay, az = (rng.normal(0, 30, len(t)) for _ in range(3))
+        for t0, f in ((1., 104.), (2.3, 109.), (3.6, 113.)):
+            tt = t - t0
+            env = np.where(tt >= 0, np.exp(-np.clip(tt, 0, None) / .3), 0.)
+            side, along = 1500. * env * np.sin(2 * np.pi * f * tt), 4500. * env ** 2 * np.sin(4 * np.pi * f * tt)
+            ax += .7 * along + .3 * side
+            ay += .7 * along - .3 * side
+            az += .4 * side
+        rows = list(zip(t.tolist(), ax.tolist(), ay.tolist(), az.tolist()))
+        q = [(i / fs,) + tuple(rng.normal(0, 30, 3)) for i in range(int(1.5 * fs))]
+        obj = plugin({"print_stats": status(state="standby"),
+                      "resonance_tester": SimpleNamespace(accel_chips=[("adxl345", object())]),
+                      "toolhead": SimpleNamespace(wait_moves=lambda: None)})
+        obj._record_quiet = lambda *args, **kw: q
+        obj._save_recording = lambda *args, **kw: None
+        pages = []                        # what the page showed after each look
+
+        def record(chip, toolhead, secs, live=None, stop=None, keep=None, sink=None):
+            step = int(.2 * fs)
+            for k in range(step, len(rows) + 1, step):
+                live([x for x in rows[:k] if x[0] >= rows[k - 1][0] - keep])
+                pages.append(list(obj.belt_live))
+            return [x for x in rows if x[0] >= rows[-1][0] - keep]
+        obj._record = record
+        obj.cmd_CHORDATA_FREE(Command(SECONDS=secs))
+        got = [(round(p["t"], 1), round(p["freq"])) for p in obj.belts["free"]["plucks"]]
+        self.assertEqual(got, [(1., 104), (2.3, 109), (3.6, 113)])
+        self.assertEqual([(h["n"], round(h["freq"])) for h in obj.history], [(1, 104), (2, 109), (3, 113)])
+        self.assertEqual(obj.belt_heard, 3)
+        # each pluck's number was on the page before it was final
+        firsts = [next(i for i, l in enumerate(pages) if any(abs(p["t"] - t0) < .05 for p in l)) for t0 in (1., 2.3, 3.6)]
+        finals = [next(i for i, l in enumerate(pages) if any(abs(p["t"] - t0) < .05 and p.get("final") for p in l))
+                  for t0 in (1., 2.3, 3.6)]
+        self.assertTrue(all(a < b for a, b in zip(firsts, finals)), (firsts, finals))
 
     def test_cleared_by_start_close_and_reset(self):
         obj = self._filled()

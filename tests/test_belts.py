@@ -616,6 +616,74 @@ def background_hum():
         FAILS.append("hum silent")
 
 
+def streaming():
+    """Tuner Mode's live stream (Stream): the downsampling joins batches seamlessly; every
+    pluck is read final exactly once, after a live read, and reads as analyse() reads the
+    whole recording; a gap in the samples starts the stream over without losing what came
+    before; a toolhead that rings long is listened beside."""
+    def fail(name, info):
+        print("FAIL %-46s %s" % (name, info))
+        FAILS.append(name)
+
+    def ok(name, info=""):
+        print("ok   %-46s %s" % (name, info))
+    x = rng.normal(0, 30, (3, 20000)) + 9.8
+    t = np.arange(20000) / FS
+    for d in (2, 3):
+        h = belts.lowpass_taps(FS, d)
+        half = (len(h) - 1) // 2
+        ref = np.stack([np.convolve(a, h)[half:half + len(a)] for a in x])[:, half::d]
+        dec = belts.Decimator(FS, d)
+        parts = [dec.feed(t[i:i + 137], x[:, i:i + 137]) for i in range(0, len(t), 137)]
+        y = np.concatenate([p[1] for p in parts], axis=1)
+        err = float(np.abs(y - ref[:, :y.shape[1]]).max())
+        (ok if err < 1e-9 else fail)("downsampling by %d in batches = one filter" % d, "max diff %.1e" % err)
+
+    def play(t, axes, q, avoid=(), gap_at=None):
+        st = belts.Stream(FS, q, 110.0, avoid, hears=0.45 * FS)
+        k = int(0.1 * FS)
+        reads = []
+        for i in range(0, len(t), k):
+            tt = t[i:i + k] + (0.2 if gap_at is not None and t[i] >= gap_at else 0.0)
+            st.feed(tt, np.asarray(axes)[:, i:i + k])
+            reads += st.step()
+        reads += st.step(last=True)
+        live = [round(w0 + p["t"], 2) for w0, r, _ in reads for p in r["plucks"] if not p["final"]]
+        final = [dict(p, t=w0 + p["t"]) for w0, r, _ in reads for p in r["plucks"] if p["final"]]
+        return live, final
+    for name, fan in (("clean", None), ("a fan at 140 Hz", 140.0)):
+        freqs = [96.0, 104.0, 111.0, 118.0, 107.0, 99.0]
+        r = rec(series(freqs), 9.0, fan=fan)
+        q = quiet(fan=fan)
+        whole = belts.analyse(*r, quiet=q, target=110.0, free=True, hears=0.45 * FS)["plucks"]
+        live, final = play(r[0], r[1:], q)
+        times = sorted(p["t"] for p in final)
+        once = len(times) == len(set(round(x, 1) for x in times)) and all(b - a >= belts.DEAD for a, b in zip(times, times[1:]))
+        (ok if once else fail)("stream (%s): each pluck final once" % name, ["%.2f" % x for x in times])
+        bad = []
+        for p in whole:
+            m = [x for x in final if abs(x["t"] - p["t"]) <= 0.05]
+            if not m or m[0]["ok"] != p["ok"] or (p["ok"] and abs(m[0]["freq"] - p["freq"]) > 0.1):
+                bad.append((p["t"], p["freq"], p["ok"], m[0]["freq"] if m else None))
+        (ok if not bad and len(final) == len(whole) else fail)(
+            "stream (%s) reads as the whole recording" % name, bad or "%d plucks" % len(final))
+        first = all(any(abs(x - p["t"]) <= 0.05 for x in live) for p in final[:-1])
+        (ok if first else fail)("stream (%s): a live read before each final" % name, live)
+    # a gap of 0.2 s in the samples (a host too slow for a while)
+    r = rec(series([100.0, 108.0, 115.0, 102.0, 110.0, 97.0]), 9.0)
+    q = quiet()
+    _, final = play(r[0], r[1:], q, gap_at=4.4)
+    got = sorted(round(p["freq"]) for p in final if p["ok"])
+    (ok if len(got) >= 5 and len(set(got)) == len(got) else fail)("stream: a gap starts it over, plucks around it read", got)
+    # a stiff toolhead still ringing (long) when the plucks come: heard beside its line
+    ring = [{"freq": 150.0, "guard": 1.0, "tau": 0.5}]
+    ev = series([100.0, 108.0, 115.0], start=1.5) + [(1.0, "ring", 150.0, 3000.0, 0.0, 0.5)]
+    r = rec(sorted(ev), 6.0)
+    _, final = play(r[0], r[1:], quiet(), ring)
+    got = [round(p["freq"]) for p in final if p["ok"]]
+    (ok if sorted(got) == [100, 108, 115] else fail)("stream: plucks beside a long toolhead ring", got)
+
+
 def tap_spot():
     """The spot's note is the one most taps ring: a first tap whose loudest line is another
     mode (a Beacon now and then) doesn't make the next taps "another spot"."""
@@ -638,6 +706,7 @@ if __name__ == "__main__":
     synthetic()
     background_hum()
     tap_spot()
+    streaming()
     tensioning()
     real_mic()
     if a.real:

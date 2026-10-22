@@ -200,10 +200,9 @@ class Chordata:
         return self._off_reactor(belts.analyse, *cols, hears=acc["hi"] if acc else None, **kw)
 
     @staticmethod
-    def _warm(q, fs):
-        import chordata_belts as belts
+    def _warm_stream(stream):
         try:
-            belts.warm(q, fs)
+            stream.warm()
         except Exception:
             logging.exception("chordata: warming the noise spectra")
 
@@ -275,8 +274,8 @@ class Chordata:
     cmd_CHORDATA_FREE_help = ("Chordata: Tuner Mode: show every pluck's frequency until a minute after the "
                               "last pluck, Done on the page, or SECONDS")
     FREE_MAX = 600.     # s: a free tune nobody ends from the page stops by itself after this
-    STREAM_KEEP = 5.0   # s: each live look of Tuner Mode reads the stream's last this many
-    STREAM_EDGE = 0.3   # s: an onset this close to a look's start is a pluck that look cut off
+    STREAM_KEEP = 6.0   # s of full-rate samples kept while Tuner Mode listens (the history's double-tap
+                        # check reads them beside the stream's analysed stretch, Stream.KEEP s)
     FREE_IDLE = 60.     # s: with no pluck heard for this long, a free tune ends by itself
 
     def cmd_CHORDATA_FREE(self, gcmd):
@@ -322,51 +321,62 @@ class Chordata:
                                                    % round(self.FREE_IDLE))
             q = [[s[i] for s in quiet] for i in (1, 2, 3)]
             avoid = self.belts.get("tap_ring") or self.belts.get("tap", [])
-            kw = dict(quiet=q, avoid=avoid, target=self.belts["target"], free=True)
-            # the noise spectra the first plucks need, made while the user gets ready to pluck
             fs_q = getattr(self, "_accel_fs", None)
-            if fs_q:
-                threading.Thread(target=self._warm, args=(q, fs_q), daemon=True).start()
-            # The stream: one recording for the whole listen. Each live look reads only its last
-            # STREAM_KEEP s (memory and work stay the same however long the listen runs); a pluck
-            # is final once its whole window is in, and is never cut by where a look starts or ends.
+            if not fs_q:
+                if not quiet or len(quiet) < 2 or quiet[-1][0] <= quiet[0][0]:
+                    raise gcmd.error("Chordata: the background recording is empty")
+                fs_q = (len(quiet) - 1) / (quiet[-1][0] - quiet[0][0])
+            acc = self._accel()
+            try:
+                # the live stream's analysis: each sample taken once, each pluck found once and
+                # read twice (live, then final), see chordata_belts.Stream
+                stream = belts.Stream(fs_q, q, self.belts["target"], avoid, hears=acc["hi"] if acc else None)
+            except ValueError as error:
+                raise gcmd.error("Chordata: invalid background recording: %s" % error)
+            # the noise spectra the first plucks need, made while the user gets ready to pluck
+            threading.Thread(target=self._warm_stream, args=(stream,), daemon=True).start()
             rec_name = "free-%s" % time.strftime("%Y%m%d-%H%M%S")
             self._listen_id = getattr(self, "_listen_id", 0) + 1     # the history tells this listen's plucks apart
             listen = self._listen_id
-            st = {"t0": None, "now": 0.0, "done": {}, "onsets": set(), "last": 0.0, "hum": []}
+            st = {"t0": None, "fed": None, "now": 0.0, "done": {}, "hum": []}
 
             def look(rows, last=False):
                 if st["t0"] is None:
                     st["t0"] = rows[0][0]
-                cols = self._cols(rows)
-                dur = rows[-1][0] - rows[0][0]
-                off = rows[0][0] - st["t0"]             # where this stretch starts, in the listen's time
-                r = self._analyse(*cols, **kw)
-                now = [dict(p, final=True) for p in r["plucks"]] if last else self._mark_final(r["plucks"], dur)
-                if off > 0.05:
-                    # an onset right at the start of the stretch is a pluck cut off by it: read in earlier looks
-                    now = [p for p in now if p["t"] >= self.STREAM_EDGE]
-                for p in now:
-                    if p.get("final"):
-                        st["done"][round(p["t"] + off, 1)] = dict(p, t=round(p["t"] + off, 2))
-                for o in r.get("onsets") or ():
-                    if off <= 0.05 or o >= self.STREAM_EDGE:
-                        st["onsets"].add(round(o + off, 1))
-                        st["last"] = max(st["last"], o + off)
-                done = sorted(st["done"].values(), key=lambda p: p["t"])
-                tail = [dict(p, t=round(p["t"] + off, 2)) for p in now if not p.get("final")
-                        and (not done or p["t"] + off > done[-1]["t"] + 0.1)]
-                self.belt_live = (done + tail)[-40:]
-                self._history_add(listen, off, now, cols, q, dur, final=last)
-                if dur >= 4.0 or r.get("hum"):
-                    st["hum"] = r.get("hum") or []
+                new = rows if st["fed"] is None else [x for x in rows if x[0] > st["fed"]]
+                if new:
+                    a = np.asarray(new, float)
+                    stream.feed(a[:, 0], a[:, 1:4].T)
+                    st["fed"] = new[-1][0]
+                st["now"] = rows[-1][0] - st["t0"]
+                for w0, r, dur in stream.step(last=last):
+                    # (each pluck at its onset's time in the stream: the same in every read of it)
+                    for p in r["plucks"]:
+                        if p["final"]:
+                            ta = round(p["at"] - st["t0"], 2)
+                            st["done"][ta] = dict(p, t=ta)
+                    done = sorted(st["done"].values(), key=lambda p: p["t"])
+                    tail = [dict(p, t=round(p["at"] - st["t0"], 2)) for p in r["plucks"] if not p["final"]]
+                    self.belt_live = (done + tail)[-40:]
+                    # the session history (and a double tap on the toolhead): the stretch's events,
+                    # final ones and the live one, beside the full-rate samples of the same stretch
+                    span = [x for x in rows if x[0] >= w0]
+                    if len(span) > 100:
+                        c0, c1 = span[0][0], span[-1][0]
+                        ev = [dict(p, t=p["t"] - (c0 - st["t0"]), final=True) for p in done
+                              if c0 - st["t0"] <= p["t"] <= c1 - st["t0"]]
+                        ev += [dict(p, t=p["t"] - (c0 - st["t0"])) for p in tail if p["t"] >= c0 - st["t0"]]
+                        ev.sort(key=lambda p: p["t"])
+                        self._history_add(listen, c0 - st["t0"], ev, self._cols(span), q, c1 - c0, final=last)
+                    if dur >= 4.0 or r.get("hum"):
+                        st["hum"] = r.get("hum") or []
                 self.belt_hum = st["hum"]
-                self.belt_heard = max(self.belt_heard, len(st["onsets"]))
-                st["now"] = off + dur
+                self.belt_heard = max(self.belt_heard, stream.heard)
 
             def stop():
                 # Done on the page, or FREE_IDLE s after the last pluck heard
-                return self._accept or st["now"] - st["last"] > self.FREE_IDLE
+                last_on = 0.0 if stream.last_on is None else stream.last_on - (st["t0"] or 0.0)
+                return self._accept or st["now"] - last_on > self.FREE_IDLE
 
             def sink(rows):
                 self._save_recording(rec_name, rows, append=True)
@@ -856,14 +866,6 @@ class Chordata:
         if quiet and len(quiet) > 100 and quiet[-1][0] > quiet[0][0]:
             self._accel_fs = (len(quiet) - 1) / (quiet[-1][0] - quiet[0][0])
         return quiet
-
-    @staticmethod
-    def _mark_final(plucks, dur):
-        """Each live pluck marked final once its whole window is in (until then its reading may
-        still move a little: the page shows it greyed)."""
-        import chordata_belts as belts
-        full = dur - (belts.SKIP + belts.WINDOW + 0.05)
-        return [dict(p, final=p["t"] <= full) for p in plucks]
 
     # ---------------- the session's pluck history (Tuner Mode) ----------------
     HISTORY_KEEP = 100  # entries kept
