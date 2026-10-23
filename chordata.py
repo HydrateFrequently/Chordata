@@ -271,6 +271,19 @@ class Chordata:
         return ([s[0] for s in samples], [s[1] for s in samples], [s[2] for s in samples],
                 [s[3] for s in samples])
 
+    @staticmethod
+    def _since(rows, t, after=False):
+        """The samples from time t on (after: from past it), by a binary search: the samples come
+        in time order, so they are the rows' tail (the same rows a scan for x[0] >= t would give)."""
+        lo, hi = 0, len(rows)
+        while lo < hi:
+            mid = (lo + hi) // 2
+            if rows[mid][0] < t or (after and rows[mid][0] == t):
+                lo = mid + 1
+            else:
+                hi = mid
+        return rows[lo:]
+
     cmd_CHORDATA_FREE_help = ("Chordata: Tuner Mode: show every pluck's frequency until a minute after the "
                               "last pluck, Done on the page, or SECONDS")
     FREE_MAX = 1800.    # s: a free tune nobody ends from the page stops by itself after this (the page says so)
@@ -339,11 +352,16 @@ class Chordata:
             self._listen_id = getattr(self, "_listen_id", 0) + 1     # the history tells this listen's plucks apart
             listen = self._listen_id
             st = {"t0": None, "fed": None, "now": 0.0, "done": {}, "hum": []}
+            look_lock = threading.Lock()    # one look at a time: the final one waits for a live one still running
 
             def look(rows, last=False):
+                with look_lock:
+                    return _look(rows, last)
+
+            def _look(rows, last):
                 if st["t0"] is None:
                     st["t0"] = rows[0][0]
-                new = rows if st["fed"] is None else [x for x in rows if x[0] > st["fed"]]
+                new = rows if st["fed"] is None else self._since(rows, st["fed"], after=True)
                 if new:
                     a = np.asarray(new, float)
                     stream.feed(a[:, 0], a[:, 1:4].T)
@@ -360,14 +378,15 @@ class Chordata:
                     self.belt_live = (done + tail)[-40:]
                     # the session history (and a double tap on the toolhead): the stretch's events,
                     # final ones and the live one, beside the full-rate samples of the same stretch
-                    span = [x for x in rows if x[0] >= w0]
+                    span = self._since(rows, w0)
                     if len(span) > 100:
                         c0, c1 = span[0][0], span[-1][0]
                         ev = [dict(p, t=p["t"] - (c0 - st["t0"]), final=True) for p in done
                               if c0 - st["t0"] <= p["t"] <= c1 - st["t0"]]
                         ev += [dict(p, t=p["t"] - (c0 - st["t0"])) for p in tail if p["t"] >= c0 - st["t0"]]
                         ev.sort(key=lambda p: p["t"])
-                        self._history_add(listen, c0 - st["t0"], ev, self._cols(span), q, c1 - c0, final=last)
+                        # (the samples as columns only when a knock is judged: most looks judge none)
+                        self._history_add(listen, c0 - st["t0"], ev, lambda: self._cols(span), q, c1 - c0, final=last)
                     if dur >= 4.0 or r.get("hum"):
                         st["hum"] = r.get("hum") or []
                 self.belt_hum = st["hum"]
@@ -971,6 +990,13 @@ class Chordata:
         if not main:
             return False
 
+        cols_v = []
+
+        def columns():
+            if not cols_v:
+                cols_v.append(cols() if callable(cols) else cols)
+            return cols_v[0]
+
         def knock(key, at, until, attack=True):
             # toolhead_knock at most once per event (live and final share the answer). Not kept
             # while a live look may not hold the next event yet (until unknown): its window could
@@ -982,7 +1008,7 @@ class Chordata:
             if not attack and self._knocks.get(k):
                 return True                   # (a knock with its attack is one without it too)
             try:
-                v = bool(belts.toolhead_knock(*cols, at, main, None, quiet=quiet, until=until, attack=attack)[0])
+                v = bool(belts.toolhead_knock(*columns(), at, main, None, quiet=quiet, until=until, attack=attack)[0])
             except Exception:
                 logging.exception("chordata: double tap check")
                 v = False
@@ -998,7 +1024,7 @@ class Chordata:
             if k in self._knocks:
                 return self._knocks[k]
             try:
-                v = belts.second_knock(*cols, at, main, quiet=quiet)
+                v = belts.second_knock(*columns(), at, main, quiet=quiet)
             except Exception:
                 logging.exception("chordata: quick double tap check")
                 v = None

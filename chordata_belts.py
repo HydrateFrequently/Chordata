@@ -10,6 +10,7 @@
 #
 # Copyright (C) 2026  Chordata contributors
 # This file may be distributed under the terms of the GNU GPLv3 license.
+import collections
 import logging
 import math
 import time
@@ -25,6 +26,33 @@ DEAD = 0.45               # s: a new pluck can't start sooner than this
 STEP = 0.05               # s: window lengths are rounded down to this (fewer noise spectra)
 
 
+_HANN, _FREQS = {}, {}
+_CACHE_MAX = 64           # windows and frequency grids kept (lengths vary: a growing window, a stretch's tail)
+
+
+def _hann(n):
+    """np.hanning(n), made once per length (the same numbers)."""
+    w = _HANN.get(n)
+    if w is None:
+        if len(_HANN) >= _CACHE_MAX:
+            _HANN.clear()
+        w = _HANN[n] = np.hanning(n)
+    return w
+
+
+def _freqs(nfft, fs):
+    """np.fft.rfftfreq(nfft, 1/fs), made once per (nfft, fs); read-only."""
+    k = (nfft, fs)
+    f = _FREQS.get(k)
+    if f is None:
+        if len(_FREQS) >= _CACHE_MAX:
+            _FREQS.clear()
+        f = np.fft.rfftfreq(nfft, 1.0 / fs)
+        f.setflags(write=False)
+        f = _FREQS[k] = f
+    return f
+
+
 def _smooth(x, n):
     if n <= 1:
         return x
@@ -33,13 +61,17 @@ def _smooth(x, n):
 
 
 def _running_median(x, n):
+    """The median over a window of n (odd) around each point, the edges held; x finite."""
     h = n // 2
     pad = np.pad(x, h, mode="edge")
     try:
         view = np.lib.stride_tricks.sliding_window_view(pad, n)
     except AttributeError:            # numpy < 1.20
         return np.array([np.median(pad[i:i + n]) for i in range(len(x))])
-    return np.median(view, axis=1)
+    # the middle value of each window (what np.median gives for an odd n of finite values), by one
+    # partition for it alone: np.median partitions for the end too, to look for NaN, which costs
+    # several times as much here
+    return np.partition(view, h, axis=1)[:, h]
 
 
 def _pct(a, qs):
@@ -128,9 +160,11 @@ class Decimator:
             return np.zeros(0), np.zeros((3, 0))
         ks = np.arange(self.k, last + 1, self.d)
         pos = ks - self.base
-        idx = pos[:, None] + np.arange(-self.half, self.half + 1)[None, :]
+        # each output: the taps over its input (the same sums as gathering each window and
+        # taking its dot product with the taps, without the gathered copy)
+        p0, p1 = int(pos[0]) - self.half, int(pos[-1]) + self.half + 1
         hr = self.h[::-1]
-        out = np.stack([self.x[a][idx] @ hr for a in range(3)])
+        out = np.stack([np.correlate(self.x[a][p0:p1], hr, mode="valid")[::self.d] for a in range(3)])
         ts = self.t[pos]
         self.k = int(ks[-1]) + self.d
         keep_from = max(0, self.k - self.half - self.base)
@@ -173,7 +207,7 @@ class Stream:
 
     def __init__(self, fs, quiet, target, avoid=(), hears=None):
         self.fs, self.target, self.avoid, self.hears = fs, target, tuple(avoid or ()), hears
-        self.gaps = []            # tone over twice it (dB) of the last accepted plucks (the session's knock gap)
+        self.gaps = []            # tone over twice it (dB) of the last accepted plucks (this listen's knock gap)
         self.d, self.band_hi = decim_plan(fs, target, hears)
         self.fsd = fsd = fs / self.d
         q = np.asarray(quiet, float)
@@ -216,7 +250,7 @@ class Stream:
         self.e_end = 0            # the band level is known below this stream index
         self.scan = 0             # onsets looked for below this
         self.free_at = 0          # the next onset can't be found before this (DEAD)
-        self.bmax = {}            # block (stream index // nb) -> the band level's top in it
+        self.bm_first, self.bm_vals = 0, []   # the band level's top in each block (stream index // nb) from bm_first on
         self.onsets = []          # stream indices, in order
         self.fine = []            # the band level's own onsets (the last few)
         self.read = {}            # onset -> 1 (read live) or 2 (final)
@@ -228,9 +262,13 @@ class Stream:
         self.lread = {}           # onset -> where the stream was at its last live read
         if self.longm:
             self.b_next = 0       # the next short frame starts at this stream index
-            self.b_e = {}         # frame index -> level, the last KEEP s
+            self.b_e = {}         # frame index -> level, the last KEEP s (frames come in order: the keys
+                                  # run without a gap from b_lo to b_top)
+            self.b_lo, self.b_top = 0, -1
             self.b_dec = 0        # frames decided below this
             self.b_free = 0
+            self.b_q = collections.deque()   # (frame, level) of the loudest frames of the last KEEP s, in order,
+                                             # each louder than all after it (the threshold's top, see _find)
             self.held = []        # onsets found beside the toolhead's lines, waiting HOLD
 
     def warm(self):
@@ -277,7 +315,8 @@ class Stream:
         b0, b1 = (i - self.nkeep) // self.nb, i // self.nb
         top = np.zeros(len(i))
         for lo_b, hi_b in set(zip(b0.tolist(), b1.tolist())):
-            m = max([v for k, v in self.bmax.items() if lo_b <= k <= hi_b] or [0.0])
+            a, b = max(lo_b - self.bm_first, 0), min(hi_b - self.bm_first + 1, len(self.bm_vals))
+            m = max(self.bm_vals[a:b]) if b > a else 0.0        # (the blocks lo_b..hi_b known so far)
             top[(b0 == lo_b) & (b1 == hi_b)] = m
         return np.maximum(5.0 * self.base, 0.03 * top)
 
@@ -299,21 +338,30 @@ class Stream:
             if first.any():
                 prior[first] = e[0] if e0 == 0 else self.env[0]      # (i0 is 0 at the stream's start)
             self.env[e0 - self.i0:e1 - self.i0] = e
-            self.bmax[e0 // self.nb] = float(e.max())
-            for k in [k for k in self.bmax if k < (e1 - self.nkeep) // self.nb - 2]:
-                del self.bmax[k]
+            self.bm_vals.append(float(e.max()))              # (block e0 // nb: the blocks come in order)
+            drop = (e1 - self.nkeep) // self.nb - 2 - self.bm_first
+            if drop > 0:
+                del self.bm_vals[:drop]
+                self.bm_first += drop
             self.rise[e0 - self.i0:e1 - self.i0] = (e > 3.0 * prior) & (e > self._thr(np.arange(e0, e1)))
             self.e_end = e1
 
-    def _beside_env(self, axes, s0, s1, bm):
-        """Short-frame band level without the toolhead's lines, for frames starting at s0.. (< s1)."""
-        f = np.fft.rfftfreq(self.bnfft, 1.0 / self.fsd)
-        keep = (f >= self.lo) & (f <= self.hi)
-        if bm is not None:
-            keep &= ~bm(f)
-        spread = 2.0 * self.fsd / self.bn
-        for fa, g in self.longm:
-            keep &= np.abs(f - fa) > g + spread
+    def _beside_env(self, axes, s0, s1, bm, bm_key=None):
+        """Short-frame band level without the toolhead's lines, for frames starting at s0.. (< s1).
+        bm_key: what bm was made from (kept with the bins it keeps, made once per mask)."""
+        kept = getattr(self, "_bkeep", None)
+        if kept is not None and bm_key is not None and kept[0] is bm_key:
+            keep = kept[1]
+        else:
+            f = _freqs(self.bnfft, self.fsd)
+            keep = (f >= self.lo) & (f <= self.hi)
+            if bm is not None:
+                keep &= ~bm(f)
+            spread = 2.0 * self.fsd / self.bn
+            for fa, g in self.longm:
+                keep &= np.abs(f - fa) > g + spread
+            if bm_key is not None:
+                self._bkeep = (bm_key, keep)
         idx = np.arange(s0, s1, self.bh)
         e = 0
         for x in axes:
@@ -366,24 +414,37 @@ class Stream:
             last = end - self.bn
             if last >= self.b_next:
                 s1 = last + 1
-                e = self._beside_env(self.y, self.b_next - self.i0, s1 - self.i0, self._bm())
+                e = self._beside_env(self.y, self.b_next - self.i0, s1 - self.i0, self._bm(), self.hum or self)
                 i_first = self.b_next // self.bh
                 self.b_e.update((i_first + k, float(v)) for k, v in enumerate(e))
+                if len(e):
+                    self.b_top = i_first + len(e) - 1
                 self.b_next = (last // self.bh + 1) * self.bh
             # each frame decided as it comes (the threshold: the loudest frame of the last KEEP s)
-            top_i = max(self.b_e) if self.b_e else -1
+            top_i = self.b_top
             keep = self.nkeep // self.bh
+            q = self.b_q
             while self.b_dec <= top_i:
                 i = self.b_dec
                 v, old = self.b_e.get(i), self.b_e.get(i - self.bback)
+                if v is not None:
+                    # the loudest of the frames (i - keep, i]: a running top (each frame put in behind
+                    # the louder ones before it, the ones it tops dropped; frames too old dropped in front)
+                    while q and q[-1][1] <= v:
+                        q.pop()
+                    q.append((i, v))
+                    while q[0][0] <= i - keep:
+                        q.popleft()
                 if v is not None and old is not None and i >= self.b_free:
-                    top = max(x for k, x in self.b_e.items() if i - keep < k <= i)
+                    top = q[0][1]
                     if v > max(5.0 * self.bbase, 0.03 * top) and v > 3.0 * old:
                         self.held.append(i * self.bh + self.bn)      # the frame's end: the pluck has just come in
                         self.b_free = i + self.bdead
                 self.b_dec += 1
-            for k in [k for k in self.b_e if k <= self.b_dec - keep - self.bback - 2]:
-                del self.b_e[k]
+            thr = self.b_dec - keep - self.bback - 2
+            for k in range(self.b_lo, min(thr, self.b_top) + 1):
+                self.b_e.pop(k, None)
+            self.b_lo = max(self.b_lo, thr + 1)
             self._release(self.e_end if final else self.scan - self.HOLD * self.fsd, fine)
         self._ahead()
         return fine
@@ -431,6 +492,11 @@ class Stream:
 
     def _read(self, live, fin):
         w0 = max(0, len(self.t) - self.nkeep)
+        # (a pluck due but older than the last KEEP s - a big batch after a pause: the stretch
+        # reaches back to it, with what came before it, as far as the buffer holds)
+        due = [o - self.i0 for o in live + fin if o >= self.i0]
+        if due and min(due) - int(0.5 * self.fsd) < w0:
+            w0 = max(0, min(due) - int(0.5 * self.fsd))
         t = self.t[w0:]
         on = [o - self.i0 - w0 for o in self.onsets if o >= self.i0 + w0]
         if self.prov is not None and self.prov in live:
@@ -509,12 +575,17 @@ def _nfft(fs):
 
 
 def _spectrum(seg, fs, nfft):
-    w = np.hanning(len(seg[0]))
-    p = 0
-    for s in seg:
-        s = (s - s.mean()) * w
-        p = p + np.abs(np.fft.rfft(s, nfft)) ** 2
-    return np.fft.rfftfreq(nfft, 1.0 / fs), p
+    """Power spectrum of the axes together (Hann window, zero padded to nfft): each axis's, summed.
+    The axes go through one zero-padded transform as rows: the same numbers as one at a time
+    (checked bit for bit), with less overhead per call."""
+    n = len(seg[0])
+    rows = np.stack(seg)
+    rows = (rows - rows.sum(axis=1, keepdims=True) / n) * _hann(n)    # (each axis less its mean)
+    sp = np.abs(np.fft.rfft(rows, nfft, axis=1)) ** 2
+    p = sp[0]
+    for k in range(1, len(sp)):
+        p = p + sp[k]
+    return _freqs(nfft, fs), p
 
 
 def _background(axes, fs, n, nfft, pct):
@@ -683,14 +754,15 @@ def _either(m1, m2):
 
 
 def _band(axes, fs, lo, hi, mask):
+    n = len(axes[0])
+    f = _freqs(n, fs)                 # (the axes are the same length)
+    keep = (f >= lo) & (f <= hi)
+    if mask is not None:
+        keep &= ~mask(f)
     out = []
     for a in axes:
-        spec = np.fft.rfft(a - a.mean())
-        f = np.fft.rfftfreq(len(a), 1.0 / fs)
-        keep = (f >= lo) & (f <= hi)
-        if mask is not None:
-            keep &= ~mask(f)
-        out.append(np.fft.irfft(np.where(keep, spec, 0), len(a)))
+        spec = np.fft.rfft(a - a.sum() / n)
+        out.append(np.fft.irfft(np.where(keep, spec, 0), n))
     return _smooth(np.sqrt(sum(x * x for x in out)), max(1, int(0.01 * fs)))
 
 
@@ -1554,7 +1626,9 @@ def analyse(t, ax, ay, az, target=None, expect=None, quiet=None, avoid=(), other
     stream: from Stream (Tuner Mode), what the live stream already found, so the recording's own
     search is skipped: onsets (sample indices), env and rise (the band level and its sharp rises,
     sample by sample), hum ((mask, Hz) of the hums found, or None), only (the onsets to read now;
-    plucks returns only those)."""
+    plucks returns only those), gap (the knock gap from the listen's own plucks, see session_gap,
+    or None). Each pluck also carries src (the line its reading came from: F, 2F or pull2) and
+    from (s after its onset the reading was taken from)."""
     for name, value in (("target", target), ("other", other), ("prev", prev), ("hears", hears)):
         if value is not None and (not math.isfinite(value) or value <= 0):
             raise ValueError("%s frequency must be positive and finite" % name)
@@ -1692,6 +1766,7 @@ def analyse(t, ax, ay, az, target=None, expect=None, quiet=None, avoid=(), other
         complete = _complete(fs, a0, a1, k + 1 < len(onsets))
         if not complete and a1 - (on + int(LATE * fs)) >= int(0.1 * fs):
             def late(fc, l0=on + int(LATE * fs)):
+                info["from"] = LATE
                 return reread(fc, l0)
         elif complete and SETTLED:
             def late2(fc, on=on):
@@ -1970,8 +2045,10 @@ def _tap_lines(f, sp, df, lo, hi, rises=None, belts=()):
         tau = _tau(halves, f, df, fk)
         # (a line at twice it PULL_GAP under it, on a line that dies fast, is no belt's pull: the
         # tap's click and the toolhead's other lines leave that much there, see _knock)
-        belt = TAP_WIDE and any(abs(fk - b) <= OTHER_GUARD for b in belts or ())
-        if own(j2) and (belt or not (tau < KNOCK_TAU and snr[j2] * 10.0 ** (PULL_GAP / 10.0) <= snr[k])):
+        # (a line on a belt's last reading is that belt, rung by the tap, whatever its twice shows)
+        if TAP_WIDE and any(abs(fk - b) <= OTHER_GUARD for b in belts or ()):
+            continue
+        if own(j2) and not (tau < KNOCK_TAU and snr[j2] * 10.0 ** (PULL_GAP / 10.0) <= snr[k]):
             continue
         if fk / 2.0 >= lo and own(jh):
             continue
@@ -2360,3 +2437,5 @@ def clear_cache(windows_only=False):
     if not windows_only:
         _REFINED.clear()
         _MEMO.clear()
+        _HANN.clear()
+        _FREQS.clear()
