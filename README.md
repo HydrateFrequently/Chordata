@@ -22,15 +22,17 @@ says to pluck (the jog pad moves it; the position can be saved for next time). P
 so it can tell a pluck from what is always there.
 
 <img src="docs/images/tap.png" width="260" alt="Yellow screen: Tap your toolhead, one of three check marks">
-<img src="docs/images/tapped.png" width="260" alt="3 good taps: the toolhead's note, and the Tuner Mode button">
 
 **3. Tap.** The screen turns yellow: tap one solid spot on the toolhead lightly until 3 taps count (each
 shows a check mark or an X). Chordata learns how the toolhead rings by itself: at which frequencies, how
 long and how broad each line is. Toolheads differ a lot (a plastic one rings briefly in broad lines, a stiff
 all-metal one rings long in sharp lines), so each line is guarded as wide as it is. A line the tap set
 ringing on a belt is never learned as the toolhead's, nor is a knock's impulse. The taps can't be skipped:
-the belts are only measured once 3 good taps were heard. Then the card shows the toolhead's note and the
-**Tuner Mode** button.
+the belts are only measured once 3 good taps were heard.
+
+<img src="docs/images/tapped.png" width="260" alt="3 good taps: the toolhead's note, and the Tuner Mode button">
+
+Then the card shows the toolhead's note and the **Tuner Mode** button.
 
 <img src="docs/images/tuner.png" width="260" alt="Green screen, Tuner Mode: the last pluck's frequency, how far from target and which way to turn, the average of the last plucks, the history">
 
