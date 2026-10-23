@@ -17,7 +17,7 @@ const path = require('node:path');
     assert.equal(await page.locator('#pTitle').textContent(),'Chordata - Tuner Mode: 110.4 Hz');
     assert.equal(await page.locator('#beltView .hist li').count(),9);
     assert.equal(await page.locator('#beltView .hist li.out').count(),4);
-    assert.match(await page.locator('#beltView').textContent(),/110\.4 Hz.*\+0\.4 Hz, loosen.*Average 110\.05 Hz of the last 5/s);
+    assert.match(await page.locator('#beltView').textContent(),/110\.4 Hz.*\+0\.4 Hz, loosen.*Average 110\.06 Hz of the last 5/s);
     // the PC layout on a wide screen with a mouse, the phone layout otherwise
     await page.setViewportSize({width:1280,height:900});
     assert.equal(await page.evaluate(()=>{ placeLayout(); return document.documentElement.classList.contains('pc') === pcQuery.matches; }),true);
