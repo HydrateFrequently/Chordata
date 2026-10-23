@@ -6,6 +6,9 @@ Pluck a belt like a guitar string. The accelerometer on the toolhead hears it, a
 frequency, so you can tension both CoreXY belts to the same, known value. No phone app, no holding a microphone
 next to the belt: the sensor is already on the printer, and you keep both hands free.
 
+No extra hardware to buy or print: Chordata runs on the printer itself. It has been checked against a
+microphone on two printers so far; the numbers are in [How it was tested](#how-it-was-tested).
+
 ## How it works
 
 Chordata is a page on your printer, made for a phone held next to it. The screens below are from a
