@@ -6,24 +6,43 @@ Pluck a belt like a guitar string. The accelerometer on the toolhead hears it, a
 frequency, so you can tension both CoreXY belts to the same, known value. No phone app, no holding a microphone
 next to the belt: the sensor is already on the printer, and you keep both hands free.
 
-## What it does
+## How it works
 
-1. **Tap.** You tap one solid spot on the toolhead lightly until 3 taps count (each shows a check mark or an X).
-   Chordata learns how the toolhead rings by itself: at which frequencies,
+Chordata is a page on your printer, made for a phone held next to it. Screens below are from a
+virtual printer, so the numbers are made up; the page is the real one.
+
+<p>
+<img src="docs/images/setup.png" width="260" alt="Set Target Frequency: the target, the accelerometer, a jog pad to park the toolhead, Start">
+<img src="docs/images/hands-off.png" width="260" alt="Red screen: Stand by, recording background noise">
+<img src="docs/images/tap.png" width="260" alt="Yellow screen: Tap your toolhead, one of three check marks">
+</p>
+
+1. **Set up.** Enter the target frequency your printer's documentation gives and park the toolhead where it
+   says to pluck (the jog pad moves it; the position can be saved for next time). Press **Start**.
+2. **Hands off.** The screen turns red for a moment while Chordata records the background (fans, motors),
+   so it can tell a pluck from what is always there.
+3. **Tap.** The screen turns yellow: tap one solid spot on the toolhead lightly until 3 taps count (each
+   shows a check mark or an X). Chordata learns how the toolhead rings by itself: at which frequencies,
    how long and how broad each line is. Toolheads differ a lot (a plastic one rings briefly in broad lines,
-   a stiff all-metal one rings long in sharp lines), so each line is guarded as wide as it is, and plucks
-   that come while a long-ringing toolhead still rings from a knock are still found. A knock is never taken
-   for a belt. A line the tap set ringing on a belt is never learned as the toolhead's, nor is a knock's
-   impulse. The taps can't be skipped: the belts are only measured once 3 good taps were heard.
-2. **Tune (Tuner Mode).** Pluck either belt. The stream is analysed as it comes, so each clear pluck shows
-   its frequency within about a second, how far it is from your target and which way to turn; a weak pluck
-   or a knock is left out (greyed in the history, with why). A knock is told from a pluck by physics: a
-   plucked belt pulls on the toolhead twice per swing, a knock doesn't. A listen stops by itself after 30
-   minutes; start it again to go on.
-   Under the number, the average of the last plucks that agree (up to 5, within 1 Hz of each other), and
-   from 4 such plucks a **± Hz per pluck** from their scatter. Turn the tensioner a little between plucks
-   until the belt is on target (within 0.25 Hz), then do the other belt.
-3. **Match.** CoreXY belts pull on each other, so turning one moves the other a little: pluck both once
+   a stiff all-metal one rings long in sharp lines), so each line is guarded as wide as it is. A line the
+   tap set ringing on a belt is never learned as the toolhead's, nor is a knock's impulse. The taps can't be
+   skipped: the belts are only measured once 3 good taps were heard.
+
+<p>
+<img src="docs/images/tapped.png" width="260" alt="3 good taps: the toolhead's note, and the Tuner Mode button">
+<img src="docs/images/tuner.png" width="260" alt="Green screen, Tuner Mode: the last pluck's frequency, how far from target and which way to turn, the average of the last plucks, the history">
+<img src="docs/images/done.png" width="260" alt="After Done: the last pluck, the average, the whole history">
+</p>
+
+4. **Tune (Tuner Mode).** The screen turns green: pluck either belt. The stream is analysed as it comes,
+   so each clear pluck shows its frequency within about a second, how far it is from your target and which
+   way to turn. A weak pluck or a knock is left out, greyed in the history with why. A knock is told from a
+   pluck by physics: a plucked belt pulls on the toolhead twice per swing, a knock doesn't. Under the number:
+   the average of the last plucks that agree (up to 5, within 1 Hz of each other), and from 4 such plucks a
+   **± Hz per pluck** from their scatter. Turn the tensioner a little between plucks until the belt is on
+   target (within 0.25 Hz), then do the other belt. A listen stops by itself after 30 minutes; start it
+   again to go on.
+5. **Match.** CoreXY belts pull on each other, so turning one moves the other a little: pluck both once
    more at the end. Done when both are on target, and so match each other.
 
 The page keeps a history of the session's plucks, newest at the top. **Reset history** starts it over, and
@@ -38,13 +57,8 @@ you close Chordata, when a print starts, or after 10 idle minutes.
 Where to put the toolhead, which stretch of belt to pluck and the target frequency all come from your
 printer's own documentation. Chordata can save the toolhead position for next time.
 
-![Chordata page after a Tuner Mode session (illustrative data)](docs/images/desktop-demo.png)
-
-*Tuner Mode after a session: the last pluck, the average of the last 5 and the history (illustrative data,
-not a real printer).* The **[user guide](docs/USER_GUIDE.md)** walks through setup and a full
-measurement with screenshots; the **[troubleshooting guide](docs/TROUBLESHOOTING.md)** helps when something
-fails. To try the page without a printer, run `python3 -m http.server 8765 --directory web` in this folder
-and open `http://127.0.0.1:8765/?demo`.
+The **[user guide](docs/USER_GUIDE.md)** walks through setup and a full measurement; the
+**[troubleshooting guide](docs/TROUBLESHOOTING.md)** helps when something fails.
 
 ## Requirements
 

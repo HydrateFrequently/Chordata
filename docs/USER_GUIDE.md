@@ -4,9 +4,10 @@ This guide covers [Chordata](https://github.com/HydrateFrequently/Chordata).
 It works as a Klipper/Kalico measurement module, a Moonraker companion page, and a
 Mainsail sidebar link.
 
-All screenshots below come from the shipped offline demo. Their readings are
-illustrative; the toolhead position, belt span and target must come from your own
-printer's documentation. No physical-printer validation is implied by these images.
+All screenshots below come from a virtual printer (Klipper with a simulated
+accelerometer), so their readings are illustrative; the toolhead position, belt span and
+target must come from your own printer's documentation. No physical-printer validation is
+implied by these images.
 
 ## 1. Try the interface first
 
@@ -26,11 +27,11 @@ server with Ctrl+C when finished. A static preview server does not measure belts
 This is the page after a Tuner Mode session (illustrative data): the last pluck, the average of the last
 plucks that agree with its ±, and the session's history.
 
-![The Chordata page after a Tuner Mode session](images/desktop-demo.png)
+![The Chordata page after a Tuner Mode session (virtual printer)](images/done.png)
 
 On a phone, while Chordata listens, the green card shows the same: pluck, read, turn, pluck again.
 
-<img src="images/mobile-demo.png" width="390" alt="Tuner Mode on a phone while listening">
+<img src="images/tuner.png" width="390" alt="Tuner Mode on a phone while listening (virtual printer)">
 
 ## 2. Prepare the printer
 
@@ -346,4 +347,5 @@ npx playwright install chromium
 node tools/capture-docs.cjs
 ```
 
-The screenshot tool uses only the offline demo and illustrative settings.
+The screenshot tool renders the offline demo with illustrative settings (the images in this
+guide were taken on a virtual printer instead).
