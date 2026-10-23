@@ -48,6 +48,8 @@ and open `http://127.0.0.1:8765/?demo`.
 
 ## Requirements
 
+- A Raspberry Pi Zero 2 W or faster host (the Zero 2 W, 3B, 4B and 5 keep up with Tuner Mode; the
+  original Pi Zero is not supported)
 - Kalico or mainline Klipper, Moonraker, and Mainsail or Fluidd
 - An accelerometer on the toolhead (ADXL345, LIS2DW, a probe with one built in) and `[resonance_tester]`
 - `[respond]` in printer.cfg, and numpy in the Klipper Python environment (input shaper needs it too)

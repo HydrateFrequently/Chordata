@@ -5,6 +5,7 @@ Update from Mainsail's Update Manager, then restart Klipper.
 
 ## Unreleased (dev)
 
+- **Minimum host: Raspberry Pi Zero 2 W.** The original Pi Zero is not supported.
 - **Tuner Mode reads the stream as it comes.** The samples are filtered and analysed once, as
   they arrive, instead of a stretch of several seconds being analysed again and again. Each pluck
   is found once and read live every 0.1 s while it rings, then once more when its window is
