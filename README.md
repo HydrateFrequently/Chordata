@@ -27,7 +27,7 @@ so it can tell a pluck from what is always there.
 shows a check mark or an X). Chordata learns how the toolhead rings by itself: at which frequencies, how
 long and how broad each line is. Toolheads differ a lot (a plastic one rings briefly in broad lines, a stiff
 all-metal one rings long in sharp lines), so each line is guarded as wide as it is. A line the tap set
-ringing on a belt is never learned as the toolhead's, nor is a knock's impulse. The taps can't be skipped:
+ringing on a belt is not learned as the toolhead's, nor is a knock's impulse. The taps can't be skipped:
 the belts are only measured once 3 good taps were heard (or 3 taps that show a stiff toolhead with
 nothing to learn).
 
@@ -40,10 +40,14 @@ Then the card shows the toolhead's note and the **Tuner Mode** button.
 **4. Tune (Tuner Mode).** The screen turns green: pluck either belt. The stream is analysed as it comes, so
 each clear pluck shows its frequency within about a second, how far it is from your target and which way
 to turn. A weak pluck or a knock is left out, greyed in the history with why. A knock is told from a pluck
-by physics: a plucked belt pulls on the toolhead twice per swing, a knock doesn't, so an event whose line at twice
-the tone is missing or far under its tone is left out. Under the number: the
-average of the last plucks that agree (up to 5, within 1 Hz of each other), and from 4 such plucks a
-**± Hz per pluck** from their scatter. Turn the tensioner a little between plucks until the belt is on
+by physics: a plucked belt pulls on the toolhead twice per swing and rings on, a knock doesn't, so an event
+with nothing (or very little) at twice its tone that also dies away quickly is left out as a knock.
+
+Under the number: the average of the last plucks that agree (up to 5, within 1 Hz of each other), and from
+4 such plucks a **± Hz per pluck**: the range the next pluck will most likely land in (95 %), which shows how
+repeatable your plucks are, not how accurate. The average doesn't know which belt was plucked: once both
+belts are within 1 Hz of each other it mixes them, so press **Reset history** (or double tap the toolhead)
+when you switch belts. Turn the tensioner a little between plucks until the belt is on
 target (within 0.25 Hz; the last pluck decides, the average under it shows whether that holds), then do the
 other belt. A listen ends 60 s after the last pluck, or after 30 minutes at most; start it again to go on.
 
@@ -74,6 +78,8 @@ The **[user guide](docs/USER_GUIDE.md)** walks through setup and a full measurem
   3B and 4B in tests on emulated Pis; the original Pi Zero is not supported)
 - Kalico or mainline Klipper, Moonraker, and Mainsail or Fluidd
 - An accelerometer on the toolhead (ADXL345, LIS2DW, a probe with one built in) and `[resonance_tester]`
+  (an LIS3DH hears up to about 150 Hz and an MPU-6050 up to about 185 Hz, less than twice a 110 Hz belt,
+  so many plucks may be refused; Chordata warns when a sensor can't hear twice the target)
 - `[respond]` in printer.cfg, and numpy in the Klipper Python environment (input shaper needs it too)
 - A CoreXY printer (two belts that must match)
 
@@ -91,7 +97,8 @@ an update entry for Mainsail's update manager. It also adds the **Chordata page*
 component, `[chordata_web]`), with a link in Mainsail's sidebar. Open it on a phone at
 `http://<printer>/server/chordata` and lay the phone near the printer: it shows big signal-colour cards for what
 your hands do, each pluck live in big numbers against the target, and a pad to move the toolhead to
-your belt tensioning position. The screen stays on while the page is open. On a PC the page looks like Mainsail's
+your belt tensioning position. The screen stays on while the page is open, once you have
+pressed anything on it. On a PC the page looks like Mainsail's
 own pop-ups. The same steps also run as prompts from the **CHORDATA** macro in Mainsail or Fluidd.
 
 Settings (`chordata_settings.cfg`): `belt_target` (Hz, default 110; you can also change it on the first prompt)
