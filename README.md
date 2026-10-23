@@ -143,7 +143,7 @@ Interesting detail: the accelerometer mostly hears the belt at twice its frequen
 ## Help wanted: recordings from other printers
 
 Almost everything above was measured on one printer, and the first recording from a second printer
-arrived on 23 October 2026 (see Thanks). To make Chordata read right on any CoreXY, we are
+arrived on 23 October 2026 (see Special Thank You To). To make Chordata read right on any CoreXY, we are
 looking for **accelerometer recordings with a matching high-quality audio reference**: a Tuner Mode
 session's raw CSV from `chordata/recordings/` (the taps, the background and the free listen) together
 with an audio recording of the same plucks, made with a good recorder or microphone close to the
@@ -171,11 +171,11 @@ safety interlocks, the installer hardening, the guides and the test suite were c
 [alextverdyy](https://github.com/alextverdyy). An optional AI measurement review lives on the
 [`ai-review`](https://github.com/HydrateFrequently/Chordata/tree/ai-review) branch; `main` makes no AI decisions.
 
-## Thanks
+## Special Thank You To:
 
-A big thank you to **Battlefield_Ace**, who sent the first recordings from another printer: an accelerometer
-recording of a full session (taps and plucks on both belts) with audio of the same plucks. It is the first
-test of Chordata away from the printer it was developed on.
+- **Battlefield_Ace**, a big thank you for the first recordings from another printer: an accelerometer
+  recording of taps and plucks on both belts, with audio of the same plucks. They were the first test of
+  Chordata away from the printer it was developed on, and they found a bug that is now fixed.
 
 ## Disclaimer
 
