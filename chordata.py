@@ -40,6 +40,7 @@ class Chordata:
             config.get("path", os.path.join(self.cfg_dir, "chordata")))
         self.belt_tol = config.getfloat("belt_tolerance", 0.25, above=0.)   # Hz: a pluck this close to the target is on target
         self.belt_target = config.getfloat("belt_target", 110., minval=40., maxval=300.)  # as the setup prompt allows
+        self.REC_KEEP = config.getint("recordings_keep", self.REC_KEEP, minval=1)   # raw recordings kept (newest)
         self.state, self.message = "idle", ""
         self.belts = {}           # the belt tension session, for the prompts
         self._quiet = None        # the background (fans, motors), recorded at the tap step
@@ -834,7 +835,15 @@ class Chordata:
         """Every 2 s while fans are off: they come back on when a print starts (a print never
         runs with a fan Chordata turned off: the card closed with its X, a step that failed)
         or FANS_IDLE s after Chordata was last used. Not while a command runs (the G-code lock:
-        it would land inside the user's macro)."""
+        it would land inside the user's macro). (An error here is logged and tried again: an
+        exception out of a reactor timer would stop Klipper.)"""
+        try:
+            return self._fans_check_now(eventtime)
+        except Exception:
+            logging.exception("chordata: bringing the fans back")
+            return eventtime + 2.0
+
+    def _fans_check_now(self, eventtime):
         if not self._fans_off:
             self._fans_timer = None
             return self.reactor.NEVER
@@ -1109,7 +1118,7 @@ class Chordata:
         web_request.send({"accepted": self._accept})
 
     # ---------------- raw recordings, readable from Mainsail (Kalico's own go to /tmp) ----------------
-    REC_KEEP = 40
+    REC_KEEP = 5                # raw recordings kept (chordata: recordings_keep): a 30-minute listen is ~300 MB of CSV
     LIVE_WAIT = 60.     # s at most for a live analysis still running when a listen ends
     LIVE_MIN = 0.2      # s: live analyses come at most this often (5 a second)
     LISTEN_STEP = 0.25  # s: a listen checks this often whether it should stop
@@ -1295,12 +1304,17 @@ class Chordata:
 
     def _rec_idle(self, eventtime):
         """Every 30 s while recordings wait: written once none came for REC_IDLE s (and Chordata
-        is not listening)."""
-        if time.monotonic() - getattr(self, "_rec_used", 0.0) >= self.REC_IDLE and self.state != "listening":
-            self._flush_recordings()
+        is not listening). (An error is logged, never let out of the timer: that would stop Klipper.)"""
+        try:
+            if time.monotonic() - getattr(self, "_rec_used", 0.0) >= self.REC_IDLE and self.state != "listening":
+                self._flush_recordings()
+                self._rec_timer = None
+                return self.reactor.NEVER
+            return eventtime + 30.0
+        except Exception:
+            logging.exception("chordata: writing the recordings")
             self._rec_timer = None
             return self.reactor.NEVER
-        return eventtime + 30.0
 
     REC_CHUNK = 20000           # rows written as CSV between looks at whether Chordata listens again
 
@@ -1322,20 +1336,31 @@ class Chordata:
                     path = os.path.join(d, name + ".csv")
                     try:
                         os.makedirs(d, exist_ok=True)
-                        parts = []
-                        if e["spilled"]:
-                            parts.append(np.fromfile(e["spilled"], dtype=np.float64).reshape(-1, 4))
-                        parts += e["chunks"]
-                        rows = np.concatenate(parts) if parts else np.zeros((0, 4))
                         new = not (e["append"] and os.path.exists(path))
                         target = path + ".part" if new else path
+
+                        def put(f, rows):
+                            while self.state == "listening":
+                                time.sleep(0.2)          # (never while Chordata listens)
+                            np.savetxt(f, rows, fmt="%.6f", delimiter=",")
+                        # piece by piece, REC_CHUNK rows at a time, never the whole recording in
+                        # memory at once (a 30-minute listen is 180 MB of numbers; a Pi Zero 2 W
+                        # has 512 MB): what was set aside on disk is read back in pieces, and
+                        # what waited in RAM is let go of as it is written
                         with open(target, "w" if new else "a") as f:
                             if new:
                                 f.write("#time,accel_x,accel_y,accel_z\n")
-                            for i in range(0, len(rows), self.REC_CHUNK):
-                                while self.state == "listening":
-                                    time.sleep(0.2)          # (never while Chordata listens)
-                                np.savetxt(f, rows[i:i + self.REC_CHUNK], fmt="%.6f", delimiter=",")
+                            if e["spilled"]:
+                                with open(e["spilled"], "rb") as sp:
+                                    while True:
+                                        a = np.fromfile(sp, dtype=np.float64, count=4 * self.REC_CHUNK)
+                                        if not len(a):
+                                            break
+                                        put(f, a[:len(a) - len(a) % 4].reshape(-1, 4))
+                            while e["chunks"]:
+                                c = e["chunks"].pop(0)
+                                for i in range(0, len(c), self.REC_CHUNK):
+                                    put(f, c[i:i + self.REC_CHUNK])
                         if new:
                             os.replace(target, path)
                         if e["spilled"]:

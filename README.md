@@ -140,6 +140,16 @@ Interesting detail: the accelerometer mostly hears the belt at twice its frequen
   on emulated Raspberry Pis from the Zero to the Pi 5 (CPU-quota containers), where the number shows about
   0.7 s after the pluck on every model.
 
+## Help wanted: recordings from other printers
+
+Everything above was measured on one printer. To make Chordata read right on any CoreXY, we are
+looking for **accelerometer recordings with a matching high-quality audio reference**: a Tuner Mode
+session's raw CSV from `chordata/recordings/` (the taps, the background and the free listen) together
+with an audio recording of the same plucks, made with a good recorder or microphone close to the
+belt (not a phone with noise suppression), ideally narrated ("belt A", "belt B", "tapping the
+toolhead"). Say which printer, belt width, toolhead and accelerometer. Please open an issue on GitHub
+with a link to the files; 9 mm belts, other toolheads and other sensors are the most useful.
+
 ## Branches
 
 - `main` is what you install, and what Mainsail's update manager updates from. It only changes through

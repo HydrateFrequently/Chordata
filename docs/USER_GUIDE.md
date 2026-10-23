@@ -177,8 +177,8 @@ flowchart TD
    `[resonance_tester]` uses and the range it hears reliably (for example ADXL345, 0-1440 Hz;
    LIS2DW12, 0-400 Hz); a target outside it is shown in red and can't be started. The instructions and specs are on
    the page's **How it works**.
-2. Select **Start**. This switches off the part-cooling fan (the
-   macro's `M106 S0`) and goes straight into the taps: keep your hands off while the red card
+2. Select **Start**. No fan is turned off by Chordata on its own (a fan humming on the belt's note
+   gets an Allow button first). It goes straight into the taps: keep your hands off while the red card
    records the background noise. This is the only background recording of the session.
    When the card turns yellow, tap one solid spot on the toolhead (the extruder is a good
    one) lightly, one tap at a time. Each tap shows a check mark or an X; keep tapping until
@@ -251,8 +251,9 @@ before starting another measurement.
 
 Raw recordings appear under `chordata/recordings/` in the config file browser.
 Each Tuner Mode run is one file (`free-*.csv`); the taps and the session's background
-capture (saved with the taps) have their own names. Chordata retains the
-latest 40 CSV files; save important captures elsewhere before continuing.
+capture (saved with the taps) have their own names. Chordata keeps the latest 5 files
+(`recordings_keep` in `[chordata]` sets how many; a 30-minute Tuner Mode listen is about 300 MB of
+CSV); save important captures elsewhere before continuing.
 
 For a standalone capture:
 

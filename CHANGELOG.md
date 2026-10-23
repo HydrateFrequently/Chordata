@@ -5,6 +5,16 @@ Update from Mainsail's Update Manager, then restart Klipper.
 
 ## Unreleased (dev)
 
+- **Recordings fit the host.** A session's recording is written to CSV piece by piece, never the
+  whole listen in memory at once (a 30-minute listen is 180 MB of numbers; a Pi Zero 2 W has
+  512 MB). Chordata now keeps the latest 5 recordings instead of 40 (a 30-minute listen is about
+  300 MB of CSV); `recordings_keep` in `[chordata]` sets how many.
+- **Fixed:** an error while the fans are brought back or while recordings are written is logged
+  instead of stopping Klipper; the page's PC layout is chosen by the screen and pointer alone (no
+  more switch to flip at a merge); the user guide no longer says Start turns the part fan off.
+- **The demo shows Tuner Mode:** `?demo` (and the browser test) show the page after a Tuner Mode
+  session; the old belt-results table, graph and CSV export, which no step used any more, are gone.
+
 - **Minimum host: Raspberry Pi Zero 2 W.** The original Pi Zero is not supported.
 - **Tuner Mode reads the stream as it comes.** The samples are filtered and analysed once, as
   they arrive, instead of a stretch of several seconds being analysed again and again. Each pluck
