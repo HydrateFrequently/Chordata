@@ -70,8 +70,8 @@ The **[user guide](docs/USER_GUIDE.md)** walks through setup and a full measurem
 
 ## Requirements
 
-- A Raspberry Pi Zero 2 W or faster host (the Zero 2 W, 3B, 4B and 5 keep up with Tuner Mode; the
-  original Pi Zero is not supported)
+- A Raspberry Pi Zero 2 W or faster host (a real Pi 5 keeps up with Tuner Mode, and so did the Zero 2 W,
+  3B and 4B in tests on emulated Pis; the original Pi Zero is not supported)
 - Kalico or mainline Klipper, Moonraker, and Mainsail or Fluidd
 - An accelerometer on the toolhead (ADXL345, LIS2DW, a probe with one built in) and `[resonance_tester]`
 - `[respond]` in printer.cfg, and numpy in the Klipper Python environment (input shaper needs it too)
@@ -201,8 +201,8 @@ replaced by Tuner Mode), the safety interlocks, the installer hardening, the gui
 ## Special Thank You To:
 
 - **Battlefield_Ace**, a big thank you for the first recordings from another printer: an accelerometer
-  recording of taps and plucks on both belts, with audio of the same plucks. They were the first test of
-  Chordata away from the printer it was developed on, and they found a bug that is now fixed.
+  recording of taps and plucks on both belts, with audio of the same plucks. These recordings were the first
+  test of Chordata away from the printer it was developed on, and they showed a bug that is now fixed.
 
 ## Disclaimer
 
