@@ -13,9 +13,13 @@ next to the belt: the sensor is already on the printer, and you keep both hands 
    how long and how broad each line is. Toolheads differ a lot (a plastic one rings briefly in broad lines,
    a stiff all-metal one rings long in sharp lines), so each line is guarded as wide as it is, and plucks
    that come while a long-ringing toolhead still rings from a knock are still found. A knock is never taken
-   for a belt. The taps can't be skipped: the belts are only measured once 3 good taps were heard.
-2. **Tune (Tuner Mode).** Pluck either belt. Each clear pluck shows its frequency, how far it is from your
-   target and which way to turn; a weak pluck or a knock is left out (greyed in the history, with why).
+   for a belt. A line the tap set ringing on a belt is never learned as the toolhead's, nor is a knock's
+   impulse. The taps can't be skipped: the belts are only measured once 3 good taps were heard.
+2. **Tune (Tuner Mode).** Pluck either belt. The stream is analysed as it comes, so each clear pluck shows
+   its frequency within about a second, how far it is from your target and which way to turn; a weak pluck
+   or a knock is left out (greyed in the history, with why). A knock is told from a pluck by physics: a
+   plucked belt pulls on the toolhead twice per swing, a knock doesn't. A listen stops by itself after 30
+   minutes; start it again to go on.
    Under the number, the average of the last plucks that agree (up to 5, within 1 Hz of each other), and
    from 4 such plucks a **± Hz per pluck** from their scatter. Turn the tensioner a little between plucks
    until the belt is on target (within 0.25 Hz), then do the other belt.
@@ -95,6 +99,13 @@ in moonraker.conf, and the sidebar link, backing up each file it changes (`*.bef
 
 Interesting detail: the accelerometer mostly hears the belt at twice its frequency, so Chordata looks for
   the tone and twice the tone together.
+- The real-time engine (Tuner Mode reads the stream as it comes) was checked on five Tuner Mode sessions
+  recorded on that printer, each against the microphone: about two thirds of the counted plucks read within
+  0.5 Hz of the microphone and over half within 0.25 Hz, with no toolhead tap counted as a pluck. The same
+  recordings replayed through the whole plugin on a virtual printer gave the same counts, and readings within
+  0.02 Hz, as the engine run on them directly. Every engine change is judged on these real recordings; synthetic benches
+  (a belt with a second line beside it, a sensor where the tone dominates, knocks, clipped knocks, a stiff
+  toolhead) may only veto a change, never set a threshold.
 - The same module ran on that real printer as part of Printune (Kalico), measuring both belts.
 - As a standalone plugin forked from Printunes belt tension module, Chordata was installed with install.sh on virtual printers (real Kalico and real
   mainline Klipper with a simulated MCU and a simulated accelerometer) and run end to end, with bad plucks
@@ -105,6 +116,9 @@ Interesting detail: the accelerometer mostly hears the belt at twice its frequen
   another measurement runs), input checks, cleanup after errors, the pluck history and double tap, that no
   fan is turned off without your OK, installer reruns and the uninstaller. `npm test` checks the page
   in a browser (demo, live updates, CSV export, phone and PC layouts). GitHub Actions runs both.
+- Speed and stability were checked on a Pi 5 (a 4-minute Tuner Mode session costs about 11 s of CPU) and
+  on emulated Raspberry Pis from the Zero to the Pi 5 (CPU-quota containers), where the number shows about
+  0.7 s after the pluck on every model.
 
 ## Branches
 
