@@ -1152,7 +1152,8 @@ def pluck_freq(f, p, noise, df, lo, hi, avoid=(), target=None, prev=None, halves
     # or at half it (a frame mode near F/2)
     alt = None
     lh = fk / 2.0
-    if (lh >= lo + 2 * df and line(fk) >= strong and line(lh) >= weak and not guarded(lh)
+    # (only within the target's band: a faint low line below it once halved an 83 Hz pluck to 41 Hz)
+    if (lh >= max(lo, flo) + 2 * df and line(fk) >= strong and line(lh) >= weak and not guarded(lh)
             and own(_near(f, p, lh, df))):     # a line of its own, not a frame mode's skirt
         h = harmonic(lh)
         if h or (halves is None and target and lh >= flo):     # no timing: the target decides

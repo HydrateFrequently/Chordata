@@ -5,6 +5,11 @@ Update from Mainsail's Update Manager, then restart Klipper.
 
 ## Unreleased (dev)
 
+- **Fixed: a pluck read at half its frequency.** When a line could be twice a belt's tone, the
+  engine checked down to the bottom of its whole search range for that tone; a faint line there
+  could turn an 83 Hz pluck into a 41 Hz one. It now only looks within the band around the target.
+  Found on the first recording from a second printer (thanks, Battlefield_Ace); every reading on
+  the original printer's recordings is unchanged.
 - **Recordings fit the host.** A session's recording is written to CSV piece by piece, never the
   whole listen in memory at once (a 30-minute listen is 180 MB of numbers; a Pi Zero 2 W has
   512 MB). Chordata now keeps the latest 5 recordings instead of 40 (a 30-minute listen is about
