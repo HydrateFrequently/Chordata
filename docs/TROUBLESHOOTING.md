@@ -92,8 +92,9 @@ rather than editing saved JSON to bypass an invalid movement.
 ## Recordings are missing
 
 Raw samples are saved as files under `chordata/recordings/` in the config directory. Writes occur
-in a background thread, so allow time for large files to finish. Chordata retains
-40 raw CSV files; a background capture counts as a file too. Check `klippy.log` and
+in a background thread, so allow time for large files to finish (a 30-minute listen is about
+300 MB). Chordata keeps 5 raw CSV files (`recordings_keep` in `[chordata]`); a background capture
+counts as a file too. Check `klippy.log` and
 directory permissions if a completed recording is not saved.
 
 ## Updates use an unexpected repository

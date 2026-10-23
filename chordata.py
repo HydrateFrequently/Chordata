@@ -22,6 +22,8 @@ import sys
 import threading
 import time
 
+import numpy as np
+
 HERE = os.path.dirname(os.path.realpath(__file__))
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
@@ -38,6 +40,7 @@ class Chordata:
             config.get("path", os.path.join(self.cfg_dir, "chordata")))
         self.belt_tol = config.getfloat("belt_tolerance", 0.25, above=0.)   # Hz: a pluck this close to the target is on target
         self.belt_target = config.getfloat("belt_target", 110., minval=40., maxval=300.)  # as the setup prompt allows
+        self.REC_KEEP = config.getint("recordings_keep", self.REC_KEEP, minval=1)   # raw recordings kept (newest)
         self.state, self.message = "idle", ""
         self.belts = {}           # the belt tension session, for the prompts
         self._quiet = None        # the background (fans, motors), recorded at the tap step
@@ -47,6 +50,8 @@ class Chordata:
         self.tap_live = []        # the setup taps so far, each good or not
         self.measurement = {"phase": "idle", "belt": None}
         self._fans_off = {}       # fans Chordata turned off this session: section -> speed before
+        self.printer.register_event_handler("klippy:disconnect", lambda: self._flush_recordings(wait=True))
+        self.printer.register_event_handler("klippy:shutdown", self._flush_recordings)
         self._fans_timer = None   # brings them back FANS_IDLE s after Chordata was last used
         self._fans_until = 0.
         self._tool_info = None
@@ -122,6 +127,10 @@ class Chordata:
                                 error=str(error) if error else None)
         self.belt_now = None
         self.state, self.message = "idle", ""
+        # back in the menus: the listen's recordings become CSV now, in the background (paused
+        # if a new listen starts; Close Chordata waits for them)
+        if getattr(self, "_rec_buf", None):
+            self._flush_recordings()
 
     def _tools(self):
         # what the printer has: fixed once klippy is ready
@@ -191,6 +200,13 @@ class Chordata:
         acc = self._accel()
         return self._off_reactor(belts.analyse, *cols, hears=acc["hi"] if acc else None, **kw)
 
+    @staticmethod
+    def _warm_stream(stream):
+        try:
+            stream.warm()
+        except Exception:
+            logging.exception("chordata: warming the noise spectra")
+
     def _off_reactor(self, fn, *args, **kw):
         """fn(*args, **kw), in a thread when called on Kalico's own (reactor) thread, which
         keeps running meanwhile: an analysis can take seconds on a small Pi, and a reactor
@@ -256,10 +272,24 @@ class Chordata:
         return ([s[0] for s in samples], [s[1] for s in samples], [s[2] for s in samples],
                 [s[3] for s in samples])
 
+    @staticmethod
+    def _since(rows, t, after=False):
+        """The samples from time t on (after: from past it), by a binary search: the samples come
+        in time order, so they are the rows' tail (the same rows a scan for x[0] >= t would give)."""
+        lo, hi = 0, len(rows)
+        while lo < hi:
+            mid = (lo + hi) // 2
+            if rows[mid][0] < t or (after and rows[mid][0] == t):
+                lo = mid + 1
+            else:
+                hi = mid
+        return rows[lo:]
+
     cmd_CHORDATA_FREE_help = ("Chordata: Tuner Mode: show every pluck's frequency until a minute after the "
                               "last pluck, Done on the page, or SECONDS")
-    FREE_MAX = 600.     # s: a free tune nobody ends from the page stops by itself after this
-    FREE_PIECE = 8.     # s: recorded and analysed in pieces this long
+    FREE_MAX = 1800.    # s: a free tune nobody ends from the page stops by itself after this (the page says so)
+    STREAM_KEEP = 6.0   # s of full-rate samples kept while Tuner Mode listens (the history's double-tap
+                        # check reads them beside the stream's analysed stretch, Stream.KEEP s)
     FREE_IDLE = 60.     # s: with no pluck heard for this long, a free tune ends by itself
 
     def cmd_CHORDATA_FREE(self, gcmd):
@@ -305,51 +335,87 @@ class Chordata:
                                                    % round(self.FREE_IDLE))
             q = [[s[i] for s in quiet] for i in (1, 2, 3)]
             avoid = self.belts.get("tap_ring") or self.belts.get("tap", [])
-            kw = dict(quiet=q, avoid=avoid, target=self.belts["target"], free=True)
-            # in short pieces: an open-ended listen would pile up samples (memory on a small Pi)
-            # and the live analysis would slow down as the recording grows
-            plucks, t_off, samples, hum = [], 0.0, None, []
+            fs_q = getattr(self, "_accel_fs", None)
+            if not fs_q:
+                if not quiet or len(quiet) < 2 or quiet[-1][0] <= quiet[0][0]:
+                    raise gcmd.error("Chordata: the background recording is empty")
+                fs_q = (len(quiet) - 1) / (quiet[-1][0] - quiet[0][0])
+            acc = self._accel()
+            try:
+                # the live stream's analysis: each sample taken once, each pluck found once and
+                # read twice (live, then final), see chordata_belts.Stream
+                stream = belts.Stream(fs_q, q, self.belts["target"], avoid, hears=acc["hi"] if acc else None)
+            except ValueError as error:
+                raise gcmd.error("Chordata: invalid background recording: %s" % error)
+            # the noise spectra the first plucks need, made while the user gets ready to pluck
+            threading.Thread(target=self._warm_stream, args=(stream,), daemon=True).start()
             rec_name = "free-%s" % time.strftime("%Y%m%d-%H%M%S")
             self._listen_id = getattr(self, "_listen_id", 0) + 1     # the history tells this listen's plucks apart
             listen = self._listen_id
-            t_end = self.reactor.monotonic() + limit
-            # it ends by itself a while after the last pluck (Done on the page ends it at once)
-            heard = 0                            # onsets heard in the finished pieces
-            while (t_off < limit - 0.5 and self.reactor.monotonic() < t_end and not self._accept
-                   and t_off - (plucks[-1]["t"] if plucks else 0.) < self.FREE_IDLE):
-                done = list(plucks)
+            st = {"t0": None, "fed": None, "now": 0.0, "done": {}, "hum": []}
+            look_lock = threading.Lock()    # one look at a time: the final one waits for a live one still running
 
-                def live(part, done=done, off=t_off, base=heard):
-                    cols = self._cols(part)
-                    r = self._analyse(*cols, **kw)
-                    now = self._mark_final(r["plucks"], part[-1][0] - part[0][0])
-                    self.belt_live = (done + [dict(p, t=round(p["t"] + off, 2)) for p in now])[-40:]
-                    self._history_add(listen, off, now, cols, q, part[-1][0] - part[0][0])
-                    self.belt_hum = r.get("hum") or []
-                    self.belt_heard = max(self.belt_heard, base + len(r.get("onsets") or ()))
+            def look(rows, last=False):
+                with look_lock:
+                    return _look(rows, last)
 
-                # where this piece starts, in the listen's time and the reactor's (Reset's floor)
-                self._listen_t0 = (listen, t_off, self.reactor.monotonic())
-                samples = self._record(chip, toolhead, min(self.FREE_PIECE, limit - t_off), live=live,
-                                       stop=lambda: self._accept)
-                if not samples:
-                    break
-                self._save_recording(rec_name, samples, append=True)
-                try:
-                    r = self._analyse(*self._cols(samples), **kw)
-                except ValueError as error:
-                    raise gcmd.error("Chordata: invalid accelerometer recording: %s" % error)
-                plucks = (plucks + [dict(p, t=round(p["t"] + t_off, 2)) for p in r["plucks"]])[-200:]
-                # the piece is all in: its verdicts are final (the live ones it repeats are replaced)
-                self._off_reactor(self._history_add, listen, t_off, r["plucks"], self._cols(samples), q,
-                                  samples[-1][0] - samples[0][0], final=True)
-                if samples[-1][0] - samples[0][0] >= 4.0 or r.get("hum"):
-                    hum = r.get("hum") or []      # the newest full piece says whether a fan hums now
-                self.belt_live = plucks[-40:]
-                heard += len(r.get("onsets") or ())
-                self.belt_heard = max(self.belt_heard, heard)
-                t_off += samples[-1][0] - samples[0][0]
-                self._listen_t0 = (listen, t_off, None)     # between pieces: nothing recorded
+            def _look(rows, last):
+                if st["t0"] is None:
+                    st["t0"] = rows[0][0]
+                new = rows if st["fed"] is None else self._since(rows, st["fed"], after=True)
+                if new:
+                    a = np.asarray(new, float)
+                    stream.feed(a[:, 0], a[:, 1:4].T)
+                    st["fed"] = new[-1][0]
+                st["now"] = rows[-1][0] - st["t0"]
+                for w0, r, dur in stream.step(last=last):
+                    # (each pluck at its onset's time in the stream: the same in every read of it)
+                    for p in r["plucks"]:
+                        if p["final"]:
+                            ta = round(p["at"] - st["t0"], 2)
+                            st["done"][ta] = dict(p, t=ta)
+                    done = sorted(st["done"].values(), key=lambda p: p["t"])
+                    tail = [dict(p, t=round(p["at"] - st["t0"], 2)) for p in r["plucks"] if not p["final"]]
+                    self.belt_live = (done + tail)[-40:]
+                    # the session history (and a double tap on the toolhead): the stretch's events,
+                    # final ones and the live one, beside the full-rate samples of the same stretch
+                    span = self._since(rows, w0)
+                    if len(span) > 100:
+                        c0, c1 = span[0][0], span[-1][0]
+                        ev = [dict(p, t=p["t"] - (c0 - st["t0"]), final=True) for p in done
+                              if c0 - st["t0"] <= p["t"] <= c1 - st["t0"]]
+                        ev += [dict(p, t=p["t"] - (c0 - st["t0"])) for p in tail if p["t"] >= c0 - st["t0"]]
+                        ev.sort(key=lambda p: p["t"])
+                        # (the samples as columns only when a knock is judged: most looks judge none)
+                        self._history_add(listen, c0 - st["t0"], ev, lambda: self._cols(span), q, c1 - c0, final=last)
+                    if dur >= 4.0 or r.get("hum"):
+                        st["hum"] = r.get("hum") or []
+                self.belt_hum = st["hum"]
+                self.belt_heard = max(self.belt_heard, stream.heard)
+
+            def stop():
+                # Done on the page, or FREE_IDLE s after the last pluck heard
+                last_on = 0.0 if stream.last_on is None else stream.last_on - (st["t0"] or 0.0)
+                return self._accept or st["now"] - last_on > self.FREE_IDLE
+
+            def sink(rows):
+                self._save_recording(rec_name, rows, append=True)
+            self._listen_t0 = (listen, 0.0, self.reactor.monotonic())
+            rows = self._record(chip, toolhead, limit, live=look, stop=stop, keep=self.STREAM_KEEP, sink=sink)
+            self._listen_t0 = (listen, st["now"], None)
+            # why it ended: Done on the page, FREE_IDLE without a pluck, or the time limit
+            last_on = 0.0 if stream.last_on is None else stream.last_on - (st["t0"] or 0.0)
+            stopped = "done" if self._accept else ("idle" if st["now"] - last_on > self.FREE_IDLE
+                                                   else ("limit" if not secs else "seconds"))
+            if not rows:
+                raise gcmd.error("Chordata: the accelerometer sent no data")
+            try:
+                self._off_reactor(look, rows, True)     # the end: every pluck heard is final now
+            except ValueError as error:
+                raise gcmd.error("Chordata: invalid accelerometer recording: %s" % error)
+            plucks = sorted(st["done"].values(), key=lambda p: p["t"])[-200:]
+            hum = st["hum"]
+            samples = rows
         finally:
             self.belt_now = None
             self._measurement_phase("analysing")
@@ -357,15 +423,19 @@ class Chordata:
             raise gcmd.error("Chordata: the accelerometer sent no data")
         ok = [p["freq"] for p in plucks if p["ok"] and p.get("freq") is not None]
         res = {"freq": ok[-1] if ok else None, "plucks": plucks, "used": len(ok), "heard": len(plucks), "hum": hum,
-               "verdict": "free" if ok else "none", "note": "%d of %d plucks clear" % (len(ok), len(plucks))}
+               "verdict": "free" if ok else "none", "note": "%d of %d plucks clear" % (len(ok), len(plucks)),
+               "stopped": stopped}
         self.belt_live = plucks[-40:]
         self.belt_hum = hum
-        self.belts = dict(self.belts, free={"plucks": plucks[-40:], "last": ok[-1] if ok else None, "hum": hum})
+        self.belts = dict(self.belts, free={"plucks": plucks[-40:], "last": ok[-1] if ok else None, "hum": hum,
+                                            "stopped": stopped, "max_min": round(self.FREE_MAX / 60.0)})
         self._end_measurement(result=res)
+        why = (" Stopped after %d minutes, the longest Tuner Mode listens: start it again to go on."
+               % round(self.FREE_MAX / 60.0)) if stopped == "limit" else ""
         if ok:
-            gcmd.respond_info("Chordata: Tuner Mode: last pluck %.1f Hz (%s)" % (ok[-1], ", ".join("%.1f" % f for f in ok)))
+            gcmd.respond_info("Chordata: Tuner Mode: last pluck %.1f Hz (%s).%s" % (ok[-1], ", ".join("%.1f" % f for f in ok), why))
         else:
-            gcmd.respond_info("Chordata: Tuner Mode: no clear pluck heard")
+            gcmd.respond_info("Chordata: Tuner Mode: no clear pluck heard.%s" % why)
 
     # ---------------- belt tensioning position (the user's own, saved from the jog pad) ----------------
     def _belt_pos_file(self):
@@ -488,7 +558,7 @@ class Chordata:
 
             def live(part):
                 # as often as the live pacing allows: each tap so far, good or not; it stops at 3 good ones
-                r = belts.analyse_taps(*self._cols(part), quiet=q, target=self.belts.get("target"))
+                r = belts.analyse_taps(*self._cols(part), quiet=q, target=self.belts.get("target"), belts=self._belt_notes())
                 if st.get("final"):             # a late live result can't overwrite the final marks
                     return
                 self.tap_live = r["taps"]
@@ -496,18 +566,22 @@ class Chordata:
                 if self._taps_over(r):
                     st["done"] = True
 
-            samples = self._record(chip, toolhead, self.TAP_MAX, live=live, stop=lambda: st["done"])
+            stamp = time.strftime("%Y%m%d-%H%M%S")
+            # the taps are judged on the last TAP_KEEP s only (the 3 good ones come close together):
+            # however long the user takes, each look and the final analysis stay small; the whole
+            # listen still goes into the recording file
+            samples = self._record(chip, toolhead, self.TAP_MAX, live=live, stop=lambda: st["done"],
+                                   keep=self.TAP_KEEP, sink=lambda rows: self._save_recording("tap-%s" % stamp, rows, append=True))
             st["final"] = True
         finally:
             self.belt_now = None
             self._measurement_phase("analysing")
         if not samples:
             raise gcmd.error("Chordata: the accelerometer sent no data")
-        stamp = time.strftime("%Y%m%d-%H%M%S")
         self._save_recording("tap-%s-quiet" % stamp, quiet)
-        self._save_recording("tap-%s" % stamp, samples)
         try:
-            res = self._off_reactor(belts.analyse_taps, *self._cols(samples), quiet=q, target=self.belts.get("target"))
+            res = self._off_reactor(belts.analyse_taps, *self._cols(samples), quiet=q, target=self.belts.get("target"),
+                                    belts=self._belt_notes())
         except ValueError as error:
             raise gcmd.error("Chordata: invalid accelerometer recording: %s" % error)
         self.tap_live = res["taps"]
@@ -538,6 +612,7 @@ class Chordata:
             gcmd.respond_info("Chordata: taps: %d good of %d (%s)" % (res["good"], len(res["taps"]), b["tap_note"]))
 
     TAP_MAX = 120.      # s: the setup tap listen stops by itself after this
+    TAP_KEEP = 15.      # s: the taps are judged on this much of the listen, the newest
     def _taps_stiff(self, r):
         """As many heard taps as needed, all ringing nothing clearly: a stiff toolhead, nothing to learn."""
         import chordata_belts as belts
@@ -729,6 +804,9 @@ class Chordata:
 
     def cmd_CHORDATA_FANS(self, gcmd):
         import chordata_belts as belts
+        if getattr(self, "_rec_buf", None) or (self._rec_prev is not None and self._rec_prev.is_alive()):
+            gcmd.respond_info("Chordata: saving the recordings...")
+        self._flush_recordings(wait=True)    # (Close Chordata: the session's recordings, all written)
         self._restore_fans()
         self._history_clear()
         belts.clear_cache()                  # (Close Chordata: the session's cached fits go)
@@ -757,7 +835,15 @@ class Chordata:
         """Every 2 s while fans are off: they come back on when a print starts (a print never
         runs with a fan Chordata turned off: the card closed with its X, a step that failed)
         or FANS_IDLE s after Chordata was last used. Not while a command runs (the G-code lock:
-        it would land inside the user's macro)."""
+        it would land inside the user's macro). (An error here is logged and tried again: an
+        exception out of a reactor timer would stop Klipper.)"""
+        try:
+            return self._fans_check_now(eventtime)
+        except Exception:
+            logging.exception("chordata: bringing the fans back")
+            return eventtime + 2.0
+
+    def _fans_check_now(self, eventtime):
         if not self._fans_off:
             self._fans_timer = None
             return self.reactor.NEVER
@@ -804,6 +890,25 @@ class Chordata:
                     logging.exception("chordata: restoring %s", section)
 
     # ---------------- the background (fans, motors): recorded once per session, at the tap step ----------------
+    def _belt_notes(self):
+        """Both belts' last readings, for the tap step (a line on one is a belt the tap set ringing):
+        Tuner Mode doesn't know which belt was plucked, so the last reading and the latest one more
+        than 1.5 Hz from it."""
+        out = []
+        try:
+            for e in reversed(list(getattr(self, "history", None) or [])):
+                fr = e.get("freq") if e.get("ok") else None
+                if fr is not None and all(abs(float(fr) - x) > 1.5 for x in out):
+                    out.append(float(fr))
+                if len(out) == 2:
+                    break
+            if not out:
+                last = (self.belts.get("free") or {}).get("last")
+                out = [float(last)] if last is not None else []
+        except (TypeError, ValueError, AttributeError):
+            return ()
+        return tuple(out)
+
     def _record_quiet(self, chip, toolhead, fresh=False):
         """The background is recorded once, when the toolhead is tapped, and used for every
         measure after it: a fan that comes on later is told from the belt by the plucks
@@ -817,14 +922,6 @@ class Chordata:
         if quiet and len(quiet) > 100 and quiet[-1][0] > quiet[0][0]:
             self._accel_fs = (len(quiet) - 1) / (quiet[-1][0] - quiet[0][0])
         return quiet
-
-    @staticmethod
-    def _mark_final(plucks, dur):
-        """Each live pluck marked final once its whole window is in (until then its reading may
-        still move a little: the page shows it greyed)."""
-        import chordata_belts as belts
-        full = dur - (belts.SKIP + belts.WINDOW + 0.05)
-        return [dict(p, final=p["t"] <= full) for p in plucks]
 
     # ---------------- the session's pluck history (Tuner Mode) ----------------
     HISTORY_KEEP = 100  # entries kept
@@ -902,6 +999,13 @@ class Chordata:
         if not main:
             return False
 
+        cols_v = []
+
+        def columns():
+            if not cols_v:
+                cols_v.append(cols() if callable(cols) else cols)
+            return cols_v[0]
+
         def knock(key, at, until, attack=True):
             # toolhead_knock at most once per event (live and final share the answer). Not kept
             # while a live look may not hold the next event yet (until unknown): its window could
@@ -913,7 +1017,7 @@ class Chordata:
             if not attack and self._knocks.get(k):
                 return True                   # (a knock with its attack is one without it too)
             try:
-                v = bool(belts.toolhead_knock(*cols, at, main, None, quiet=quiet, until=until, attack=attack)[0])
+                v = bool(belts.toolhead_knock(*columns(), at, main, None, quiet=quiet, until=until, attack=attack)[0])
             except Exception:
                 logging.exception("chordata: double tap check")
                 v = False
@@ -929,7 +1033,7 @@ class Chordata:
             if k in self._knocks:
                 return self._knocks[k]
             try:
-                v = belts.second_knock(*cols, at, main, quiet=quiet)
+                v = belts.second_knock(*columns(), at, main, quiet=quiet)
             except Exception:
                 logging.exception("chordata: quick double tap check")
                 v = None
@@ -1014,23 +1118,25 @@ class Chordata:
         web_request.send({"accepted": self._accept})
 
     # ---------------- raw recordings, readable from Mainsail (Kalico's own go to /tmp) ----------------
-    REC_KEEP = 40
+    REC_KEEP = 5                # raw recordings kept (chordata: recordings_keep): a 30-minute listen is ~300 MB of CSV
     LIVE_WAIT = 60.     # s at most for a live analysis still running when a listen ends
     LIVE_MIN = 0.2      # s: live analyses come at most this often (5 a second)
     LISTEN_STEP = 0.25  # s: a listen checks this often whether it should stop
 
-    def _record(self, chip, toolhead, secs, live=None, stop=None):
+    def _record(self, chip, toolhead, secs, live=None, stop=None, keep=None, sink=None):
         """Record for secs. live: a function of the samples so far that does the listen's live
         work (Tuner Mode, the taps), called as often as LIVE_MIN allows while recording, in a
         thread, so a slow host doesn't hold up Kalico. stop: checked every LISTEN_STEP s, True
-        ends the recording."""
+        ends the recording. keep: live gets only the last keep s, and the samples before them
+        are let go (a listen of any length then holds only those in memory; sink gets every
+        sample once, as it comes, to keep for the recording file); returns the kept ones."""
         import chordata_belts as belts
         belts.clear_cache(windows_only=True)     # the last recording's window spectra: not needed again
         client = chip.start_internal_client()
         timer = None
         if live is not None:
             busy = []
-            pace = {"dt": self.LIVE_MIN}       # how long the last live analysis took
+            pace = {"dt": self.LIVE_MIN, "next": 0.}    # how long the last live analysis took; the next may start then
             got = {"msgs": 0, "rows": []}       # the samples gathered so far (only new messages are read)
             self._live_gen = gen_now = getattr(self, "_live_gen", 0) + 1
 
@@ -1043,27 +1149,39 @@ class Chordata:
                     logging.exception("chordata: live belt analysis")
                 finally:
                     pace["dt"] = time.monotonic() - t0
+                    # never more than a third of the time analysing: the analysis thread holds
+                    # Python's GIL while it runs, and Kalico's own work shares the process with it
+                    pace["next"] = time.monotonic() + 2.0 * pace["dt"]
                     busy.clear()
 
             def tick(eventtime):
                 try:
-                    if not busy:
-                        msgs = list(client.msgs)
-                        if len(msgs) < got["msgs"]:          # (the helper started its list over)
-                            got["msgs"], got["rows"] = 0, []
-                        for m in msgs[got["msgs"]:]:
-                            got["rows"].extend(x for x in m["data"] if x[0] >= client.request_start_time)
-                        got["msgs"] = len(msgs)
-                        if len(got["rows"]) > 200:
-                            busy.append(1)
-                            threading.Thread(target=work, args=(list(got["rows"]),), daemon=True).start()
+                    # the samples are taken in (and let go of: keep) every tick, also while the
+                    # last live analysis still runs: on a slow host it may take longer than keep s,
+                    # and a listen would otherwise pile up all its samples for the final analysis
+                    msgs = list(client.msgs)
+                    if len(msgs) < got["msgs"]:          # (the helper started its list over)
+                        got["msgs"], got["rows"] = 0, []
+                    new = [x for m in msgs[got["msgs"]:] for x in m["data"] if x[0] >= client.request_start_time]
+                    got["rows"].extend(new)
+                    got["msgs"] = len(msgs)
+                    if sink is not None and new:
+                        sink(new)
+                    if keep is not None and got["rows"]:
+                        # the stream: only the last keep s stay (the helper's own list too)
+                        cut = got["rows"][-1][0] - keep
+                        i = next((k for k, x in enumerate(got["rows"]) if x[0] >= cut), len(got["rows"]))
+                        if i:
+                            del got["rows"][:i]
+                        del client.msgs[:got["msgs"]]
+                        got["msgs"] = 0
+                    if not busy and len(got["rows"]) > 200 and time.monotonic() >= pace["next"]:
+                        busy.append(1)
+                        threading.Thread(target=work, args=(list(got["rows"]),), daemon=True).start()
                 except Exception:
                     logging.exception("chordata: live belt samples")
                     return self.reactor.NEVER
-                # as often as LIVE_MIN, but never more than a third of the time analysing: the
-                # analysis thread holds Python's GIL while it runs, and Kalico's own work shares
-                # the process with it
-                return eventtime + max(self.LIVE_MIN, 3.0 * pace["dt"])
+                return eventtime + self.LIVE_MIN
         try:
             if live is not None:
                 timer = self.reactor.register_timer(tick, self.reactor.monotonic() + 0.5)
@@ -1091,6 +1209,16 @@ class Chordata:
                     wait = self.reactor.monotonic() + self.LIVE_WAIT
                     while busy and self.reactor.monotonic() < wait:
                         self.reactor.pause(self.reactor.monotonic() + 0.05)
+        if keep is not None and live is not None:
+            # what came after the last look, then the kept stretch
+            new = [x for m in list(client.msgs)[got["msgs"]:] for x in m["data"] if x[0] >= client.request_start_time]
+            if sink is not None and new:
+                sink(new)
+            rows = got["rows"] + new
+            if rows:
+                cut = rows[-1][0] - keep
+                rows = rows[next((k for k, x in enumerate(rows) if x[0] >= cut), 0):]
+            return rows
         return client.get_samples()
 
     def _find_chip(self, name):
@@ -1108,47 +1236,157 @@ class Chordata:
         return None
 
     _rec_prev = None    # the last writer thread: each waits for it, so pieces go in in order
+    # Recordings are kept in RAM while a session runs and written when it closes (Close Chordata),
+    # after REC_IDLE s without a new one, when Klipper shuts down, or when they would take more
+    # than REC_RAM_SHARE of the free RAM (REC_RAM_MAX at most): an SD card is written seldom, in
+    # whole files, instead of a piece every few seconds
+    REC_RAM_SHARE = 0.10
+    REC_RAM_MAX = 64 << 20      # bytes
+    REC_RAM_MIN = 8 << 20
+    REC_IDLE = 600.             # s
+    _rec_lock = threading.Lock()    # recordings waiting in RAM, _rec_buf (the live analysis thread adds too)
 
-    def _save_recording(self, name, samples, append=False):
-        """Write samples as ACCELEROMETER_MEASURE's CSV into chordata/recordings. append: add
-        to that file (a free tune is recorded in pieces, and all of it is kept)."""
-        if not samples:
+    def _rec_limit(self):
+        """Bytes of recordings that may wait in RAM: REC_RAM_SHARE of what Linux says is available."""
+        try:
+            with open("/proc/meminfo") as f:
+                avail = next(int(l.split()[1]) * 1024 for l in f if l.startswith("MemAvailable:"))
+        except (OSError, StopIteration, ValueError):
+            return self.REC_RAM_MIN
+        return int(max(self.REC_RAM_MIN, min(self.REC_RAM_MAX, self.REC_RAM_SHARE * avail)))
+
+    def _save_recording(self, name, samples, append=False, now=False):
+        """Keep samples for chordata/recordings/NAME.csv (ACCELEROMETER_MEASURE's CSV). append: add
+        to that recording (a listen is recorded as it comes, and all of it is kept). now: write at
+        once (CHORDATA_RECORD: the user asked for the file). Otherwise it waits in RAM as numbers
+        and becomes CSV only while Chordata is not listening (see REC_RAM_SHARE)."""
+        if samples is None or not len(samples):
             return None
-        d = os.path.join(self.out_dir, "recordings")
-        path = os.path.join(d, name + ".csv")
-        keep = self.REC_KEEP
-
-        def write():
-            # in a thread like Kalico's own writer: a 30 s recording takes a while on a Pi.
-            # One at a time and in order (a lock would not keep the order), so the pieces of
-            # a free tune go in in sequence.
-            if prev is not None:
-                prev.join()
-            try:
-                os.makedirs(d, exist_ok=True)
-                rows = ("%.6f,%.6f,%.6f,%.6f\n" % tuple(s[:4]) for s in samples)
-                if append:
-                    new = not os.path.exists(path)
-                    with open(path, "a") as f:
-                        if new:
-                            f.write("#time,accel_x,accel_y,accel_z\n")
-                        f.writelines(rows)
-                else:
-                    with open(path + ".part", "w") as f:
-                        f.write("#time,accel_x,accel_y,accel_z\n")
-                        f.writelines(rows)
-                    os.replace(path + ".part", path)
-                old = sorted((os.path.getmtime(os.path.join(d, n)), n)
-                             for n in os.listdir(d) if n.endswith(".csv"))
-                for _, n in old[:-keep]:
-                    os.remove(os.path.join(d, n))
-            except OSError as e:
-                logging.warning("chordata: could not save recording %s: %s", name, e)
-        prev = self._rec_prev
-        t = threading.Thread(target=write, daemon=True)
-        self._rec_prev = t
-        t.start()
+        path = os.path.join(self.out_dir, "recordings", name + ".csv")
+        rows = np.asarray(samples, dtype=float)[:, :4] if isinstance(samples, np.ndarray) else \
+            np.asarray([s[:4] for s in samples], dtype=float)
+        buf = self.__dict__.setdefault("_rec_buf", {})
+        with self._rec_lock:
+            e = buf.get(name)
+            if e is None or not append:
+                buf[name] = e = {"chunks": [], "append": append, "spilled": None}
+            e["chunks"].append(rows)
+            self._rec_used = time.monotonic()
+            size = sum(c.nbytes for v in buf.values() for c in v["chunks"])
+        if now:
+            self._flush_recordings()
+        elif size > self._rec_limit():
+            if self.state == "listening":
+                self._spill_recordings()       # (no CSV while listening: the numbers go to disk as they are)
+            else:
+                self._flush_recordings()
+        elif getattr(self, "_rec_timer", None) is None and getattr(self, "reactor", None) is not None:
+            self._rec_timer = self.reactor.register_timer(self._rec_idle, self.reactor.monotonic() + 30.0)
         return path
+
+    def _spill_recordings(self):
+        """RAM full while listening: each waiting recording's numbers are appended to a hidden binary
+        file beside it (no conversion: a plain copy), to become CSV later with the rest."""
+        d = os.path.join(self.out_dir, "recordings")
+        with self._rec_lock:
+            for name, e in getattr(self, "_rec_buf", {}).items():
+                if not e["chunks"]:
+                    continue
+                path = e["spilled"] or os.path.join(d, ".%s.bin" % name)
+                try:
+                    os.makedirs(d, exist_ok=True)
+                    with open(path, "ab") as f:
+                        for c in e["chunks"]:
+                            np.ascontiguousarray(c, dtype=np.float64).tofile(f)
+                    e["spilled"], e["chunks"] = path, []
+                except OSError as err:
+                    logging.warning("chordata: could not set aside recording %s: %s", name, err)
+
+    def _rec_idle(self, eventtime):
+        """Every 30 s while recordings wait: written once none came for REC_IDLE s (and Chordata
+        is not listening). (An error is logged, never let out of the timer: that would stop Klipper.)"""
+        try:
+            if time.monotonic() - getattr(self, "_rec_used", 0.0) >= self.REC_IDLE and self.state != "listening":
+                self._flush_recordings()
+                self._rec_timer = None
+                return self.reactor.NEVER
+            return eventtime + 30.0
+        except Exception:
+            logging.exception("chordata: writing the recordings")
+            self._rec_timer = None
+            return self.reactor.NEVER
+
+    REC_CHUNK = 20000           # rows written as CSV between looks at whether Chordata listens again
+
+    def _flush_recordings(self, wait=False):
+        """Write every recording waiting (RAM, and what was set aside on disk) as CSV, in a thread,
+        in order. The conversion pauses whenever Chordata listens (it never competes with a
+        listen). wait: return once all is written (Close Chordata, Klipper stopping)."""
+        with self._rec_lock:
+            buf, self._rec_buf = getattr(self, "_rec_buf", {}), {}
+        if buf:
+            d = os.path.join(self.out_dir, "recordings")
+            keep = self.REC_KEEP
+
+            def write():
+                # in a thread like Kalico's own writer: a long recording takes a while on a Pi
+                if prev is not None:
+                    prev.join()
+                for name, e in buf.items():
+                    path = os.path.join(d, name + ".csv")
+                    try:
+                        os.makedirs(d, exist_ok=True)
+                        new = not (e["append"] and os.path.exists(path))
+                        target = path + ".part" if new else path
+
+                        def put(f, rows):
+                            while self.state == "listening":
+                                time.sleep(0.2)          # (never while Chordata listens)
+                            np.savetxt(f, rows, fmt="%.6f", delimiter=",")
+                        # piece by piece, REC_CHUNK rows at a time, never the whole recording in
+                        # memory at once (a 30-minute listen is 180 MB of numbers; a Pi Zero 2 W
+                        # has 512 MB): what was set aside on disk is read back in pieces, and
+                        # what waited in RAM is let go of as it is written
+                        with open(target, "w" if new else "a") as f:
+                            if new:
+                                f.write("#time,accel_x,accel_y,accel_z\n")
+                            if e["spilled"]:
+                                with open(e["spilled"], "rb") as sp:
+                                    while True:
+                                        a = np.fromfile(sp, dtype=np.float64, count=4 * self.REC_CHUNK)
+                                        if not len(a):
+                                            break
+                                        put(f, a[:len(a) - len(a) % 4].reshape(-1, 4))
+                            while e["chunks"]:
+                                c = e["chunks"].pop(0)
+                                for i in range(0, len(c), self.REC_CHUNK):
+                                    put(f, c[i:i + self.REC_CHUNK])
+                        if new:
+                            os.replace(target, path)
+                        if e["spilled"]:
+                            os.remove(e["spilled"])
+                    except (OSError, ValueError) as err:
+                        logging.warning("chordata: could not save recording %s: %s", name, err)
+                try:
+                    old = sorted((os.path.getmtime(os.path.join(d, n)), n)
+                                 for n in os.listdir(d) if n.endswith(".csv"))
+                    for _, n in old[:-keep]:
+                        os.remove(os.path.join(d, n))
+                except OSError:
+                    pass
+            prev = self._rec_prev
+            t = threading.Thread(target=write, daemon=True)
+            self._rec_prev = t
+            t.start()
+        t = self._rec_prev
+        if wait and t is not None:
+            pause = getattr(getattr(self, "reactor", None), "pause", None)
+            if pause is not None and threading.current_thread() is threading.main_thread():
+                end = self.reactor.monotonic() + 120.0     # (Kalico keeps running meanwhile)
+                while t.is_alive() and self.reactor.monotonic() < end:
+                    pause(self.reactor.monotonic() + 0.1)
+            else:
+                t.join(120.0)
 
     cmd_CHORDATA_RECORD_help = ("Chordata: record an accelerometer for SECONDS and save it where "
                                 "Mainsail can download it (CHIP=, SECONDS=, NAME=)")
@@ -1177,7 +1415,7 @@ class Chordata:
             self._end_measurement(error=error)
             raise
         self._end_measurement()
-        path = self._save_recording(label, samples)
+        path = self._save_recording(label, samples, now=True)
         gcmd.respond_info("Chordata: saving %d samples to %s" % (
             len(samples), os.path.relpath(path, self.cfg_dir)))
 

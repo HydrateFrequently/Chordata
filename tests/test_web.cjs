@@ -11,29 +11,23 @@ const path = require('node:path');
     await page.addInitScript(()=>{ window.__connections=0; window.WebSocket=class { constructor(){window.__connections++;throw Error('Demo must not connect');} }; });
     await page.goto('file://'+path.resolve(__dirname,'../web/index.html')+'?demo');
     assert.equal(await page.evaluate(()=>window.__connections),0);
-    assert.equal(await page.locator('#measureRows tr').count(),7);
+    // the demo: the page after a Tuner Mode session, with its history
     assert.match(await page.locator('#connBanner').textContent(),/Demo/);
     assert.equal(await page.locator('#startBtn').isDisabled(),true);
-    assert.equal(await page.locator('#trend circle').count(),6);
-    assert.equal(await page.locator('#trend path').count(),1);
-    assert.equal(await page.evaluate(()=>csvMeasurements().split('\r\n').length),8);
-    // dev shows the phone layout on a PC too (PHONE_EVERYWHERE); main shows its PC layout on a wide screen with a mouse
+    assert.equal(await page.locator('#pTitle').textContent(),'Chordata - Tuner Mode: 110.4 Hz');
+    assert.equal(await page.locator('#beltView .hist li').count(),9);
+    assert.equal(await page.locator('#beltView .hist li.out').count(),4);
+    assert.match(await page.locator('#beltView').textContent(),/110\.4 Hz.*\+0\.4 Hz, loosen.*Average 110\.06 Hz of the last 5/s);
+    // the PC layout on a wide screen with a mouse, the phone layout otherwise
     await page.setViewportSize({width:1280,height:900});
-    assert.equal(await page.evaluate(()=>{ placeLayout(); return document.documentElement.classList.contains('pc') === (!PHONE_EVERYWHERE && pcQuery.matches); }),true);
+    assert.equal(await page.evaluate(()=>{ placeLayout(); return document.documentElement.classList.contains('pc') === pcQuery.matches; }),true);
     for (const width of [390,1280]) {
       await page.setViewportSize({width,height:900});
       assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth <= innerWidth),true);
       await page.screenshot({path:'/tmp/chordata-demo-'+width+'.png',fullPage:true});
     }
-    await page.evaluate(()=>{ S.chordata.belts.A.plucks=[{freq:111.5,ok:true},{freq:null,ok:false,why:'No signal'}]; renderMeasurements(); });
-    assert.equal(await page.locator('#measureRows tr').count(),5);
-    assert.match(await page.locator('#measureRows').textContent(),/No signal/);
     const merged=await page.evaluate(()=>{const state={chordata:{state:'idle',belts:{A:{freq:110}},measurement:{stale:true}}}; merge(state,{chordata:{belts:{},measurement:{}}}); return state;});
     assert.deepEqual(merged,{chordata:{state:'idle',belts:{},measurement:{}}});
-    // A rejected pluck with no frequency remains in data without inventing a chart point.
-    assert.equal(await page.locator('#trend path').count(),0);
-    await page.evaluate(()=>{ S.chordata.belts.A.plucks[1].why='=unsafe,"quoted"'; });
-    assert.match(await page.evaluate(()=>csvMeasurements()),/'=unsafe,""quoted""/);
     // Cue cards: none closes on a timer or on a press on the phone; green stays for the whole plucking step, with the plucks on it
     const cue=(m,extra)=>page.evaluate(([m,extra])=>{ Object.assign(S.chordata,{state:'listening',belt_live:[],measurement:m},extra||{}); cueUpdate(); },[m,extra]);
     const shown=()=>page.evaluate(()=>!$('cue').hidden && $('cueBig').textContent);
@@ -141,12 +135,6 @@ const path = require('node:path');
     const order=await live.evaluate(()=>[...document.querySelectorAll('#pBody > *')].map(e=>e.id||e.className||e.tagName));
     assert.deepEqual(order,['ptarget','pbuttons','setupJog','pbuttons','pbuttons']);   // no -5..+5 buttons: the box   // the last: How it works
     assert.equal(await live.locator('#prompt .howlink').count(),1);
-    // no graph on the setup, even with plucks from an earlier measurement, nor while Tuner Mode listens
-    await live.evaluate(()=>{ S.chordata.state='idle'; S.chordata.belts=Object.assign(S.chordata.belts||{},{A:{plucks:[{freq:110,ok:true}]}}); render(); });
-    assert.equal(await live.locator('#measurePanel').isVisible(),false);
-    await live.evaluate(()=>{ S.chordata.state='listening'; S.chordata.belt_now='free'; S.chordata.belt_live=[{freq:110,ok:true}]; render(); });
-    assert.equal(await live.locator('#measurePanel').isVisible(),false);     // Tuner Mode has its own card
-    await live.evaluate(()=>{ S.chordata.state='idle'; S.chordata.belt_now=null; render(); });
     // a target the accelerometer can't hear: red text and a notice, no full-screen card
     await live.evaluate(()=>{ for (const l of ['action:prompt_begin Set Target Frequency','action:prompt_text Target Frequency: 160 Hz',
       'action:prompt_text Accelerometer: LIS3DH, frequency range 0-149 Hz','action:prompt_text Error: frequency target out of range',
@@ -215,9 +203,8 @@ const path = require('node:path');
     await pc.goto('file://'+path.resolve(__dirname,'../web/index.html')+'?demo&layout=pc');
     assert.equal(await pc.evaluate(()=>document.documentElement.classList.contains('pc')),true);
     assert.equal(await pc.locator('#pClose').isVisible(),true);
-    assert.equal(await pc.locator('#pTitle').textContent(),'Chordata - belt results');
+    assert.equal(await pc.locator('#pTitle').textContent(),'Chordata - Tuner Mode: 110.4 Hz');
     assert.equal(await pc.locator('#pTitle').isVisible(),true);
-    assert.equal(await pc.evaluate(()=>document.getElementById('measurePanel').parentNode.id),'prompt');
     assert.equal(await pc.evaluate(()=>document.documentElement.scrollWidth <= innerWidth),true);
     await pc.screenshot({path:'/tmp/chordata-pc-1280.png',fullPage:true});
     await pc.evaluate(()=>{ S.chordata.state='listening'; S.chordata.measurement={belt:'free',phase:'listening'}; cueUpdate(); });
@@ -229,6 +216,6 @@ const path = require('node:path');
     await live.waitForTimeout(300);
     assert.equal(await live.evaluate(()=>!!document.querySelector('video[aria-hidden=true]')),true);
     assert.deepEqual(errors,[]);
-    console.log('Web checks passed: offline demo, live replacement, rejected plucks, Tuner history and stable buttons, How it works steps, CSV escaping, phone and PC layouts, keep-awake, no JS errors.');
+    console.log('Web checks passed: offline demo, live replacement, rejected plucks, Tuner history and stable buttons, How it works steps, phone and PC layouts, keep-awake, no JS errors.');
   } finally { await browser.close(); }
 })().catch(e=>{console.error(e);process.exit(1);});

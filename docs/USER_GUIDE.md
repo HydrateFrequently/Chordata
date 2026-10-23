@@ -4,9 +4,10 @@ This guide covers [Chordata](https://github.com/HydrateFrequently/Chordata).
 It works as a Klipper/Kalico measurement module, a Moonraker companion page, and a
 Mainsail sidebar link.
 
-All screenshots below come from the shipped offline demo. Their readings are
-illustrative; the toolhead position, belt span and target must come from your own
-printer's documentation. No physical-printer validation is implied by these images.
+All screenshots below come from a virtual printer (Klipper with a simulated
+accelerometer), so their readings are illustrative; the toolhead position, belt span and
+target must come from your own printer's documentation. No physical-printer validation is
+implied by these images.
 
 ## 1. Try the interface first
 
@@ -26,11 +27,11 @@ server with Ctrl+C when finished. A static preview server does not measure belts
 This is the page after a Tuner Mode session (illustrative data): the last pluck, the average of the last
 plucks that agree with its ±, and the session's history.
 
-![The Chordata page after a Tuner Mode session](images/desktop-demo.png)
+![The Chordata page after a Tuner Mode session (virtual printer)](images/done.png)
 
 On a phone, while Chordata listens, the green card shows the same: pluck, read, turn, pluck again.
 
-<img src="images/mobile-demo.png" width="390" alt="Tuner Mode on a phone while listening">
+<img src="images/tuner.png" width="390" alt="Tuner Mode on a phone while listening (virtual printer)">
 
 ## 2. Prepare the printer
 
@@ -176,8 +177,8 @@ flowchart TD
    `[resonance_tester]` uses and the range it hears reliably (for example ADXL345, 0-1440 Hz;
    LIS2DW12, 0-400 Hz); a target outside it is shown in red and can't be started. The instructions and specs are on
    the page's **How it works**.
-2. Select **Start**. This switches off the part-cooling fan (the
-   macro's `M106 S0`) and goes straight into the taps: keep your hands off while the red card
+2. Select **Start**. No fan is turned off by Chordata on its own (a fan humming on the belt's note
+   gets an Allow button first). It goes straight into the taps: keep your hands off while the red card
    records the background noise. This is the only background recording of the session.
    When the card turns yellow, tap one solid spot on the toolhead (the extruder is a good
    one) lightly, one tap at a time. Each tap shows a check mark or an X; keep tapping until
@@ -250,8 +251,9 @@ before starting another measurement.
 
 Raw recordings appear under `chordata/recordings/` in the config file browser.
 Each Tuner Mode run is one file (`free-*.csv`); the taps and the session's background
-capture (saved with the taps) have their own names. Chordata retains the
-latest 40 CSV files; save important captures elsewhere before continuing.
+capture (saved with the taps) have their own names. Chordata keeps the latest 5 files
+(`recordings_keep` in `[chordata]` sets how many; a 30-minute Tuner Mode listen is about 300 MB of
+CSV); save important captures elsewhere before continuing.
 
 For a standalone capture:
 
@@ -346,4 +348,5 @@ npx playwright install chromium
 node tools/capture-docs.cjs
 ```
 
-The screenshot tool uses only the offline demo and illustrative settings.
+The screenshot tool renders the offline demo with illustrative settings (the images in this
+guide were taken on a virtual printer instead).

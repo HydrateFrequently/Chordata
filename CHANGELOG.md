@@ -3,6 +3,60 @@
 What changed in each update of Chordata's main branch, newest first.
 Update from Mainsail's Update Manager, then restart Klipper.
 
+## 2026-10-23
+
+- **Fixed: a pluck read at half its frequency.** When a line could be twice a belt's tone, the
+  engine checked down to the bottom of its whole search range for that tone; a faint line there
+  could turn an 83 Hz pluck into a 41 Hz one. It now only looks within the band around the target.
+  Found on the first recording from a second printer (thanks, Battlefield_Ace); every reading on
+  the original printer's recordings is unchanged.
+- **Recordings fit the host.** A session's recording is written to CSV piece by piece, never the
+  whole listen in memory at once (a 30-minute listen is 180 MB of numbers; a Pi Zero 2 W has
+  512 MB). Chordata now keeps the latest 5 recordings instead of 40 (a 30-minute listen is about
+  300 MB of CSV); `recordings_keep` in `[chordata]` sets how many.
+- **Fixed:** an error while the fans are brought back or while recordings are written is logged
+  instead of stopping Klipper; the page's PC layout is chosen by the screen and pointer alone (no
+  more switch to flip at a merge); the user guide no longer says Start turns the part fan off.
+- **The demo shows Tuner Mode:** `?demo` (and the browser test) show the page after a Tuner Mode
+  session; the old belt-results table, graph and CSV export, which no step used any more, are gone.
+
+- **Minimum host: Raspberry Pi Zero 2 W.** The original Pi Zero is not supported.
+- **Tuner Mode reads the stream as it comes.** The samples are filtered and analysed once, as
+  they arrive, instead of a stretch of several seconds being analysed again and again. Each pluck
+  is found once and read live every 0.1 s while it rings, then once more when its window is
+  complete. A reading no longer depends on where an analysed stretch starts or ends, and the
+  engine does about five times less work: on a Pi 5 a 4-minute session costs 11 s of CPU, and the
+  number shows about 0.7 s after the pluck on every Pi from the Zero up (measured on emulated
+  Pis; the Zero, Zero 2 W and 3B could not keep up before). A listen stops by itself after 30
+  minutes and says so; start Tuner Mode again to go on.
+- **Toolhead taps are told from plucks.** A plucked belt pulls on the toolhead twice per swing,
+  so it always shows a line at twice its tone; a knock on the toolhead leaves that line 12 dB or
+  more under the tone and is refused. A printer whose own plucks show weaker pulls widens that
+  allowance from its own session, so the rule isn't tuned to one printer. The tap step now learns
+  the toolhead's note even when a faint line at twice it made the note look like a belt (that is
+  why some sessions missed it), never learns a line on a belt's last reading, and refuses a
+  knock's impulse (a "line" far wider than a mode ringing that long can be). How far a toolhead
+  line's skirt reaches now follows that line's own width.
+- **A tone pulled by a line beside it.** The other belt ringing along, or a toolhead note the taps
+  missed, closer to the tone than a short window resolves, pulls the tone's peak. At twice the
+  tone the two are twice as far apart, so when twice the tone says the tone sits lower than its
+  peak, the reading is taken from there (belt stiffness and the pitch glide only ever push it the
+  other way). On a real A/B test the median error against the microphone went from 0.89 Hz to
+  0.06 Hz.
+- **Loose belts read.** A loose belt rings briefly and its pull at twice the tone can land on a
+  steady background line beside a toolhead line; that pull still counts (it dies like a pull, not
+  like the toolhead's ringing or a fan), so the belt reads instead of being refused as a knock.
+- **Twice the tone on a toolhead line's skirt:** a knock whose twice lands on the skirt of the
+  toolhead's own ringing is no longer taken for a belt at half the toolhead's note.
+- Fixed: samples missing inside one batch (a host too slow for a while) now start the stream
+  over, as a gap between batches did; a live analysis can no longer run beside the final one; a
+  pluck due after a long pause can no longer fall out of the kept stretch unread.
+
+- **Easier on SD cards:** the raw recordings of a session are kept in RAM and written to
+  `chordata/recordings` in whole files when you close Chordata (or after 10 minutes without a new
+  one, when Klipper shuts down, or when they would take more than 10 % of the free RAM, 64 MB at
+  most), instead of a piece every few seconds while you pluck. CHORDATA_RECORD still writes at once.
+
 ## 2026-10-19 (2)
 
 - **A steadier average:** the average and the ± take the last plucks within 1 Hz of each other
@@ -11,8 +65,9 @@ Update from Mainsail's Update Manager, then restart Klipper.
   hum when that hum sits near the note (it said "hidden by a steady hum at 726 Hz" for a belt at
   107 Hz and for toolhead taps).
 - **Only fans you allow are turned off:** Chordata no longer turns any fan off on its own guess
-  (also not the part cooling fan at the start, which it used to). When a fan hums on the belt's
-  note, the card asks to **Allow Chordata to turn off** it first; the choice is kept. Fans for the hotend, the stepper drivers and the electronics are never
+  (also not the part cooling fan at the start, which it used to).
+  When a fan hums on the belt's note, the card asks to **Allow Chordata to turn off** it first;
+  the choice is kept. Fans for the hotend, the stepper drivers and the electronics are never
   offered, as before.
 - **Quicker double tap:** two taps on the toolhead up to 0.8 s apart now count as a double tap,
   also quick ones 0.2-0.45 s apart (they had to be about half a second apart or more), and the

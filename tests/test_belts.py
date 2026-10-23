@@ -523,7 +523,7 @@ def real_mic():
     """The real plucks2 recordings (cut short: tests/data/plucks2.npz, kept out of the public repo), judged by
     the microphone that was recording beside them. A Nebula 370 with an ADXL345 and a Beacon,
     the right belt plucked, then the left. The mic's pitch at each counted pluck is read over
-    the same stretch the engine used (0.03 s after the onset, 0.6 s or up to the next pluck):
+    the same stretch the engine used (from where it read it, to 0.6 s or up to the next pluck):
     a plucked belt's tone sinks as it rings down, so a longer or later window reads lower.
     Checked: a reading for each belt, near the mic (within 0.3 Hz: the tone at twice the note
     weighs the louder start more), and above all the two belts' difference, which is what
@@ -534,8 +534,10 @@ def real_mic():
     d = np.load(DATA)
     mfs = float(d["mic_fs"])
 
-    def mic(y, t, n_s, c):
-        seg = y[int((t + belts.SKIP) * mfs):][:int(n_s * mfs)].astype(float)
+    def mic(y, t, n_s, c, st=belts.SKIP):
+        # (from where the engine read the pluck: a reading at twice the tone is taken after the
+        # glide, see SETTLED - its window ends where the engine's did)
+        seg = y[int((t + st) * mfs):][:int((n_s - (st - belts.SKIP)) * mfs)].astype(float)
         n = 1 << 18
         sp = np.abs(np.fft.rfft((seg - seg.mean()) * np.hanning(len(seg)), n)) ** 2
         f = np.fft.rfftfreq(n, 1 / mfs)
@@ -559,7 +561,7 @@ def real_mic():
             for i, p in enumerate(r["plucks"]):
                 if p["ok"]:
                     w = min(belts.WINDOW, ts[i + 1] - p["t"] - belts.SKIP - 0.01) if i + 1 < len(ts) else belts.WINDOW
-                    err.append((p["freq"], mic(d[chip + "_" + side + "_mic"], p["t"], w, ref)))
+                    err.append((p["freq"], mic(d[chip + "_" + side + "_mic"], p["t"], w, ref, p.get("from") or belts.SKIP)))
             res[side] = (r, err)
             e = [a - b for a, b in err]
             check("%s %s: reading near the mic (%+.2f Hz)" % (chip, side, np.mean(e) if e else 99),
@@ -571,7 +573,7 @@ def real_mic():
             for i, p in enumerate(r["plucks"]):
                 if p["ok"]:
                     w = min(belts.WINDOW, ts[i + 1] - p["t"] - belts.SKIP - 0.01) if i + 1 < len(ts) else belts.WINDOW
-                    fe.append((p["t"], round(p["freq"] - mic(d[chip + "_" + side + "_mic"], p["t"], w, ref), 2)))
+                    fe.append((p["t"], round(p["freq"] - mic(d[chip + "_" + side + "_mic"], p["t"], w, ref, p.get("from") or belts.SKIP), 2)))
             bad = {x[0] for x in fe if abs(x[1]) > FREE_ERR}
             known = KNOWN_WRONG.get((chip, side), set())
             ok = len(fe) - len(bad) >= MIN_RIGHT[(chip, side)] and bad == known
@@ -616,6 +618,130 @@ def background_hum():
         FAILS.append("hum silent")
 
 
+def streaming():
+    """Tuner Mode's live stream (Stream): the downsampling joins batches seamlessly; every
+    pluck is read final exactly once, after a live read, and reads as analyse() reads the
+    whole recording; a gap in the samples starts the stream over without losing what came
+    before; a toolhead that rings long is listened beside."""
+    def fail(name, info):
+        print("FAIL %-46s %s" % (name, info))
+        FAILS.append(name)
+
+    def ok(name, info=""):
+        print("ok   %-46s %s" % (name, info))
+    x = rng.normal(0, 30, (3, 20000)) + 9.8
+    t = np.arange(20000) / FS
+    for d in (2, 3):
+        h = belts.lowpass_taps(FS, d)
+        half = (len(h) - 1) // 2
+        ref = np.stack([np.convolve(a, h)[half:half + len(a)] for a in x])[:, half::d]
+        dec = belts.Decimator(FS, d)
+        parts = [dec.feed(t[i:i + 137], x[:, i:i + 137]) for i in range(0, len(t), 137)]
+        y = np.concatenate([p[1] for p in parts], axis=1)
+        err = float(np.abs(y - ref[:, :y.shape[1]]).max())
+        (ok if err < 1e-9 else fail)("downsampling by %d in batches = one filter" % d, "max diff %.1e" % err)
+
+    def play(t, axes, q, avoid=(), gap_at=None):
+        st = belts.Stream(FS, q, 110.0, avoid, hears=0.45 * FS)
+        k = int(0.1 * FS)
+        reads = []
+        for i in range(0, len(t), k):
+            tt = t[i:i + k] + (0.2 if gap_at is not None and t[i] >= gap_at else 0.0)
+            st.feed(tt, np.asarray(axes)[:, i:i + k])
+            reads += st.step()
+        reads += st.step(last=True)
+        live = [round(w0 + p["t"], 2) for w0, r, _ in reads for p in r["plucks"] if not p["final"]]
+        final = [dict(p, t=w0 + p["t"]) for w0, r, _ in reads for p in r["plucks"] if p["final"]]
+        return live, final
+    for name, fan in (("clean", None), ("a fan at 140 Hz", 140.0)):
+        freqs = [96.0, 104.0, 111.0, 118.0, 107.0, 99.0]
+        r = rec(series(freqs), 9.0, fan=fan)
+        q = quiet(fan=fan)
+        whole = belts.analyse(*r, quiet=q, target=110.0, free=True, hears=0.45 * FS)["plucks"]
+        live, final = play(r[0], r[1:], q)
+        times = sorted(p["t"] for p in final)
+        once = len(times) == len(set(round(x, 1) for x in times)) and all(b - a >= belts.DEAD for a, b in zip(times, times[1:]))
+        (ok if once else fail)("stream (%s): each pluck final once" % name, ["%.2f" % x for x in times])
+        bad = []
+        for p in whole:
+            m = [x for x in final if abs(x["t"] - p["t"]) <= 0.05]
+            if not m or m[0]["ok"] != p["ok"] or (p["ok"] and abs(m[0]["freq"] - p["freq"]) > 0.1):
+                bad.append((p["t"], p["freq"], p["ok"], m[0]["freq"] if m else None))
+        (ok if not bad and len(final) == len(whole) else fail)(
+            "stream (%s) reads as the whole recording" % name, bad or "%d plucks" % len(final))
+        first = all(any(abs(x - p["t"]) <= 0.05 for x in live) for p in final[:-1])
+        (ok if first else fail)("stream (%s): a live read before each final" % name, live)
+    # a gap of 0.2 s in the samples (a host too slow for a while)
+    r = rec(series([100.0, 108.0, 115.0, 102.0, 110.0, 97.0]), 9.0)
+    q = quiet()
+    _, final = play(r[0], r[1:], q, gap_at=4.4)
+    got = sorted(round(p["freq"]) for p in final if p["ok"])
+    (ok if len(got) >= 5 and len(set(got)) == len(got) else fail)("stream: a gap starts it over, plucks around it read", got)
+    # a stiff toolhead still ringing (long) when the plucks come: heard beside its line
+    ring = [{"freq": 150.0, "guard": 1.0, "tau": 0.5}]
+    ev = series([100.0, 108.0, 115.0], start=1.5) + [(1.0, "ring", 150.0, 3000.0, 0.0, 0.5)]
+    r = rec(sorted(ev), 6.0)
+    _, final = play(r[0], r[1:], quiet(), ring)
+    got = [round(p["freq"]) for p in final if p["ok"]]
+    (ok if sorted(got) == [100, 108, 115] else fail)("stream: plucks beside a long toolhead ring", got)
+
+
+def loose_belt():
+    """A loose belt rings briefly, and twice its tone can land on a steady background line (a
+    fan) right beside a toolhead line the tap learned: its pull there still counts (it dies like
+    a pull, not like the toolhead's ringing or a fan), and the reading is the belt's. Knocks that
+    ring the same frame line and toolhead line stay refused."""
+    avoid = [{"freq": 187.5, "guard": 4.9, "tau": 0.22, "width": 4.0}]
+    q = quiet(fan=188.0)
+    plk = [(1.0 + 1.3 * i, "pluck", 94.5 + rng.uniform(-0.2, 0.2), 1500.0, 3.0, 0.12) for i in range(4)]
+    r = belts.analyse(*rec(plk, 6.5, fan=188.0), quiet=q, avoid=avoid, target=110.0, free=True, hears=1440)
+    got = [(p["freq"], p["ok"]) for p in r["plucks"]]
+    good = len(got) == 4 and all(ok and abs(fr - e[2]) <= 0.1 for (fr, ok), e in zip(got, plk))
+    print("%-4s %-46s %s" % ("ok" if good else "FAIL", "loose belt, pull on a fan beside a toolhead line", got))
+    if not good:
+        FAILS.append("loose belt")
+    kn = [(1.0 + 1.3 * i, "ring", 94.5, 1500.0, 0.0, 0.12) for i in range(4)] + \
+         [(1.0 + 1.3 * i, "tap", 187.5, 6000.0, 0.0, 0.22) for i in range(4)]
+    r = belts.analyse(*rec(sorted(kn), 6.5, fan=188.0), quiet=q, avoid=avoid, target=110.0, free=True, hears=1440)
+    bad = [(p["freq"], p["why"]) for p in r["plucks"] if p["ok"]]
+    print("%-4s %-46s %s" % ("ok" if not bad else "FAIL", "knocks there stay refused", [(p["freq"], p["why"]) for p in r["plucks"]]))
+    if bad:
+        FAILS.append("loose belt knocks")
+
+
+def pulled_tone():
+    """The other belt ringing along a few Hz above (unresolved in a short window) pulls the tone's
+    peak up; its pull at twice the tone is clear of it and reads the plucked belt."""
+    q = quiet()
+    plk = [(1.0 + 1.3 * i, "pluck", 104.3 + rng.uniform(-0.2, 0.2), 1500.0, 3.0, 0.3) for i in range(4)]
+    ev = plk + [(e[0], "ring", 106.9, 1200.0, 0.0, 0.3) for e in plk]
+    r = belts.analyse(*rec(sorted(ev), 6.5), quiet=q, target=110.0, free=True, hears=1440)
+    got = [(p["freq"], p["ok"]) for p in r["plucks"]]
+    good = len(got) == 4 and all(ok and abs(fr - e[2]) <= 0.25 for (fr, ok), e in zip(got, plk))
+    print("%-4s %-46s %s" % ("ok" if good else "FAIL", "tone pulled up by a line beside it", [(round(e[2], 2), g) for e, g in zip(plk, got)]))
+    if not good:
+        FAILS.append("pulled tone")
+
+
+def faint_pull_knock():
+    """A tap on the toolhead rings its note, dies fast and leaves only a little at twice it (its
+    click, the toolhead's other lines): refused, while plucks dying as fast with their pull read."""
+    q = quiet()
+    kn = [(1.0 + 1.3 * i, "harm", 105.6, (8000.0, 8000.0, 0.0), 0.0, 0.1) for i in range(4)]   # (twice it ~16 dB under)
+    r = belts.analyse(*rec(kn, 6.5), quiet=q, target=110.0, free=True, hears=1440)
+    bad = [(p["freq"], p["why"]) for p in r["plucks"] if p["ok"]]
+    print("%-4s %-46s %s" % ("ok" if not bad else "FAIL", "a tap with a faint pull is a knock", [(p["freq"], p["why"]) for p in r["plucks"]]))
+    if bad:
+        FAILS.append("faint pull knock")
+    plk = [(1.0 + 1.3 * i, "pluck", 104.3, 1500.0, 1.0, 0.15) for i in range(4)]
+    r = belts.analyse(*rec(plk, 6.5), quiet=q, target=110.0, free=True, hears=1440)
+    got = [(p["freq"], p["ok"]) for p in r["plucks"]]
+    good = len(got) == 4 and all(ok and abs(fr - 104.3) <= 0.25 for fr, ok in got)
+    print("%-4s %-46s %s" % ("ok" if good else "FAIL", "fast-dying plucks with their pull read", got))
+    if not good:
+        FAILS.append("fast plucks")
+
+
 def tap_spot():
     """The spot's note is the one most taps ring: a first tap whose loudest line is another
     mode (a Beacon now and then) doesn't make the next taps "another spot"."""
@@ -638,6 +764,10 @@ if __name__ == "__main__":
     synthetic()
     background_hum()
     tap_spot()
+    loose_belt()
+    pulled_tone()
+    faint_pull_knock()
+    streaming()
     tensioning()
     real_mic()
     if a.real:
