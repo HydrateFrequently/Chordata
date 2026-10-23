@@ -28,7 +28,8 @@ shows a check mark or an X). Chordata learns how the toolhead rings by itself: a
 long and how broad each line is. Toolheads differ a lot (a plastic one rings briefly in broad lines, a stiff
 all-metal one rings long in sharp lines), so each line is guarded as wide as it is. A line the tap set
 ringing on a belt is never learned as the toolhead's, nor is a knock's impulse. The taps can't be skipped:
-the belts are only measured once 3 good taps were heard.
+the belts are only measured once 3 good taps were heard (or 3 taps that show a stiff toolhead with
+nothing to learn).
 
 <img src="docs/images/tapped.png" width="260" alt="3 good taps: the toolhead's note, and the Tuner Mode button">
 
@@ -39,11 +40,12 @@ Then the card shows the toolhead's note and the **Tuner Mode** button.
 **4. Tune (Tuner Mode).** The screen turns green: pluck either belt. The stream is analysed as it comes, so
 each clear pluck shows its frequency within about a second, how far it is from your target and which way
 to turn. A weak pluck or a knock is left out, greyed in the history with why. A knock is told from a pluck
-by physics: a plucked belt pulls on the toolhead twice per swing, a knock doesn't. Under the number: the
+by physics: a plucked belt pulls on the toolhead twice per swing, a knock doesn't, so an event whose line at twice
+the tone is missing or far under its tone is left out. Under the number: the
 average of the last plucks that agree (up to 5, within 1 Hz of each other), and from 4 such plucks a
 **± Hz per pluck** from their scatter. Turn the tensioner a little between plucks until the belt is on
-target (within 0.25 Hz), then do the other belt. A listen stops by itself after 30 minutes; start it again
-to go on.
+target (within 0.25 Hz; the last pluck decides, the average under it shows whether that holds), then do the
+other belt. A listen ends 60 s after the last pluck, or after 30 minutes at most; start it again to go on.
 
 <img src="docs/images/done.png" width="260" alt="After Done: the last pluck, the average, the whole history">
 
@@ -94,8 +96,9 @@ own pop-ups. The same steps also run as prompts from the **CHORDATA** macro in M
 
 Settings (`chordata_settings.cfg`): `belt_target` (Hz, default 110; you can also change it on the first prompt)
 and `belt_tolerance` (Hz, default 0.25). The fans you allowed Chordata to turn off are kept in
-`chordata/fans_ok.json` in the config folder (delete it to take them all back). Every recording is saved in `chordata/recordings/` in the config
-folder, so you can download it from Mainsail. `CHORDATA_RECORD SECONDS=10 NAME=test` records any accelerometer
+`chordata/fans_ok.json` in the config folder (delete it to take them all back). The latest 5 recordings (`recordings_keep` in `[chordata]`)
+are kept in `chordata/recordings/` in the config folder, written there when you close Chordata, so you can
+download them from Mainsail. `CHORDATA_RECORD SECONDS=10 NAME=test` records any accelerometer
 (`CHIP=` as in Klipper's own commands) into the same folder.
 
 ## Update
@@ -117,19 +120,36 @@ in moonraker.conf, and the sidebar link, backing up each file it changes (`*.bef
 
 ## How it was tested
 
-- The pluck analysis was checked on real recordings from a CoreXY printer, with both a Beacon and an NH36 toolhead board equipped with an ADXL345 mounted to the extruder. A Zoom H5 recorder with the XYH-5 microphone provided a reference, read over the same stretch of each pluck as Chordata reads: each belt's average agreed within 0.21 Hz, and the difference between the two belts (what tensioning matches) within 0.16 Hz. Bad plucks should be rejected and not counted. A good pluck's tone (or twice the tone) must stand at least 12 dB above the background noise at that frequency, and the other at least 6 dB.
+Chordata has been checked against a microphone on two CoreXY printers so far.
 
-Interesting detail: the accelerometer mostly hears the belt at twice its frequency, so Chordata looks for
-  the tone and twice the tone together.
-- The real-time engine (Tuner Mode reads the stream as it comes) was checked on five Tuner Mode sessions
-  recorded on that printer, each against the microphone: about two thirds of the counted plucks read within
-  0.5 Hz of the microphone and over half within 0.25 Hz, with no toolhead tap counted as a pluck. The same
-  recordings replayed through the whole plugin on a virtual printer gave the same counts, and readings within
-  0.02 Hz, as the engine run on them directly. Every engine change is judged on these real recordings; synthetic benches
-  (a belt with a second line beside it, a sensor where the tone dominates, knocks, clipped knocks, a stiff
-  toolhead) may only veto a change, never set a threshold.
-- The same module ran on that real printer as part of Printune (Kalico), measuring both belts.
-- As a standalone plugin forked from Printunes belt tension module, Chordata was installed with install.sh on virtual printers (real Kalico and real
+- **The first printer** (the author's, with both a Beacon and an NH36 toolhead board with an ADXL345 on the
+  extruder; a Zoom H5 recorder with the XYH-5 microphone as the reference, read over the same stretch of each
+  pluck as Chordata reads):
+  - In two short recordings per sensor (about 7 plucks per belt), each belt's average agreed with the
+    microphone within 0.21 Hz, and the difference between the two belts (what tensioning matches) within
+    0.16 Hz.
+  - In five Tuner Mode sessions with the real-time engine, 293 plucks were counted and 206 of them had a
+    clear microphone reading: 56 % of those read within 0.25 Hz of the microphone and 64 % within 0.5 Hz.
+    No toolhead tap was counted as a pluck. One belt reads about 0.6 Hz above the microphone; the cause is
+    not known yet.
+  - The same recordings replayed through the whole plugin on a virtual printer gave the same counts, and
+    readings within 0.02 Hz, as the engine run on them directly.
+- **The second printer** (Battlefield_Ace's, ADXL345 on the toolhead, with phone audio as the reference,
+  which is weaker than a recorder): all 38 plucks were counted and no tap was. On one belt (about 84 Hz),
+  16 of 20 plucks read within 0.25 Hz of the phone and 18 within 0.5 Hz. The other belt (about 92 Hz) reads
+  0.7 to 1.0 Hz above the phone's line, but that line moved by 1 Hz during the recording while the
+  accelerometer's stayed within 0.15 Hz, so which one is right is still open. This recording also found a
+  bug (a pluck read at half its frequency), now fixed.
+- A good pluck's tone (or twice the tone) must stand at least 12 dB above the background noise at that
+  frequency, and the other at least 6 dB. Weak plucks, knocks and two plucks at once are left out.
+- Interesting detail: a plucked belt pulls on the toolhead twice per swing, so the accelerometer also hears
+  it at twice its frequency. On the first printer that line was usually the louder one, on the second the
+  two were about equal, so Chordata looks for the tone and twice the tone together.
+- Every engine change is judged on these real recordings; synthetic benches (a belt with a second line
+  beside it, a sensor where the tone dominates, knocks, clipped knocks, a stiff toolhead) may only veto a
+  change, never set a threshold.
+- The same module ran on the first printer as part of Printune (Kalico), measuring both belts.
+- As a standalone plugin forked from Printune's belt tension module, Chordata was installed with install.sh on virtual printers (real Kalico and real
   mainline Klipper with a simulated MCU and a simulated accelerometer) and run end to end, with bad plucks
   and double taps mixed in on purpose. It also runs as a standalone plugin on my own printer (a CoreXY on
   Kalico, ADXL345), where Tuner Mode, the history, Reset and the double tap were tried out.
@@ -137,15 +157,14 @@ Interesting detail: the accelerometer mostly hears the belt at twice its frequen
 - `python3 -m unittest discover -s tests` checks the printer interlocks (no measuring during a print or while
   another measurement runs), input checks, cleanup after errors, the pluck history and double tap, that no
   fan is turned off without your OK, installer reruns and the uninstaller. `npm test` checks the page
-  in a browser (demo, live updates, CSV export, phone and PC layouts). GitHub Actions runs both.
+  in a browser (demo, live updates, phone and PC layouts). GitHub Actions runs both.
 - Speed and stability were checked on a Pi 5 (a 4-minute Tuner Mode session costs about 11 s of CPU) and
-  on emulated Raspberry Pis from the Zero to the Pi 5 (CPU-quota containers), where the number shows about
-  0.7 s after the pluck on every model.
+  on Raspberry Pis emulated on a PC (CPU-quota containers, not real boards), where the number showed about
+  0.8 s after the pluck on a Pi 4 or 5, 1.0 s on a Pi 3B and 1.1 s on a Zero 2 W (median).
 
 ## Help wanted: recordings from other printers
 
-Almost everything above was measured on one printer, and the first recording from a second printer
-arrived on 23 October 2026 (see Special Thank You To). To make Chordata read right on any CoreXY, we are
+Two printers have been measured so far (the second thanks to Battlefield_Ace, see Special Thank You To). To make Chordata read right on any CoreXY, we are
 looking for **accelerometer recordings with a matching high-quality audio reference**: a Tuner Mode
 session's raw CSV from `chordata/recordings/` (the taps, the background and the free listen) together
 with an audio recording of the same plucks, made with a good recorder or microphone close to the
@@ -168,8 +187,8 @@ Pull requests go to `dev`, see [CONTRIBUTING.md](CONTRIBUTING.md).
 ## Origin
 
 Chordata started as the belt tension step of [Printune](https://github.com/HydrateFrequently/Printune), a
-tuning wizard for Kalico/Klipper, and is now available on its own. The live chart, the measurement table, the
-safety interlocks, the installer hardening, the guides and the test suite were contributed by
+tuning wizard for Kalico/Klipper, and is now available on its own. The first live chart and measurement table (since
+replaced by Tuner Mode), the safety interlocks, the installer hardening, the guides and the test suite were contributed by
 [alextverdyy](https://github.com/alextverdyy). An optional AI measurement review lives on the
 [`ai-review`](https://github.com/HydrateFrequently/Chordata/tree/ai-review) branch; `main` makes no AI decisions.
 
