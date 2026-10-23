@@ -134,10 +134,10 @@ Chordata has been checked against a microphone on two CoreXY printers so far.
     not known yet.
   - The same recordings replayed through the whole plugin on a virtual printer gave the same counts, and
     readings within 0.02 Hz, as the engine run on them directly.
-- **The second printer** (Battlefield_Ace's, ADXL345 on the toolhead, with phone audio as the reference,
-  which is weaker than a recorder): all 38 plucks were counted and no tap was. On one belt (about 84 Hz),
-  16 of 20 plucks read within 0.25 Hz of the phone and 18 within 0.5 Hz. The other belt (about 92 Hz) reads
-  0.7 to 1.0 Hz above the phone's line, but that line moved by 1 Hz during the recording while the
+- **The second printer** (Battlefield_Ace's, ADXL345 on the toolhead, with an audio recording of the same
+  plucks as the reference): all 38 plucks were counted and no tap was. On one belt (about 84 Hz),
+  16 of 20 plucks read within 0.25 Hz of the audio and 18 within 0.5 Hz. The other belt (about 92 Hz) reads
+  0.7 to 1.0 Hz above the audio's line, but that line moved by 1 Hz during the recording while the
   accelerometer's stayed within 0.15 Hz, so which one is right is still open. This recording also found a
   bug (a pluck read at half its frequency), now fixed.
 - A good pluck's tone (or twice the tone) must stand at least 12 dB above the background noise at that
