@@ -129,7 +129,7 @@ in moonraker.conf, and the sidebar link, backing up each file it changes (`*.bef
 
 Chordata has been checked against a microphone on two CoreXY printers so far.
 
-- **The author's printer** (Kalico, with both a Beacon and an NH36 toolhead board with an ADXL345 on the
+- **The author's printer** (Kalico, with both a Beacon Probe and a NH36 tool head board with an ADXL345 on the
   extruder; a Zoom H5 recorder with the XYH-5 microphone as the reference, read over the same stretch of each
   pluck as Chordata reads):
   - In two short recordings per sensor (about 7 plucks per belt), each belt's average agreed with the
