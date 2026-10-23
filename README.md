@@ -122,7 +122,7 @@ in moonraker.conf, and the sidebar link, backing up each file it changes (`*.bef
 
 Chordata has been checked against a microphone on two CoreXY printers so far.
 
-- **The first printer** (the author's, with both a Beacon and an NH36 toolhead board with an ADXL345 on the
+- **The author's printer** (Kalico, with both a Beacon and an NH36 toolhead board with an ADXL345 on the
   extruder; a Zoom H5 recorder with the XYH-5 microphone as the reference, read over the same stretch of each
   pluck as Chordata reads):
   - In two short recordings per sensor (about 7 plucks per belt), each belt's average agreed with the
@@ -134,25 +134,31 @@ Chordata has been checked against a microphone on two CoreXY printers so far.
     not known yet.
   - The same recordings replayed through the whole plugin on a virtual printer gave the same counts, and
     readings within 0.02 Hz, as the engine run on them directly.
-- **The second printer** (Battlefield_Ace's, ADXL345 on the toolhead, with an audio recording of the same
-  plucks as the reference): all 38 plucks were counted and no tap was. On one belt (about 84 Hz),
-  16 of 20 plucks read within 0.25 Hz of the audio and 18 within 0.5 Hz. The other belt (about 92 Hz) reads
-  0.7 to 1.0 Hz above the audio's line, but that line moved by 1 Hz during the recording while the
-  accelerometer's stayed within 0.15 Hz, so which one is right is still open. This recording also found a
-  bug (a pluck read at half its frequency), now fixed.
+  - The belt module first ran on this printer as part of Printune, measuring both belts. Chordata now runs
+    there as a standalone plugin, where Tuner Mode, the history, Reset and the double tap were tried out.
+- **Battlefield_Ace's printer** (ADXL345 on the toolhead, with an audio recording of the same plucks as the
+  reference): all 38 plucks were counted and no tap was. On one belt (about 84 Hz), 16 of 20 plucks read
+  within 0.25 Hz of the audio and 18 within 0.5 Hz. The other belt (about 92 Hz) reads 0.7 to 1.0 Hz above
+  the audio's line, but that line moved by 1 Hz during the recording while the accelerometer's stayed within
+  0.15 Hz, so which one is right is still open. This recording also found a bug (a pluck read at half its
+  frequency), now fixed.
+
+How a pluck is judged:
+
 - A good pluck's tone (or twice the tone) must stand at least 12 dB above the background noise at that
   frequency, and the other at least 6 dB. Weak plucks, knocks and two plucks at once are left out.
 - Interesting detail: a plucked belt pulls on the toolhead twice per swing, so the accelerometer also hears
-  it at twice its frequency. On the first printer that line was usually the louder one, on the second the
-  two were about equal, so Chordata looks for the tone and twice the tone together.
+  it at twice its frequency. On the author's printer that line was usually the louder one, on Battlefield_Ace's
+  the two were about equal, so Chordata looks for the tone and twice the tone together.
 - Every engine change is judged on these real recordings; synthetic benches (a belt with a second line
   beside it, a sensor where the tone dominates, knocks, clipped knocks, a stiff toolhead) may only veto a
   change, never set a threshold.
-- The same module ran on the first printer as part of Printune (Kalico), measuring both belts.
-- As a standalone plugin forked from Printune's belt tension module, Chordata was installed with install.sh on virtual printers (real Kalico and real
-  mainline Klipper with a simulated MCU and a simulated accelerometer) and run end to end, with bad plucks
-  and double taps mixed in on purpose. It also runs as a standalone plugin on my own printer (a CoreXY on
-  Kalico, ADXL345), where Tuner Mode, the history, Reset and the double tap were tried out.
+
+The software:
+
+- Chordata was installed with install.sh on virtual printers (real Kalico and real mainline Klipper with a
+  simulated MCU and a simulated accelerometer) and run end to end, with bad plucks and double taps mixed in
+  on purpose.
 - `tests/test_belts.py` checks the pluck judge on synthetic recordings (and on real ones, if you have them).
 - `python3 -m unittest discover -s tests` checks the printer interlocks (no measuring during a print or while
   another measurement runs), input checks, cleanup after errors, the pluck history and double tap, that no
