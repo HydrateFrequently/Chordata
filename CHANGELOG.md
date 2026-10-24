@@ -3,6 +3,13 @@
 What changed in each update of Chordata's main branch, newest first.
 Update from Mainsail's Update Manager, then restart Klipper.
 
+## 2026-10-24
+
+- **Configuration reference:** [docs/CONFIGURATION.md](docs/CONFIGURATION.md) lists every setting, macro,
+  G-code command, file and installer option Chordata uses, and the values fixed in the code.
+- **Settings file:** a new `chordata_settings.cfg` also lists `recordings_keep` and `path`, and its
+  comment on `belt_tolerance` now says what it does (the last pluck must be that close to show On target).
+
 ## 2026-10-23
 
 - **Fixed: a pluck read at half its frequency.** When a line could be twice a belt's tone, the

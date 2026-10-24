@@ -337,6 +337,7 @@ Do not restore an old whole-file backup over unrelated newer settings.
 ## Further reference
 
 - [Troubleshooting](TROUBLESHOOTING.md)
+- [Configuration reference](CONFIGURATION.md): every setting, macro, command and file
 - [Klipper measuring resonances](https://www.klipper3d.org/Measuring_Resonances.html)
 - [Moonraker API documentation](https://moonraker.readthedocs.io/en/latest/external_api/introduction/)
 

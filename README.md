@@ -109,7 +109,8 @@ and `belt_tolerance` (Hz, default 0.25). The fans you allowed Chordata to turn o
 `chordata/fans_ok.json` in the config folder (delete it to take them all back). The latest 5 recordings (`recordings_keep` in `[chordata]`)
 are kept in `chordata/recordings/` in the config folder, written there when you close Chordata, so you can
 download them from Mainsail. `CHORDATA_RECORD SECONDS=10 NAME=test` records any accelerometer
-(`CHIP=` as in Klipper's own commands) into the same folder.
+(`CHIP=` as in Klipper's own commands) into the same folder. Every option, macro and file Chordata uses is listed in the
+**[configuration reference](docs/CONFIGURATION.md)**.
 
 ## Update
 
