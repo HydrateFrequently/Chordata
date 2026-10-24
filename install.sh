@@ -84,8 +84,13 @@ if [ ! -e "$CONFIG_DIR/chordata_settings.cfg" ]; then
 # Starting target frequency in Hz (change it on the first prompt too). Use the value
 # your printer's guide gives for the stretch of belt you pluck.
 #belt_target: 110
-# How close the average of 5 good plucks must be to the target, in Hz
+# How close a pluck must be to the target to show On target, in Hz
 #belt_tolerance: 0.25
+# How many recordings to keep in chordata/recordings (the newest; a 30-minute listen is about 300 MB)
+#recordings_keep: 5
+# Where Chordata keeps its folder (recordings, allowed fans, the saved toolhead position)
+#path: ~/printer_data/config/chordata
+# All options and macros: docs/CONFIGURATION.md
 EOF
   say "wrote chordata_settings.cfg"
 fi
