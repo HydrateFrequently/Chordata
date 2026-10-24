@@ -139,7 +139,7 @@ Chordata has been checked against a microphone on two CoreXY printers so far.
   - In two short recordings per sensor (about 7 plucks per belt), each belt's average agreed with the
     microphone within 0.21 Hz, and the difference between the two belts (what tensioning matches) within
     0.16 Hz.
-  - In five Tuner Mode sessions with the real-time engine, 293 plucks were counted and 206 of them had a
+  - In five Tuner Mode sessions with the live engine, 293 plucks were counted and 206 of them had a
     clear microphone reading: 56 % of those read within 0.25 Hz of the microphone and 64 % within 0.5 Hz.
     No toolhead tap was counted as a pluck. One belt reads about 0.6 Hz above the microphone; the cause is
     not known yet.
