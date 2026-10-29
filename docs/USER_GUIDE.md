@@ -195,9 +195,11 @@ flowchart TD
    is on target (within the tolerance, 0.25 Hz by default). Then the other belt.
 4. Pluck both belts once more: they pull on each other, so turning one moves the other a
    little. You are done when both are on target, and so match each other. Tuner Mode stops
-   by itself a minute after the last pluck, or select **Done** on the Chordata page
-   (Mainsail's prompt can't end it while it listens); **Tuner Mode** on the next card starts
-   it again.
+   by itself a minute after the last pluck, or select **Done** on the Chordata page; the
+   page's own **‹ Back** and **Close Chordata** end it too (and the toolhead taps); the
+   browser's back button does not. While
+   Chordata listens, other commands wait, homing too: Mainsail's prompt, its Close Chordata
+   included, can't end a listen. **Tuner Mode** on the next card starts it again.
 
 The Chordata page keeps a history of the session's plucks under the number, newest at the
 top (the last 100; about 20 show, scroll for more): each pluck's frequency, and the refused
