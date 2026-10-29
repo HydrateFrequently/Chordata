@@ -393,10 +393,16 @@ class Chordata:
                 self.belt_hum = st["hum"]
                 self.belt_heard = max(self.belt_heard, stream.heard)
 
+            wall = {"on": None, "at": self.reactor.monotonic()}
+
             def stop():
-                # Done on the page, or FREE_IDLE s after the last pluck heard
+                # Done on the page (or the page left), or FREE_IDLE s after the last pluck heard;
+                # also by the host's clock, in case the samples stop coming (their time stands still then)
                 last_on = 0.0 if stream.last_on is None else stream.last_on - (st["t0"] or 0.0)
-                return self._accept or st["now"] - last_on > self.FREE_IDLE
+                if stream.last_on != wall["on"]:
+                    wall["on"], wall["at"] = stream.last_on, self.reactor.monotonic()
+                return (self._accept or st["now"] - last_on > self.FREE_IDLE
+                        or self.reactor.monotonic() - wall["at"] > self.FREE_IDLE + 5.0)
 
             def sink(rows):
                 self._save_recording(rec_name, rows, append=True)
@@ -405,8 +411,9 @@ class Chordata:
             self._listen_t0 = (listen, st["now"], None)
             # why it ended: Done on the page, FREE_IDLE without a pluck, or the time limit
             last_on = 0.0 if stream.last_on is None else stream.last_on - (st["t0"] or 0.0)
-            stopped = "done" if self._accept else ("idle" if st["now"] - last_on > self.FREE_IDLE
-                                                   else ("limit" if not secs else "seconds"))
+            idle = (st["now"] - last_on > self.FREE_IDLE
+                    or self.reactor.monotonic() - wall["at"] > self.FREE_IDLE + 5.0)
+            stopped = "done" if self._accept else ("idle" if idle else ("limit" if not secs else "seconds"))
             if not rows:
                 raise gcmd.error("Chordata: the accelerometer sent no data")
             try:
@@ -570,7 +577,7 @@ class Chordata:
             # the taps are judged on the last TAP_KEEP s only (the 3 good ones come close together):
             # however long the user takes, each look and the final analysis stay small; the whole
             # listen still goes into the recording file
-            samples = self._record(chip, toolhead, self.TAP_MAX, live=live, stop=lambda: st["done"],
+            samples = self._record(chip, toolhead, self.TAP_MAX, live=live, stop=lambda: st["done"] or self._accept,
                                    keep=self.TAP_KEEP, sink=lambda rows: self._save_recording("tap-%s" % stamp, rows, append=True))
             st["final"] = True
         finally:
@@ -586,6 +593,12 @@ class Chordata:
             raise gcmd.error("Chordata: invalid accelerometer recording: %s" % error)
         self.tap_live = res["taps"]
         stiff = self._taps_stiff(res)
+        if self._accept and self.belts.get("tap_done") and not (res["good"] >= belts.TAP_NEED or stiff):
+            # the page was left in a repeat of the taps: the toolhead result from before stays
+            self.tap_live = self.belts.get("taps", [])
+            self._end_measurement()
+            gcmd.respond_info("Chordata: taps stopped; the earlier toolhead result is kept")
+            return
         b = dict(self.belts)
         b["tap"] = res["modes"]
         b["tap_ring"] = res["ring"]          # per line: how long it rings and how wide it is
@@ -1112,9 +1125,11 @@ class Chordata:
         web_request.send({"cleared": True})
 
     def _handle_accept(self, web_request):
-        """From the page (via Moonraker), while G-code waits for the listen: end a free tune."""
+        """From the page (via Moonraker), while G-code waits for the listen: end a free tune (Done),
+        or the tap listen (the page is left with Back or Close: G-code, homing too, waits until a
+        listen ends, so leaving the page must not leave one running)."""
         m = self.measurement or {}
-        self._accept = self.state == "listening" and m.get("belt") == "free"
+        self._accept = self.state == "listening" and m.get("belt") in ("free", "tap")
         web_request.send({"accepted": self._accept})
 
     # ---------------- raw recordings, readable from Mainsail (Kalico's own go to /tmp) ----------------

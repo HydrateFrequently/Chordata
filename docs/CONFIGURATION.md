@@ -77,8 +77,8 @@ edit to `chordata.cfg` itself is lost on the next update.
 |---|---|---|
 | `CHORDATA_RECORD` | `SECONDS=` 0.5–30 (default 10), `NAME=`, `CHIP=` | Records an accelerometer and saves it at once as `chordata/recordings/<chip>-<name>.csv` (the time if `NAME` is left out). `CHIP=` is the accelerometer's name as in Klipper's own commands. |
 | `_CHORDATA_START` | `TARGET=` 20–400 Hz (default `belt_target`) | Starts a session. Needs `[resonance_tester]` and CoreXY. |
-| `_CHORDATA_TAP` | `UI=1`, `ANYWAY=1` | Records the background, then listens for the taps (120 s at most). `ANYWAY=1` skips the hum check. |
-| `_CHORDATA_FREE` | `UI=1`, `SECONDS=` 0–1800 | Tuner Mode. Without `SECONDS` it ends 60 s after the last pluck, on **Done** on the page, or after 30 minutes. |
+| `_CHORDATA_TAP` | `UI=1`, `ANYWAY=1` | Records the background, then listens for the taps (120 s at most, or until the page's ‹ Back, Close Chordata or × is pressed). `ANYWAY=1` skips the hum check. |
+| `_CHORDATA_FREE` | `UI=1`, `SECONDS=` 0–1800 | Tuner Mode. Without `SECONDS` it ends 60 s after the last pluck, on **Done** on the page, on the page's **‹ Back**, **Close Chordata** or ×, or after 30 minutes. Other G-code waits while it listens. |
 | `_CHORDATA_POS` | `SAVE=1` or `GO=1` | Saves where the toolhead is as the belt tensioning position, or moves there. Needs X and Y homed. Z only ever moves up. |
 | `_CHORDATA_FAN` | `INDEX=` | Turns off an allowed fan until Chordata is closed. |
 | `_CHORDATA_FANS` | | Writes the session's recordings and turns the fans Chordata turned off back to how they were. |

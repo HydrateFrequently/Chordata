@@ -852,7 +852,7 @@ function promptButton(b) {
   btn.disabled = buttonsLocked;
   btn.onclick = () => pressPromptButton(withTypedTarget(b.gcode));
   // Close Chordata: the prompt ends, and the page goes back to Mainsail or Fluidd
-  if (b.label === "Close Chordata") btn.onclick = () => { pressPromptButton(b.gcode); setTimeout(() => { location.href = $("backUi").href; }, 300); };
+  if (b.label === "Close Chordata") btn.onclick = () => stopListen().then(() => { pressPromptButton(b.gcode); setTimeout(() => { location.href = $("backUi").href; }, 300); }).catch(() => {});
   return btn;
 }
 
@@ -1352,6 +1352,14 @@ function freeDone() {
   render();
   rpc("server.chordata.accept", {}).catch((e) => { accepting = false; toast(errText(e)); render(); });
 }
+// leaving the page (Back, Close Chordata) ends a listen still running: G-code waits for it, so
+// homing from Mainsail or Fluidd would otherwise wait until Tuner Mode stopped by itself
+function stopListen() {
+  // (no connection: nothing can be sent, and the state shown may be stale: leave anyway)
+  if (demo || !connected || pt().state !== "listening") return Promise.resolve();
+  // (not sent: say so and stay, rather than leave a listen running behind the user's back)
+  return rpc("server.chordata.accept", {}, 3000).catch((e) => { toast("Chordata is still listening: " + errText(e)); throw e; });
+}
 function pt() { return obj("chordata"); }
 function isPrinting() { return ["printing", "paused"].includes(obj("print_stats").state || ""); }
 function merge(dst, src) {
@@ -1480,7 +1488,12 @@ function init() {
   $("pClose").onclick = () => {
     const close = [...$("pFooter").querySelectorAll("button")].find((b) => b.textContent === "Close Chordata");
     if (close && !close.disabled) close.click();
-    else { runGcode("_CHORDATA_CLOSE").catch(() => {}); setTimeout(() => { location.href = $("backUi").href; }, 300); }
+    else stopListen().then(() => { runGcode("_CHORDATA_CLOSE").catch(() => {}); setTimeout(() => { location.href = $("backUi").href; }, 300); }).catch(() => {});
+  };
+  $("backUi").onclick = (e) => {
+    if (demo || pt().state !== "listening") return;     // (nothing running: the link as it is)
+    e.preventDefault();
+    stopListen().then(() => { location.href = $("backUi").href; }).catch(() => {});
   };
   $("startBtn").onclick = () => runGcode("CHORDATA").catch(() => {});
   $("howBtn").onclick = openHow;

@@ -3,6 +3,17 @@
 What changed in each update of Chordata's main branch, newest first.
 Update from Mainsail's Update Manager, then restart Klipper.
 
+## 2026-10-29
+
+- **Fixed: Chordata kept listening after Back** ([#27](https://github.com/HydrateFrequently/Chordata/issues/27)).
+  Leaving the Chordata page with Back, Close Chordata or the close button while Tuner Mode or the
+  toolhead taps were listening left the listen running, and homing or any other command waited
+  until it stopped by itself. The page's ‹ Back, Close Chordata and × now end the listen
+  first (stopping a repeat of the taps keeps the earlier toolhead result). The Mainsail and Fluidd
+  prompts say that commands, their own Close Chordata included, wait while Chordata listens.
+  Tuner Mode also stops a minute after its last pluck by the host's clock, in case the
+  accelerometer stops sending.
+
 ## 2026-10-24
 
 - **Configuration reference:** [docs/CONFIGURATION.md](docs/CONFIGURATION.md) lists every setting, macro,
