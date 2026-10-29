@@ -3,6 +3,19 @@
 What changed in each update of Chordata's main branch, newest first.
 Update from Mainsail's Update Manager, then restart Klipper.
 
+## Unreleased
+
+- **Belt tension in N or lbf.** Tuner Mode can show each pluck's belt tension under the Hz, in the
+  average and in the history. Set the span you pluck and the belt (6 mm or 9 mm, Gates-Unitta 2GT or
+  Gates GT2 / GT3, or its mass in g/m) on Set Target Frequency, or with `belt_span`, `belt_mass` and `tension_unit` in `[chordata]`.
+  Without a span nothing changes. The absolute tension is good to about 15-20 % and reads a little
+  high on short spans (the span must be at least 40 mm); two belts with the same span and belt compare as well as their Hz do.
+- **Target in Hz, N or lbf.** Set Target Frequency now starts with **Belt**, which opens the belt
+  card (span, belt, unit; each make has a hint with the print to look for on the belt: LL-2GT or
+  2MGT / 2MR). The target can then be typed in Hz, N or lbf; a tension target is set as its Hz
+  (to 0.1 Hz) and Tuner Mode shows how far each pluck is in that unit. Picking N or lbf without a
+  span opens a pop-up that leads to the belt card; Hz needs nothing more.
+
 ## 2026-10-29
 
 - **Fixed: Chordata kept listening after Back** ([#27](https://github.com/HydrateFrequently/Chordata/issues/27)).

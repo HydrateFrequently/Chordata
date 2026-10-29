@@ -26,7 +26,8 @@ class Command:
         return int(self.get(key, default))
 
     def get_float(self, key, default=None, **bounds):
-        return float(self.get(key, default))
+        value = self.get(key, default)
+        return None if value is None else float(value)
 
     def error(self, message):
         return ValueError(message)
@@ -429,6 +430,96 @@ class SafetyTests(unittest.TestCase):
             obj.cmd_CHORDATA_POS(Command(GO=1))
         self.assertTrue(scripts[-1].startswith("RESTORE_GCODE_STATE"))
         self.assertNotIn("G1 Z", scripts[1])  # saved Z below current Z never lowers it
+
+
+class TensionTests(unittest.TestCase):
+    def _obj(self, directory, **cfg):
+        obj = plugin()
+        obj.out_dir = directory
+        obj.belt_span, obj.belt_mass, obj.tension_unit = cfg.get("span", 0.), cfg.get("mass", 8.4), cfg.get("unit", "N")
+        return obj
+
+    def test_off_without_a_span(self):
+        with tempfile.TemporaryDirectory() as directory:
+            t = self._obj(directory)._tension()
+            self.assertEqual(t["k"], 0.)
+
+    def test_string_formula_and_gates_gt2_mass(self):
+        # 150 mm of 6 mm GT2 (8.4 g/m) at 110 Hz: 4 * 0.0084 * 0.15^2 * 110^2 = 9.15 N
+        with tempfile.TemporaryDirectory() as directory:
+            obj = self._obj(directory, span=150.)
+            self.assertAlmostEqual(obj._tension()["k"] * 110 ** 2, 9.1476, places=3)
+            self.assertEqual(obj._tension_text(110.), "9.1 N")
+            obj = self._obj(directory, span=150., unit="lbf")
+            self.assertEqual(obj._tension_text(110.), "2.06 lbf")
+
+    def test_command_saves_and_wins_over_the_config(self):
+        with tempfile.TemporaryDirectory() as directory:
+            obj = self._obj(directory, span=100.)
+            cmd = Command(SPAN=150., MASS=12.6, UNIT="lbf")
+            obj.cmd_CHORDATA_TENSION(cmd)
+            with open(os.path.join(directory, "tension.json")) as f:
+                self.assertEqual(json.load(f), {"span": 150., "mass": 12.6, "unit": "lbf", "target_unit": "Hz"})
+            again = self._obj(directory, span=100.)
+            t = again._tension()
+            self.assertEqual((t["span"], t["mass"], t["unit"]), (150., 12.6, "lbf"))
+            self.assertIn("150 mm of span", cmd.messages[-1])
+            obj.cmd_CHORDATA_TENSION(Command(SPAN=0.))
+            self.assertEqual(self._obj(directory, span=100.)._tension()["k"], 0.)   # 0 on the page: Hz only
+
+    def test_command_refuses_bad_values_and_keeps_the_file(self):
+        with tempfile.TemporaryDirectory() as directory:
+            obj = self._obj(directory)
+            for bad in (dict(SPAN=5.), dict(SPAN=30.), dict(SPAN=float("nan")), dict(MASS=0.), dict(MASS=500.), dict(UNIT="Nm"), dict(TARGET_UNIT="kg")):
+                with self.assertRaises(ValueError):
+                    obj.cmd_CHORDATA_TENSION(Command(**bad))
+            self.assertFalse(os.path.exists(os.path.join(directory, "tension.json")))
+
+    def test_a_write_error_is_a_command_error_not_a_shutdown(self):
+        obj = self._obj("/dev/null/chordata")
+        with self.assertRaisesRegex(ValueError, "could not save"):
+            obj.cmd_CHORDATA_TENSION(Command(SPAN=150.))
+
+    def test_summary_uses_the_session_target(self):
+        with tempfile.TemporaryDirectory() as directory:
+            obj = self._obj(directory, span=150.)
+            obj.belts = {"target": 120.}
+            cmd = Command()
+            obj.cmd_CHORDATA_TENSION(cmd)
+            self.assertIn("10.9 N at 120 Hz", cmd.messages[-1])
+
+    def test_config_checks(self):
+        class Cfg:
+            def __init__(self, **v):
+                self.v = v
+            def get_printer(self):
+                return SimpleNamespace(get_reactor=lambda: None, lookup_object=lambda *a, **k: None,
+                                       get_start_args=lambda: {"config_file": "/tmp/printer.cfg"},
+                                       register_event_handler=lambda *a: None)
+            def get(self, key, default=None):
+                return self.v.get(key, default)
+            def getfloat(self, key, default=None, **bounds):
+                return float(self.v.get(key, default))
+            def getint(self, key, default=None, **bounds):
+                return int(self.v.get(key, default))
+            def error(self, message):
+                return ValueError(message)
+        for bad in (dict(belt_span="10"), dict(belt_span="30"), dict(tension_unit="Nm")):
+            with self.assertRaises(ValueError):
+                Chordata(Cfg(**bad))
+        try:
+            Chordata(Cfg(tension_unit="LBF", belt_span="150"))
+        except ValueError:
+            self.fail("LBF in capitals is fine")
+        except Exception:
+            pass                         # (later setup needs a real printer)
+
+    def test_a_broken_file_falls_back_to_the_config(self):
+        with tempfile.TemporaryDirectory() as directory:
+            with open(os.path.join(directory, "tension.json"), "w") as f:
+                f.write('{"span": "x", "mass": 1e9, "unit": "kg"}')
+            t = self._obj(directory, span=150.)._tension()
+            self.assertEqual((t["span"], t["mass"], t["unit"]), (150., 8.4, "N"))
 
 
 class CaptureTests(unittest.TestCase):
