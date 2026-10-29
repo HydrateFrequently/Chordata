@@ -88,6 +88,13 @@ if [ ! -e "$CONFIG_DIR/chordata_settings.cfg" ]; then
 #belt_tolerance: 0.25
 # How many recordings to keep in chordata/recordings (the newest; a 30-minute listen is about 300 MB)
 #recordings_keep: 5
+# Belt tension beside the Hz: the span you pluck in mm (0: Hz only), the belt's mass in g/m
+# (Gates-Unitta 2GT: 6 mm 7.8, 9 mm 11.7; Gates GT2 / GT3: 6 mm 8.4, 9 mm 12.6, 12 mm 16.8)
+# and N or lbf. The page's setup screen sets
+# these too, and what it sets wins.
+#belt_span: 0
+#belt_mass: 7.8
+#tension_unit: N
 # Where Chordata keeps its folder (recordings, allowed fans, the saved toolhead position)
 #path: ~/printer_data/config/chordata
 # All options and macros: docs/CONFIGURATION.md

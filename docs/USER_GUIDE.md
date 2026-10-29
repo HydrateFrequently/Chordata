@@ -177,6 +177,17 @@ flowchart TD
    `[resonance_tester]` uses and the range it hears reliably (for example ADXL345, 0-1440 Hz;
    LIS2DW12, 0-400 Hz); a target outside it is shown in red and can't be started. The instructions and specs are on
    the page's **How it works**.
+   To see the belt tension in N or lbf beside the Hz, press **Belt** first (it says "Not set: Hz only"
+   until a span is given). The belt card takes the span
+   you pluck in mm (at the belt tensioning position, from where the belt leaves one pulley to where it
+   meets the next one or the clamp), the belt (6 mm or 9 mm, Gates-Unitta 2GT
+   or Gates GT2 / GT3, or **Other** and its mass in g/m; the hint under each make says what is printed on
+   that belt: LL-2GT or LL-2GT-E for Gates-Unitta, 2MGT or 2MR for Gates) and the unit. It is saved for next
+   time; an empty span shows Hz only. With a belt set, the target can be typed in **Hz**, **N** or **lbf**:
+   a tension is set as its Hz (to 0.1 Hz), and the other unit shows under the box. N or lbf without a
+   span opens a pop-up that takes you to the belt card, or keeps Hz. The absolute tension is good to about 15-20 % (the span and the belt's mass are rarely
+   known better), and reads a little high on short spans; your two belts, with the same span and
+   belt, compare as well as their Hz do.
 2. Select **Start**. No fan is turned off by Chordata on its own (a fan humming on the belt's note
    gets an Allow button first). It goes straight into the taps: keep your hands off while the red card
    records the background noise. This is the only background recording of the session.
@@ -190,8 +201,9 @@ flowchart TD
    taken for a belt. This step is required: the belts can only be measured once it is done.
    **Measure Toolhead Frequency** repeats it (and records the background again).
 3. Select **Tuner Mode**. When the card turns green (the phone beeps, 1000 Hz, 200 ms),
-   pluck either belt. Each clear pluck shows its frequency, big, and how far it is from the
-   target: tighten or loosen. Turn that belt's tensioner a little and pluck again, until it
+   pluck either belt. Each clear pluck shows its frequency, big (with its tension under it when a
+   span is set), and how far it is from the
+   target (in the target's unit): tighten or loosen. Turn that belt's tensioner a little and pluck again, until it
    is on target (within the tolerance, 0.25 Hz by default). Then the other belt.
 4. Pluck both belts once more: they pull on each other, so turning one moves the other a
    little. You are done when both are on target, and so match each other. Tuner Mode stops

@@ -17,7 +17,10 @@ const path = require('node:path');
     assert.equal(await page.locator('#pTitle').textContent(),'Chordata - Tuner Mode: 110.4 Hz');
     assert.equal(await page.locator('#beltView .hist li').count(),9);
     assert.equal(await page.locator('#beltView .hist li.out').count(),4);
-    assert.match(await page.locator('#beltView').textContent(),/110\.4 Hz.*\+0\.4 Hz, loosen.*Average 110\.06 Hz of the last 5/s);
+    // the demo shows the belt tension too (150 mm of 6 mm GT2): under the number, in the average, the target and each clear pluck
+    assert.match(await page.locator('#beltView').textContent(),/110\.4 Hz9\.2 N.*\+0\.4 Hz, loosen.*Average 110\.06 Hz \(9\.2 N\) of the last 5.*Target 110 Hz \u00b7 9\.1 N/s);
+    assert.equal(await page.locator('#beltView .hist li .t').count(),5);
+    await page.evaluate(()=>{ S.chordata.tension=null; render(); });   // (the checks below: Hz only)
     // the PC layout on a wide screen with a mouse, the phone layout otherwise
     await page.setViewportSize({width:1280,height:900});
     assert.equal(await page.evaluate(()=>{ placeLayout(); return document.documentElement.classList.contains('pc') === pcQuery.matches; }),true);
@@ -130,7 +133,7 @@ const path = require('node:path');
     assert.equal(await live.locator('#targetHz').inputValue(),'110');
     // a typed target goes to the printer as HZ=, rounded to whole Hz
     await live.locator('#targetHz').fill('118.4');
-    await live.locator('#prompt form.ptarget button').click();
+    await live.locator('#prompt form.ptarget button[type=submit]').click();
     await live.waitForFunction(()=>window.__calls.some(r=>r.method==='printer.gcode.script'&&/_CHORDATA_BELTS HZ=118\b/.test(r.params.script)));
     const order=await live.evaluate(()=>[...document.querySelectorAll('#pBody > *')].map(e=>e.id||e.className||e.tagName));
     assert.deepEqual(order,['ptarget','pbuttons','setupJog','pbuttons','pbuttons']);   // no -5..+5 buttons: the box   // the last: How it works
@@ -226,7 +229,64 @@ const path = require('node:path');
     await live.evaluate(()=>{ keepAwake(); });
     await live.waitForTimeout(300);
     assert.equal(await live.evaluate(()=>!!document.querySelector('video[aria-hidden=true]')),true);
+    // Belt tension: the setup block sends each choice at once; Other opens the g/m box; the cue shows N or lbf, or nothing
+    const tens=await live.evaluate(async()=>{ const sent=[]; const real=runGcode; runGcode=(g)=>{ sent.push(g); return Promise.resolve(); };
+      S.chordata.tension={span:0,mass:12.6,unit:'N',k:0};
+      const box=document.body.appendChild(tensionBox());
+      const pressed=()=>[...box.querySelectorAll('.chips button')].filter(b=>b.getAttribute('aria-pressed')==='true').map(b=>b.getAttribute('aria-label')||b.textContent);
+      const massShown=()=>!box.querySelector('#tensMass').closest('.tr').hidden;
+      const out={start:[pressed(), massShown(), box.querySelector('#tensSpan').value]};
+      const span=box.querySelector('#tensSpan'); span.value='150'; span.dispatchEvent(new Event('change'));
+      span.value='5'; span.dispatchEvent(new Event('change'));
+      [...box.querySelectorAll('.chips button')].find(b=>b.textContent==='Other').click();
+      out.other=[pressed(), massShown()];
+      const m=box.querySelector('#tensMass'); m.value='16.8'; m.dispatchEvent(new Event('change'));
+      [...box.querySelectorAll('.chips button')].find(b=>b.getAttribute('aria-label')==='Gates-Unitta 2GT 6 mm').click();
+      out.six=[pressed(), massShown(), [...box.querySelectorAll('.ptens p.help')].filter(p=>!p.hidden).map(p=>p.textContent).pop()];
+      [...box.querySelectorAll('.chips button')].find(b=>b.getAttribute('aria-label')==='Gates GT2 / GT3 6 mm').click();
+      [...box.querySelectorAll('.chips button')].find(b=>b.textContent==='lbf').click();
+      out.sent=sent; box.remove(); runGcode=real; return out; });
+    assert.deepEqual(tens.start,[['Gates GT2 / GT3 9 mm','N'],false,'']);
+    assert.deepEqual(tens.other,[['Other','N'],true]);
+    assert.deepEqual(tens.six,[['Gates-Unitta 2GT 6 mm','N'],false,'Gates-Unitta 2GT 6 mm: 7.8 g/m']);
+    assert.deepEqual(tens.sent,['_CHORDATA_TENSION SPAN=150','_CHORDATA_TENSION MASS=16.8','_CHORDATA_TENSION MASS=7.8','_CHORDATA_TENSION MASS=8.4','_CHORDATA_TENSION UNIT=lbf']);
+    // its own page: the inputs, then which belt is which
+    const tpage=await live.evaluate(()=>{ for (const k in tensSent) delete tensSent[k]; S.chordata.tension={span:150,mass:11.7,unit:'N',k:4*0.0117*0.0225}; tensionPage();
+      const c=$('tensionCard'); const r=[c.querySelector('h2').textContent, !!c.querySelector('#tensSpan'),
+        [...c.querySelectorAll('.chips button')].filter(b=>b.getAttribute('aria-pressed')==='true').map(b=>b.getAttribute('aria-label')||b.textContent),
+        /LL-2GT.*2MGT, 2MR/s.test(c.textContent)]; c.textContent=''; return r; });
+    assert.deepEqual(tpage,['Belt tension',true,['Gates-Unitta 2GT 9 mm','N'],true]);
+    // a target as a tension: N or lbf to Hz (to 0.1 Hz) and back; the hint says how far in that unit; without a span, the pop-up
+    const tgt=await live.evaluate(()=>{ for (const k in tensSent) delete tensSent[k];
+      S.chordata.tension={span:150,mass:8.4,unit:'N',target_unit:'N',k:4*0.0084*0.0225};
+      const b={target:hzOf(9.5,'N'),tol:0.25};
+      const r=[b.target, hzOf(2.0,'lbf'), hzOf(118.4,'Hz'), targetText(b), deltaText(110,b)[1], deltaText(112.2,b)[1]];
+      S.chordata.tension={span:0,mass:8.4,unit:'N',target_unit:'Hz',k:0};
+      const box=document.body.appendChild(targetBox('Target Frequency: 110 Hz'));
+      [...box.querySelectorAll('.tunits button')].find(x=>x.textContent==='N').click();
+      r.push($('needSpan').open, box.querySelector('[aria-pressed=true]').textContent);
+      $('needSpan').close(); box.remove(); return r; });
+    assert.deepEqual(tgt,[112.1,108.5,118,'Target 9.5 N (112.1 Hz)','-0.4 N, tighten','On target',true,'Hz']);
+    // a number typed, then the unit changed before Set: the typed target goes, not the old one
+    const typedT=await live.evaluate(()=>{ for (const k in tensSent) delete tensSent[k];
+      S.chordata.tension={span:150,mass:8.4,unit:'N',target_unit:'Hz',k:4*0.0084*0.0225};
+      const real=runGcode; runGcode=()=>Promise.resolve(); const realP=pressPromptButton; let sent=null; pressPromptButton=(g)=>{ sent=g; };
+      const box=document.body.appendChild(targetBox('Target Frequency: 110 Hz')); const inp=box.querySelector('#targetHz'); const other=$('targetHz'); if (other && other!==inp) other.id='targetHzAway';
+      inp.value='120'; inp.dispatchEvent(new Event('input'));
+      [...box.querySelectorAll('.tunits button')].find(x=>x.textContent==='N').click();
+      const r=[inp.value, box.querySelector('.tconv').textContent, withTypedTarget('_CHORDATA_BELTS STEP=go'), inp.getAttribute('aria-label')];
+      box.refresh(); r.push(inp.value);
+      box.querySelector('button[type=submit]').click(); r.push(sent);
+      box.remove(); if (other && other!==inp) other.id='targetHz'; runGcode=real; pressPromptButton=realP; for (const k in tensSent) delete tensSent[k]; return r; });
+    assert.deepEqual(typedT,['10.9','= 120 Hz','_CHORDATA_BELTS STEP=go HZ=120','Target in N','10.9','_CHORDATA_BELTS HZ=120']);
+    const cueT=(t)=>live.evaluate((t)=>{ S.chordata.tension=t; Object.assign(S.chordata,{state:'listening',belts:{target:110,tol:.25},
+      belt_live:[{freq:110.43,ok:true,t:91}],measurement:{belt:'free',phase:'listening'}}); cueUpdate();
+      const e=document.querySelector('#cueLive .ltens'); return [e.hidden, e.textContent]; },t);
+    assert.deepEqual(await cueT({span:150,mass:8.4,unit:'N',k:4*0.0084*0.0225}),[false,'9.2 N']);
+    assert.deepEqual(await cueT({span:150,mass:8.4,unit:'lbf',k:4*0.0084*0.0225/4.4482216152605}),[false,'2.07 lbf']);
+    assert.deepEqual(await cueT({span:0,mass:8.4,unit:'N',k:0}),[true,'']);
+    await live.evaluate(()=>{ S.chordata.state='idle'; S.chordata.measurement={phase:'idle',belt:null}; S.chordata.belt_live=[]; cueUpdate(); });
     assert.deepEqual(errors,[]);
-    console.log('Web checks passed: offline demo, live replacement, rejected plucks, Tuner history and stable buttons, How it works steps, phone and PC layouts, keep-awake, no JS errors.');
+    console.log('Web checks passed: offline demo, live replacement, rejected plucks, Tuner history and stable buttons, How it works steps, phone and PC layouts, keep-awake, belt tension, no JS errors.');
   } finally { await browser.close(); }
 })().catch(e=>{console.error(e);process.exit(1);});

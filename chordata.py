@@ -41,6 +41,15 @@ class Chordata:
         self.belt_tol = config.getfloat("belt_tolerance", 0.25, above=0.)   # Hz: a pluck this close to the target is on target
         self.belt_target = config.getfloat("belt_target", 110., minval=40., maxval=300.)  # as the setup prompt allows
         self.REC_KEEP = config.getint("recordings_keep", self.REC_KEEP, minval=1)   # raw recordings kept (newest)
+        # belt tension beside the Hz (optional): the span plucked and the belt's mass; the page's
+        # setup saves its own choice in tension.json, which wins over these
+        self.belt_span = config.getfloat("belt_span", 0., minval=0., maxval=self.SPAN_MAX)    # mm; 0: Hz only
+        if 0. < self.belt_span < self.SPAN_MIN:
+            raise config.error("[chordata] belt_span must be 0 (Hz only) or %d-%d mm" % (self.SPAN_MIN, self.SPAN_MAX))
+        self.belt_mass = config.getfloat("belt_mass", 7.8, minval=self.MASS_MIN, maxval=self.MASS_MAX)  # g/m
+        self.tension_unit = {"n": "N", "lbf": "lbf"}.get(config.get("tension_unit", "N").strip().lower())
+        if self.tension_unit is None:
+            raise config.error("[chordata] tension_unit must be N or lbf")
         self.state, self.message = "idle", ""
         self.belts = {}           # the belt tension session, for the prompts
         self._quiet = None        # the background (fans, motors), recorded at the tap step
@@ -61,7 +70,7 @@ class Chordata:
         if webhooks is not None:
             webhooks.register_endpoint("chordata/accept", self._handle_accept)
             webhooks.register_endpoint("chordata/history_reset", self._handle_history_reset)
-        for name in ("START", "FREE", "TAP", "POS", "FAN", "FANS", "FAN_OK"):
+        for name in ("START", "FREE", "TAP", "POS", "TENSION", "FAN", "FANS", "FAN_OK"):
             fn = getattr(self, "cmd_CHORDATA_" + name)
             self.gcode.register_command("_CHORDATA_" + name, fn,
                                         desc=getattr(self, "cmd_CHORDATA_%s_help" % name))
@@ -75,7 +84,7 @@ class Chordata:
                 "belt_live": self.belt_live, "belt_hum": getattr(self, "belt_hum", []), "tap_live": getattr(self, "tap_live", []),
                 "belt_heard": getattr(self, "belt_heard", 0),
                 "history": getattr(self, "history", []), "history_note": getattr(self, "history_note", None),
-                "belt_pos": self._belt_pos(),
+                "belt_pos": self._belt_pos(), "tension": self._tension(),
                 "measurement": dict(self.measurement, elapsed=round(max(
                     0., eventtime - self.measurement["started_at"]), 1))
                 if self.measurement.get("phase") in ("starting", "background", "listening", "analysing", "recording")
@@ -265,7 +274,7 @@ class Chordata:
         belts.clear_cache()
         self._quiet = None                   # the background, recorded once per session at the tap step
         self.measurement = {"phase": "idle", "belt": None}
-        gcmd.respond_info("Chordata: belt tension, target %.0f Hz" % target)
+        gcmd.respond_info("Chordata: belt tension, target %g Hz" % target)
 
     @staticmethod
     def _cols(samples):
@@ -440,7 +449,9 @@ class Chordata:
         why = (" Stopped after %d minutes, the longest Tuner Mode listens: start it again to go on."
                % round(self.FREE_MAX / 60.0)) if stopped == "limit" else ""
         if ok:
-            gcmd.respond_info("Chordata: Tuner Mode: last pluck %.1f Hz (%s).%s" % (ok[-1], ", ".join("%.1f" % f for f in ok), why))
+            t = self._tension()
+            n = (", %s" % self._tension_text(ok[-1], t)) if t["k"] else ""
+            gcmd.respond_info("Chordata: Tuner Mode: last pluck %.1f Hz%s (%s).%s" % (ok[-1], n, ", ".join("%.1f" % f for f in ok), why))
         else:
             gcmd.respond_info("Chordata: Tuner Mode: no clear pluck heard.%s" % why)
 
@@ -502,6 +513,105 @@ class Chordata:
                 g.run_script_from_command("\n".join(moves))
             finally:
                 g.run_script_from_command("RESTORE_GCODE_STATE NAME=_chordata_bpos")
+
+    # ---------------- belt tension from the Hz (optional) ----------------
+    # A plucked span rings like a string: T = 4 m L^2 f^2 (T in N, m in kg/m, L in m, f in Hz),
+    # the formula Gates' and Unitta's sonic tension meters use. Gates-Unitta 2GT (most printers'
+    # belts) weighs 1.3 g/m per mm of width (6 mm 7.8 g/m), Gates PowerGrip GT2 / GT3 2 mm 1.4 g/m
+    # per mm (6 mm 8.4 g/m). The error in T is twice the error in Hz, plus twice the error in the
+    # span, plus the error in the mass; two belts with the same span and mass compare as well as
+    # their Hz do. The belt's own stiffness makes short spans read a little high.
+    SPAN_MIN, SPAN_MAX = 40., 2000.     # mm (0: tension not shown)
+    MASS_MIN, MASS_MAX = 1., 100.       # g/m
+    LBF = 4.4482216152605               # N per lbf
+
+    def _tension_file(self):
+        return os.path.join(self.out_dir, "tension.json")
+
+    def _tension(self):
+        """The span (mm, 0: off), mass (g/m) and unit in use, and k: tension in that unit = k f^2
+        (0 when off). The page's saved choice wins over [chordata]'s."""
+        if not hasattr(self, "_tens"):
+            d = {}
+            try:
+                with open(self._tension_file()) as f:
+                    d = json.load(f)
+                if not isinstance(d, dict):
+                    d = {}
+            except Exception:
+                pass
+            t = {"span": getattr(self, "belt_span", 0.), "mass": getattr(self, "belt_mass", 7.8),
+                 "unit": getattr(self, "tension_unit", "N")}
+            try:
+                span = float(d["span"])
+                if span == 0. or self.SPAN_MIN <= span <= self.SPAN_MAX:
+                    t["span"] = span
+            except Exception:
+                pass
+            try:
+                mass = float(d["mass"])
+                if self.MASS_MIN <= mass <= self.MASS_MAX:
+                    t["mass"] = mass
+            except Exception:
+                pass
+            if d.get("unit") in ("N", "lbf"):
+                t["unit"] = d["unit"]
+            # what the page's target box is in: Hz, or a tension (sent to the macro as its Hz)
+            t["target_unit"] = d.get("target_unit") if d.get("target_unit") in ("Hz", "N", "lbf") else "Hz"
+            k = 4. * t["mass"] / 1000. * (t["span"] / 1000.) ** 2
+            t["k"] = (k / self.LBF if t["unit"] == "lbf" else k) if t["span"] > 0 else 0.
+            self._tens = t
+        return self._tens
+
+    def _tension_text(self, freq, t=None):
+        t = t or self._tension()
+        return ("%.2f lbf" if t["unit"] == "lbf" else "%.1f N") % (t["k"] * freq * freq)
+
+    cmd_CHORDATA_TENSION_help = ("Chordata: belt tension beside the Hz: SPAN= mm plucked (0: Hz only), "
+                                 "MASS= g/m of the belt, UNIT=N or lbf, TARGET_UNIT=Hz, N or lbf (the page's "
+                                 "target box); saved for next time")
+
+    def cmd_CHORDATA_TENSION(self, gcmd):
+        t = dict(self._tension())
+        span = gcmd.get_float("SPAN", None)
+        mass = gcmd.get_float("MASS", None)
+        unit = gcmd.get("UNIT", None)
+        tunit = gcmd.get("TARGET_UNIT", None)
+        if span is not None:
+            if not math.isfinite(span) or not (span == 0. or self.SPAN_MIN <= span <= self.SPAN_MAX):
+                raise gcmd.error("Chordata: span must be 0 (Hz only) or %d-%d mm" % (self.SPAN_MIN, self.SPAN_MAX))
+            t["span"] = round(span, 1)
+        if mass is not None:
+            if not math.isfinite(mass) or not self.MASS_MIN <= mass <= self.MASS_MAX:
+                raise gcmd.error("Chordata: belt mass must be %d-%d g/m" % (self.MASS_MIN, self.MASS_MAX))
+            t["mass"] = round(mass, 2)
+        if unit is not None:
+            unit = {"n": "N", "lbf": "lbf"}.get(unit.strip().lower())
+            if unit is None:
+                raise gcmd.error("Chordata: UNIT must be N or lbf")
+            t["unit"] = unit
+        if tunit is not None:
+            tunit = {"hz": "Hz", "n": "N", "lbf": "lbf"}.get(tunit.strip().lower())
+            if tunit is None:
+                raise gcmd.error("Chordata: TARGET_UNIT must be Hz, N or lbf")
+            t["target_unit"] = tunit
+        if span is not None or mass is not None or unit is not None or tunit is not None:
+            d = {"span": t["span"], "mass": t["mass"], "unit": t["unit"], "target_unit": t["target_unit"]}
+            try:
+                os.makedirs(self.out_dir, exist_ok=True)
+                with open(self._tension_file() + ".part", "w") as f:
+                    json.dump(d, f)
+                os.replace(self._tension_file() + ".part", self._tension_file())
+            except OSError as error:
+                raise gcmd.error("Chordata: could not save the belt tension settings (%s)" % error)
+            del self._tens
+        t = self._tension()
+        if t["k"]:
+            target = (getattr(self, "belts", None) or {}).get("target") or self.belt_target
+            gcmd.respond_info("Chordata: belt tension shown for %g mm of span and %g g/m of belt, in %s (%s at %g Hz)"
+                              % (t["span"], t["mass"], t["unit"], self._tension_text(target, t), target))
+        else:
+            gcmd.respond_info("Chordata: belt tension not shown (no span set): Hz only")
 
     cmd_CHORDATA_TAP_help = ("Chordata: learn how the toolhead rings by itself from one light tap, "
                                   "so a tap is never taken for a belt")
