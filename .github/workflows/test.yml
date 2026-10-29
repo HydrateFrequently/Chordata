@@ -4,7 +4,8 @@ permissions:
   contents: read
 jobs:
   python:
-    runs-on: ubuntu-latest
+    # (ubuntu-latest is 26.04 now, with no Python 3.9 build: 3.9 is what Raspberry Pi OS Bullseye runs)
+    runs-on: ubuntu-24.04
     strategy:
       matrix:
         python: ['3.9', '3.12']

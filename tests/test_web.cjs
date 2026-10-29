@@ -211,6 +211,17 @@ const path = require('node:path');
     await pc.waitForTimeout(400);
     await pc.screenshot({path:'/tmp/chordata-pc-cue.png'});
     await pc.close();
+    // Back while a listen runs (issue #27): the listen is ended first (G-code, homing too, waits for it), then the page goes
+    const backRpc=await live.evaluate(async()=>{ window.__rpc=[]; const real=rpc; rpc=(m,p,w)=>{ window.__rpc.push(m); return Promise.resolve({accepted:true}); };
+      $('backUi').href='#left'; S.chordata.state='listening'; S.chordata.measurement={belt:'tap',phase:'listening'};
+      $('backUi').click(); await new Promise(r=>setTimeout(r,50)); const listening=[location.hash, window.__rpc.slice()];
+      S.chordata.state='idle'; S.chordata.measurement={phase:'idle',belt:null}; location.hash=''; window.__rpc=[];
+      $('backUi').click(); await new Promise(r=>setTimeout(r,50)); const idle=[location.hash, window.__rpc.slice()];
+      S.chordata.state='listening'; location.hash=''; rpc=()=>Promise.reject({message:'Not connected to the printer'});
+      $('backUi').click(); await new Promise(r=>setTimeout(r,50)); const failed=location.hash;
+      S.chordata.state='idle'; rpc=real; return [listening, idle, failed]; });
+    // (the stop not sent: it says so and stays)
+    assert.deepEqual(backRpc,[['#left',['server.chordata.accept']],['#left',[]],'']);
     // the screen stays on: a press starts the keep-awake video on a plain-http page (no wake lock there)
     await live.evaluate(()=>{ keepAwake(); });
     await live.waitForTimeout(300);

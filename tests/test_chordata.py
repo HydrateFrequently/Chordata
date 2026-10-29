@@ -134,6 +134,31 @@ class SafetyTests(unittest.TestCase):
         self.assertEqual(len({n for n, _ in saved}), 1)
         self.assertTrue(all(a for _, a in saved))
 
+    def test_free_tune_ends_by_the_host_clock_when_no_samples_come(self):
+        obj = plugin({"print_stats": status(state="standby"),
+                      "resonance_tester": SimpleNamespace(accel_chips=[("adxl345", object())]),
+                      "toolhead": SimpleNamespace(wait_moves=lambda: None)})
+        obj._record_quiet = lambda *args, **kw: [(i * .01, 0., 0., 0.) for i in range(150)]
+        clock = {"t": 100.}
+        obj.reactor = SimpleNamespace(monotonic=lambda: clock["t"], NEVER=1e30)
+        ticks = []
+
+        def record(chip, toolhead, secs, live=None, stop=None, keep=None, sink=None):
+            # the chip sends nothing: no look ever runs, the samples' time stands still
+            for k in range(1, 2000):
+                clock["t"] += 1.
+                ticks.append(k)
+                if stop():
+                    break
+            return [(0., 0., 0., 0.)] * 300
+        obj._record = record
+        obj._save_recording = lambda *args, **kw: None
+        with patch.object(belts, "Stream", FakeStream):
+            obj.cmd_CHORDATA_FREE(Command())
+        self.assertEqual(ticks[-1], 66)                # FREE_IDLE + 5 s by the host's clock, not 30 minutes
+        self.assertEqual(obj.state, "idle")
+        self.assertEqual(obj.belts["free"]["stopped"], "idle")
+
     def test_free_tune_says_when_it_ran_into_its_longest_listen(self):
         obj = plugin({"print_stats": status(state="standby"),
                       "resonance_tester": SimpleNamespace(accel_chips=[("adxl345", object())]),
@@ -203,6 +228,60 @@ class SafetyTests(unittest.TestCase):
         with patch.object(Chordata, "_accel", lambda self: {"name": "ADXL345", "lo": 0, "hi": 1440}):
             obj, _ = self._tap_plugin(result)
         self.assertEqual(obj.belts["tap_range"], "")
+
+    def test_leaving_the_page_ends_the_tap_listen(self):
+        # Back or Close on the page while the toolhead is tapped (issue #27): G-code, homing too,
+        # waits for a listen, so the page's accept ends this one as it ends Tuner Mode
+        obj = plugin({"print_stats": status(state="standby"),
+                      "resonance_tester": SimpleNamespace(accel_chips=[("adxl345", object())]),
+                      "toolhead": SimpleNamespace(wait_moves=lambda: None)})
+        obj._record_quiet = lambda *args, **kw: [(i * .01, 0., 0., 0.) for i in range(150)]
+        obj.belts["tap_done"] = False            # the first taps of a session
+        stops, sent = [], []
+        req = SimpleNamespace(send=sent.append)
+
+        def record(chip, toolhead, secs, live=None, stop=None, keep=None, sink=None):
+            live([(0., 0., 0., 0.)] * 300)
+            stops.append(stop())                 # one good tap: it listens on
+            obj._handle_accept(req)              # the page is left
+            stops.append(stop())
+            return [(0., 0., 0., 0.)] * 300
+        obj._record = record
+        obj._save_recording = lambda *args, **kw: None
+        taps = [{"t": 1., "ok": True, "why": "", "freq": 105.8}]
+        with patch.object(belts, "analyse_taps", lambda *a, **k: {"taps": taps, "good": 1, "bad": 0, "main": None,
+                                                                  "modes": [], "ring": [], "tau": None, "note": ""}):
+            obj.cmd_CHORDATA_TAP(Command())
+        self.assertEqual(stops, [False, True])
+        self.assertEqual(sent, [{"accepted": True}])
+        self.assertEqual(obj.state, "idle")
+        self.assertFalse(obj.belts["tap_done"])        # one tap is not the fingerprint: tapped again next time
+        # nothing listening: nothing to end
+        obj._handle_accept(req)
+        self.assertEqual(sent[-1], {"accepted": False})
+
+    def test_leaving_a_repeat_of_the_taps_keeps_the_earlier_result(self):
+        obj = plugin({"print_stats": status(state="standby"),
+                      "resonance_tester": SimpleNamespace(accel_chips=[("adxl345", object())]),
+                      "toolhead": SimpleNamespace(wait_moves=lambda: None)})
+        obj._record_quiet = lambda *args, **kw: [(i * .01, 0., 0., 0.) for i in range(150)]
+        main = {"freq": 105.8, "tau": .1, "width": 4., "guard": 2.}
+        obj.belts = dict(obj.belts, tap=[105.8], tap_main=main, tap_done=True)
+        keys = ("tap", "tap_main", "tap_done")
+        before = {k: obj.belts[k] for k in keys}
+
+        def record(chip, toolhead, secs, live=None, stop=None, keep=None, sink=None):
+            obj._handle_accept(SimpleNamespace(send=lambda r: None))
+            return [(0., 0., 0., 0.)] * 300
+        obj._record = record
+        obj._save_recording = lambda *args, **kw: None
+        cmd = Command()
+        with patch.object(belts, "analyse_taps", lambda *a, **k: {"taps": [], "good": 0, "bad": 0, "main": None,
+                                                                  "modes": [], "ring": [], "tau": None, "note": "no tap"}):
+            obj.cmd_CHORDATA_TAP(cmd)
+        self.assertEqual({k: obj.belts[k] for k in keys}, before)
+        self.assertEqual(obj.state, "idle")
+        self.assertTrue(any("earlier toolhead result is kept" in m for m in cmd.messages))
 
     def test_nine_bad_taps_stop_with_advice(self):
         taps = [{"t": float(i), "ok": False, "why": "two taps at once", "freq": None} for i in range(9)]
