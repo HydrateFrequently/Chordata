@@ -12,6 +12,7 @@
 import argparse
 import os
 import sys
+import time
 
 import numpy as np
 
@@ -483,7 +484,9 @@ def quick_double_tap(q):
 def uncertainty():
     """u95: s with n - 1, Student's t, the rounding (readings exactly alike still leave it)."""
     cases = [([90.0], None), ([89.67] * 3, 4.303 * np.sqrt(1e-4 / 12)), ([90.5, 90.9, 91.0], 4.303 * np.sqrt(np.var([90.5, 90.9, 91.0], ddof=1) / 3 + 1e-4 / 12)),
-             ([110.0, 110.05, 110.1, 110.2, 110.1], 2.776 * np.sqrt(np.var([110.0, 110.05, 110.1, 110.2, 110.1], ddof=1) / 5 + 1e-4 / 12))]
+             ([110.0, 110.05, 110.1, 110.2, 110.1], 2.776 * np.sqrt(np.var([110.0, 110.05, 110.1, 110.2, 110.1], ddof=1) / 5 + 1e-4 / 12)),
+             # past the table: t for 21 degrees of freedom is 2.080, not the normal's 1.96
+             ([110.0, 110.3] * 11, 2.0796 * np.sqrt(np.var([110.0, 110.3] * 11, ddof=1) / 22 + 1e-4 / 12))]
     for vals, want in cases:
         got = belts.u95(vals)
         ok = (got is None) if want is None else (got is not None and abs(got - want) < 2e-3)
@@ -700,13 +703,18 @@ def loose_belt():
     print("%-4s %-46s %s" % ("ok" if good else "FAIL", "loose belt, pull on a fan beside a toolhead line", got))
     if not good:
         FAILS.append("loose belt")
-    kn = [(1.0 + 1.3 * i, "ring", 94.5, 1500.0, 0.0, 0.12) for i in range(4)] + \
-         [(1.0 + 1.3 * i, "tap", 187.5, 6000.0, 0.0, 0.22) for i in range(4)]
-    r = belts.analyse(*rec(sorted(kn), 6.5, fan=188.0), quiet=q, avoid=avoid, target=110.0, free=True, hears=1440)
-    bad = [(p["freq"], p["why"]) for p in r["plucks"] if p["ok"]]
-    print("%-4s %-46s %s" % ("ok" if not bad else "FAIL", "knocks there stay refused", [(p["freq"], p["why"]) for p in r["plucks"]]))
-    if bad:
-        FAILS.append("loose belt knocks")
+    # (knocks ring the toolhead 25-30 dB above the noise on a real printer: that loud here, not
+    # louder. A much louder line right on the fan's notch leaks ahead of itself through the
+    # whole-recording band filter and is found early, and the refusal is then for another reason)
+    for amp in (3000.0, 1500.0):
+        kn = [(1.0 + 1.3 * i, "ring", 94.5, 1500.0, 0.0, 0.12) for i in range(4)] + \
+             [(1.0 + 1.3 * i, "tap", 187.5, amp, 0.0, 0.22) for i in range(4)]
+        r = belts.analyse(*rec(sorted(kn), 6.5, fan=188.0), quiet=q, avoid=avoid, target=110.0, free=True, hears=1440)
+        got = [(p["freq"], p["why"]) for p in r["plucks"]]
+        good = len(got) == 4 and all(why.startswith("a knock") for _, why in got)
+        print("%-4s %-46s %s" % ("ok" if good else "FAIL", "knocks there refused as knocks (toolhead %.0f)" % amp, got))
+        if not good:
+            FAILS.append("loose belt knocks %.0f" % amp)
 
 
 def pulled_tone():
@@ -742,6 +750,163 @@ def faint_pull_knock():
         FAILS.append("fast plucks")
 
 
+def dropped_samples():
+    """Samples the chip or the host dropped are put back on the sample clock: scattered single
+    ones and a burst read as if none were missing, in a recording and in the live stream."""
+    q = quiet()
+    t, ax, ay, az = rec(series([110.0] * 5), 7.0)
+    full = belts.analyse(t, ax, ay, az, quiet=q)["freq"]
+    scattered = np.ones(len(t), bool)
+    scattered[np.arange(400, len(t), 160)] = False       # 1 in 160
+    burst = np.ones(len(t), bool)
+    burst[int(0.3 * FS):int(0.4 * FS)] = False          # 0.1 s before the plucks (1.4 % low before)
+    for name, keep in (("scattered", scattered), ("a 0.1 s burst", burst)):
+        r = belts.analyse(t[keep], ax[keep], ay[keep], az[keep], quiet=q)
+        check("samples dropped, %s" % name, near(r, full, 0.05) and r["used"] == 5, r)
+    tr = np.round(t[burst], 6)                         # (timestamps saved rounded)
+    ok = abs(belts.sample_rate(belts.fill_gaps(tr, [ax[burst]])[0]) - FS) < 0.05 and \
+        belts.fill_gaps(np.round(t, 6), [ax])[1][0] is ax
+    print("%-4s %-46s" % ("ok" if ok else "FAIL", "rate with a burst gone and rounded; none: as is"))
+    if not ok:
+        FAILS.append("sample rate")
+    # 35 ms gone while a belt rings on (0.5 s): it comes back as loud as at a pluck, and is no pluck
+    ev = [(1.0 + 1.2 * i, "pluck", 110.0, 1500.0, 3.0, 0.5) for i in range(5)]
+    t2, ax2, ay2, az2 = rec(ev, 7.5)
+    keep = np.ones(len(t2), bool)
+    keep[int(1.6 * FS):int(1.6 * FS) + int(0.035 * FS)] = False
+    r = belts.analyse(t2[keep], ax2[keep], ay2[keep], az2[keep], quiet=q)
+    check("35 ms gone mid-ring: no extra pluck", near(r, 110.0, 0.05) and r["heard"] == 5 and r["used"] == 5, r)
+    st = belts.Stream(FS, q, 110.0, (), hears=0.45 * FS)
+    x2 = np.array([ax2, ay2, az2])[:, keep]
+    reads = []
+    for i in range(0, int(keep.sum()), 320):
+        st.feed(t2[keep][i:i + 320], x2[:, i:i + 320])
+        reads += st.step()
+    reads += st.step(last=True)
+    fin = [p["freq"] for _, r, _ in reads for p in r["plucks"] if p["final"]]
+    ok = len(fin) == 5 and all(abs(f - 110.0) < 0.3 for f in fin)
+    print("%-4s %-46s %s" % ("ok" if ok else "FAIL", "live: 35 ms gone mid-ring, no extra pluck", fin))
+    if not ok:
+        FAILS.append("stream gap mid-ring")
+    st = belts.Stream(FS, q, 110.0, (), hears=0.45 * FS)
+    reads = []
+    tb, xb = t[scattered & burst], np.array([ax, ay, az])[:, scattered & burst]
+    for i in range(0, len(tb), 320):
+        st.feed(tb[i:i + 320], xb[:, i:i + 320])
+        reads += st.step()
+    reads += st.step(last=True)
+    fin = [p["freq"] for _, r, _ in reads for p in r["plucks"] if p["final"] and p["ok"]]
+    ok = len(fin) == 5 and all(abs(f - full) < 0.3 for f in fin)
+    print("%-4s %-46s %s" % ("ok" if ok else "FAIL", "live stream with samples dropped", fin))
+    if not ok:
+        FAILS.append("stream with samples dropped")
+
+
+def tap_hears():
+    """A sensor that hears only up to some Hz (an MPU-6050: 184 Hz): a line the taps ring above
+    that is not learned, and doesn't become the toolhead's note."""
+    ev = [(1.0 + 1.5 * i, "tap", 105.6, 3000.0, 0.0) for i in range(4)]
+    ev += [(1.0 + 1.5 * i, "tap", 330.0, 4000.0, 0.0) for i in range(4)]
+    r = belts.analyse_taps(*rec(sorted(ev), 8.0), quiet=quiet(), hears=184.0)
+    ok = r["good"] == 3 and r["main"] and abs(r["main"]["freq"] - 105.6) <= 0.6 and all(m < 184.0 for m in r["modes"])
+    print("%-4s %-46s %s" % ("ok" if ok else "FAIL", "taps: nothing above what the sensor hears", r["modes"]))
+    if not ok:
+        FAILS.append("tap hears")
+
+
+def long_ring_rates():
+    """A toolhead line that rings long (0.5 s) 3-5 Hz from the plucks, rung by each one: read
+    to within 0.15 Hz live, at 1600, 3200 and 4000 samples/s. And what it costs: the fit
+    that takes the ringing out is the most work a listen does; it must stay well inside real
+    time (about 15-20 % on a PC; the budget leaves room for a slow CI machine, a Pi is 3-4x
+    slower than a PC)."""
+    global FS
+    ring = [{"freq": 95.5, "guard": 1.0, "tau": 0.5, "width": 2.0}]
+    want = [90.0, 92.0, 91.0, 90.5, 92.5]
+    fs0 = FS
+    try:
+        for fs in (1600.0, 3200.0, 4000.0):
+            FS = fs
+            ev = []
+            for i, f in enumerate(want):
+                ev += [(1.0 + 1.2 * i, "pluck", f, 1500.0, 3.0), (1.0 + 1.2 * i, "ring", 95.5, 900.0, 0.0, 0.5)]
+            r = rec(ev, 8.0)
+            belts.clear_cache()
+            st = belts.Stream(fs, quiet(), 110.0, ring, hears=0.45 * fs)
+            k, reads = int(0.1 * fs), []
+            cpu = time.process_time()
+            for i in range(0, len(r[0]), k):
+                st.feed(r[0][i:i + k], np.asarray(r[1:])[:, i:i + k])
+                reads += st.step()
+            reads += st.step(last=True)
+            cpu = (time.process_time() - cpu) / 8.0
+            fin = [p["freq"] for _, x, _ in reads for p in x["plucks"] if p["final"] and p["ok"]]
+            ok = len(fin) == 5 and all(abs(a - b) <= 0.15 for a, b in zip(fin, want)) and cpu < 0.6
+            print("%-4s %-46s %s, cpu %.0f %% of real time" % ("ok" if ok else "FAIL",
+                  "long-ringing toolhead 3-5 Hz off, %d sps" % fs, fin, 100 * cpu))
+            if not ok:
+                FAILS.append("long ring %d sps" % fs)
+    finally:
+        FS = fs0
+
+
+def jitter_and_bad_samples():
+    """Timestamps that jitter (a host that stamps them late now and then) are not gaps: nothing
+    is filled in, and the readings are the clean recording's. A sample that isn't a number, or
+    out of order, is left out of the live stream as if the chip had dropped it; a background
+    recording with one is refused."""
+    q = quiet()
+    t, ax, ay, az = rec(series([110.0] * 5), 7.0)
+    clean = belts.analyse(t, ax, ay, az, quiet=q)["freq"]
+    for sig in (0.2, 0.3):
+        tj = np.sort(t + rng.normal(0, sig / FS, len(t)))
+        tj += np.arange(len(tj)) * 1e-12
+        r = belts.analyse(tj, ax, ay, az, quiet=q)
+        ok = near(r, clean, 0.15) and abs(r["metadata"]["sample_rate"] - FS) < 1.0 and r["used"] == 5
+        check("timestamps jitter %.1f of a step" % sig, ok, r)
+        st = belts.Stream(FS, q, 110.0, (), hears=0.45 * FS)
+        x = np.array([ax, ay, az])
+        reads = []
+        for i in range(0, len(tj), 320):
+            st.feed(tj[i:i + 320], x[:, i:i + 320])
+            reads += st.step()
+        reads += st.step(last=True)
+        fin = [p["freq"] for _, rr, _ in reads for p in rr["plucks"] if p["final"] and p["ok"]]
+        ok = len(fin) == 5 and all(abs(f - clean) < 0.3 for f in fin)
+        print("%-4s %-46s %s" % ("ok" if ok else "FAIL", "live: timestamps jitter %.1f of a step" % sig, fin))
+        if not ok:
+            FAILS.append("stream jitter %.1f" % sig)
+    # a gap right before a pluck (inside DEAD): the pluck is still found
+    keep = np.ones(len(t), bool)
+    keep[int(1.9 * FS):int(1.9 * FS) + int(0.035 * FS)] = False
+    r = belts.analyse(t[keep], ax[keep], ay[keep], az[keep], quiet=q)
+    check("35 ms gone 0.3 s before a pluck: all 5 found", near(r, clean, 0.1) and r["heard"] == 5 and r["used"] == 5, r)
+    # one NaN sample in the stream
+    xb = np.array([ax, ay, az]).copy()
+    xb[1, int(2.5 * FS)] = np.nan
+    st = belts.Stream(FS, q, 110.0, (), hears=0.45 * FS)
+    reads = []
+    for i in range(0, len(t), 320):
+        st.feed(t[i:i + 320], xb[:, i:i + 320])
+        reads += st.step()
+    reads += st.step(last=True)
+    fin = [p["freq"] for _, rr, _ in reads for p in rr["plucks"] if p["final"] and p["ok"]]
+    ok = len(fin) == 5 and all(abs(f - clean) < 0.3 for f in fin)
+    print("%-4s %-46s %s" % ("ok" if ok else "FAIL", "live: one sample that isn't a number", fin))
+    if not ok:
+        FAILS.append("stream NaN")
+    qb = [a.copy() for a in q]
+    qb[0][10] = np.inf
+    try:
+        belts.Stream(FS, qb, 110.0, ())
+        ok = False
+    except ValueError:
+        ok = True
+    print("%-4s %-46s" % ("ok" if ok else "FAIL", "live: a background recording with inf is refused"))
+    if not ok:
+        FAILS.append("stream inf quiet")
+
+
 def tap_spot():
     """The spot's note is the one most taps ring: a first tap whose loudest line is another
     mode (a Beacon now and then) doesn't make the next taps "another spot"."""
@@ -764,6 +929,10 @@ if __name__ == "__main__":
     synthetic()
     background_hum()
     tap_spot()
+    tap_hears()
+    dropped_samples()
+    jitter_and_bad_samples()
+    long_ring_rates()
     loose_belt()
     pulled_tone()
     faint_pull_knock()

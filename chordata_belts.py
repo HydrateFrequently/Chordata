@@ -211,6 +211,12 @@ class Stream:
         self.d, self.band_hi = decim_plan(fs, target, hears)
         self.fsd = fsd = fs / self.d
         q = np.asarray(quiet, float)
+        if q.ndim != 2 or q.shape[0] != 3:
+            raise ValueError("quiet recording must contain three acceleration arrays")
+        if not np.isfinite(q).all():
+            raise ValueError("quiet recording contains invalid acceleration samples")
+        if not math.isfinite(fs) or fs <= 2 * SEARCH[0] / 0.45:
+            raise ValueError("accelerometer sample rate is too low for belt analysis")
         self.q = list(decimate(np.arange(q.shape[1]) / fs, q, fs, self.d)[1]) if self.d > 1 else list(q)
         if len(self.q[0]) <= int(0.5 * fsd):
             raise ValueError("the quiet recording is too short")
@@ -238,6 +244,7 @@ class Stream:
                           if len(self.q[0]) >= 2 * self.bn else 0.0) or 1e-9
         self.heard = 0            # onsets found in the whole listen
         self.last_on = None       # the time of the latest
+        self.note = None          # the belt's last final reading (Hz) in this stream
         self._start()
 
     def _start(self):
@@ -257,6 +264,9 @@ class Stream:
         self.hum = None           # (mask, Hz) from steady_in
         self.hum_t = None
         self.fed = None
+        self.tail_t, self.tail_x = np.zeros(0), np.zeros((3, 0))     # the last FILL_W samples fed (fill_gaps)
+        self.pend_t, self.pend_x = np.zeros(0), np.zeros((3, 0))     # the last FILL_W samples given, not fed yet
+        self.filled = []          # (first, last) s of stretches fill_gaps put back (no onset just after them)
         self.done = []            # reads made since the last step() (a gap ends the stream: its last reads)
         self.prov, self.clear = None, 0
         self.lread = {}           # onset -> where the stream was at its last live read
@@ -283,6 +293,16 @@ class Stream:
         if not len(t):
             return
         axes = np.asarray(axes, float).reshape(3, -1)
+        if axes.shape[1] != len(t):
+            raise ValueError("recording must contain equally sized time and acceleration arrays")
+        ok = np.isfinite(t) & np.isfinite(axes).all(axis=0) & np.r_[True, np.diff(t) > 0]
+        if not ok.all():
+            # a sample that isn't a number, or out of order (a host hiccup): left out, as if the
+            # chip had dropped it (fill_gaps puts the place back); never into the buffer, where one
+            # NaN would spoil every look for KEEP s
+            t, axes = t[ok], axes[:, ok]
+            if not len(t):
+                return
         cut = np.flatnonzero(np.diff(t) > self.GAP)
         if len(cut):
             # samples missing inside this batch: each stretch on its own, as separate batches
@@ -294,7 +314,29 @@ class Stream:
             done = self.step(last=True)        # (with the reads not handed out yet)
             self._start()
             self.done = done
+        # a few samples dropped (less than GAP s): put back on the sample clock (fill_gaps), or
+        # each tone after them would start in the wrong place. A long step is a gap only when the
+        # FILL_W samples after it agree, so a batch's last FILL_W samples wait for the next batch
+        # (5 ms at 3.2 kHz); the FILL_W fed last say where the clock was before a step
+        lead = len(self.tail_t)
+        t, axes = np.r_[self.tail_t, self.pend_t, t], np.column_stack([self.tail_x, self.pend_x, axes])
         self.fed = float(t[-1])
+        # the last FILL_W wait, as they came: a step among them (at the batch's end too) is judged
+        # next time, with the samples after it in
+        hold = min(FILL_W, len(t) - lead)
+        self.pend_t, self.pend_x = t[len(t) - hold:].copy(), axes[:, len(t) - hold:].copy()
+        t, axes = t[:len(t) - hold], axes[:, :len(t) - hold]
+        if len(t) > lead and (np.diff(t[max(lead - 1, 0):]) > 1.5 / self.fs).any():
+            t, aa = fill_gaps(t, list(axes), 1.0 / self.fs, self.filled, start=lead)
+            axes = np.asarray(aa)
+        self._ingest(t[lead:], axes[:, lead:])
+
+    def _ingest(self, t, axes):
+        if not len(t):
+            return
+        self.tail_t = np.r_[self.tail_t, t][-FILL_W:]
+        self.tail_x = np.column_stack([self.tail_x, axes])[:, -FILL_W:]
+        self.filled = [x for x in self.filled if x[1] + FILL_SHADOW > t[-1] - self.KEEP - 2.0]
         td, yd = self.dec.feed(t, axes)
         if len(td):
             self.t = np.concatenate([self.t, td])
@@ -308,6 +350,9 @@ class Stream:
             if cut > 0:
                 self.t, self.y, self.env, self.rise = self.t[cut:], self.y[:, cut:], self.env[cut:], self.rise[cut:]
                 self.i0 += cut
+                if len(self.onsets) > 64:
+                    # (a 30-minute listen: only the onsets still in the buffer, and the last one)
+                    self.onsets = [o for o in self.onsets if o >= self.i0 - self.dead] or self.onsets[-1:]
 
     def _thr(self, i):
         """find_plucks' threshold at stream indices i: 5x the quiet level, and 3 % of the loudest
@@ -344,6 +389,8 @@ class Stream:
                 del self.bm_vals[:drop]
                 self.bm_first += drop
             self.rise[e0 - self.i0:e1 - self.i0] = (e > 3.0 * prior) & (e > self._thr(np.arange(e0, e1)))
+            if self.filled:
+                self.rise[e0 - self.i0:e1 - self.i0] &= ~_near_fill(self.t[e0 - self.i0:e1 - self.i0], self.filled)
             self.e_end = e1
 
     def _beside_env(self, axes, s0, s1, bm, bm_key=None):
@@ -513,6 +560,8 @@ class Stream:
             pr = env[np.maximum(k - self.back, 0)]
             thr = np.maximum(self._thr(k + self.i0 + w0), 0.03 * float(env[tail:].max()))
             rise[tail:] = (env[tail:] > thr) & (env[tail:] > 3.0 * pr)
+            if self.filled:
+                rise[tail:] &= ~_near_fill(t[tail:], self.filled)
         only = [o - self.i0 - w0 for o in live + fin if o >= self.i0 + w0]
         # hums judged on this stretch, its plucks too (one that starts at them is a belt), as analyse() would
         m, new = steady_in(list(self.y[:, w0:]), self.fsd, self.q, on)
@@ -520,13 +569,15 @@ class Stream:
         r = analyse(t, *self.y[:, w0:], quiet=self.q, avoid=self.avoid, target=self.target, free=True,
                     hears=self.hears, band_hi=self.band_hi,
                     stream={"onsets": on, "env": env, "rise": rise, "hum": (m, new) if m is not None else None, "only": only,
-                            "gap": gap})
+                            "gap": gap, "note": self.note})
         fset = {o - self.i0 - w0 for o in fin}
         for p in r["plucks"]:
             # (its onset: the nearest read; onsets are DEAD apart, its t rounded to 0.01 s)
             k = min(only, key=lambda k: abs(p["t"] * self.fsd - k))
             p["final"] = k in fset
             p["at"] = float(t[k])         # its onset's own time in the stream (the same at every read)
+            if p["final"] and p["ok"]:
+                self.note = p["freq"]          # (the belt's last reading: a far-off hum hides nothing)
             if p["final"] and p.get("db") is not None and p.get("db2") is not None:
                 g = p["db"] - p["db2"]
                 if p["ok"] and g <= PULL_GAP:
@@ -545,6 +596,9 @@ class Stream:
         return float(t[0]), r, float(t[-1] - t[0])
 
     def step(self, last=False):
+        if last and len(self.pend_t):
+            self._ingest(self.pend_t, self.pend_x)         # (the samples held back for the next batch)
+            self.pend_t, self.pend_x = np.zeros(0), np.zeros((3, 0))
         out, self.done = self.done, []
         if len(self.t) < int(0.5 * self.fsd):
             return out
@@ -766,9 +820,11 @@ def _band(axes, fs, lo, hi, mask):
     return _smooth(np.sqrt(sum(x * x for x in out)), max(1, int(0.01 * fs)))
 
 
-def find_plucks(axes, fs, lo, hi, mask, base=None, env=None):
+def find_plucks(axes, fs, lo, hi, mask, base=None, env=None, skip=None):
     """Onset indices of the plucks: the energy in the band jumps up.
-    base: the band level without plucks (from a quiet recording), if there is one."""
+    base: the band level without plucks (from a quiet recording), if there is one. skip: samples
+    where no onset is taken (after a stretch fill_gaps put back; before the DEAD s pause, so a
+    jump there never hides the pluck that follows it)."""
     if env is None:
         env = _band(axes, fs, lo, hi, mask)
     if base is None:
@@ -782,6 +838,8 @@ def find_plucks(axes, fs, lo, hi, mask, base=None, env=None):
     dead, back = int(DEAD * fs), max(1, int(0.04 * fs))
     prior = np.concatenate([np.full(min(back, n), env[0]), env[:max(0, n - back)]])     # env[max(0, i - back)]
     cand = np.flatnonzero((env > thr) & (env > 3.0 * prior))
+    if skip is not None:
+        cand = cand[~skip[cand]]
     i = 0
     for c in cand:                        # the first candidate at or after i, then skip DEAD
         if c < i:
@@ -796,7 +854,7 @@ def find_plucks(axes, fs, lo, hi, mask, base=None, env=None):
 LONG_FRAME = 0.2          # s: frames for finding plucks while the toolhead rings on
 
 
-def _onsets_beside(axes, fs, lo, hi, mask, modes, quiet=None):
+def _onsets_beside(axes, fs, lo, hi, mask, modes, quiet=None, skip=None):
     """Onsets of plucks while a stiff toolhead still rings from a knock: in short spectra
     (LONG_FRAME), leaving out the toolhead's own lines (and the spread of a line in such
     a short frame), so its ringing can't hide a pluck that comes during it. (Cutting
@@ -834,7 +892,7 @@ def _onsets_beside(axes, fs, lo, hi, mask, modes, quiet=None):
     out, i = [], back
     dead = int(DEAD * fs / hop)
     while i < len(e):
-        if e[i] > thr and e[i] > 3.0 * e[i - back]:
+        if e[i] > thr and e[i] > 3.0 * e[i - back] and (skip is None or not skip[min(int(idx[i] + n), len(skip) - 1)]):
             # the frame's end is where the pluck has just come in
             out.append(int(idx[i] + n))
             i += dead
@@ -926,7 +984,14 @@ def u95(values):
         return None
     s = float(np.std(v, ddof=1))
     u = math.sqrt(s * s / n + RES * RES / 12.0)
-    t = T95[n - 2] if n - 2 < len(T95) else 1.96
+    k = n - 1                     # degrees of freedom
+    if k <= len(T95):
+        t = T95[k - 1]
+    else:
+        # past the table: Student's t from the normal's 1.96 (Cornish-Fisher, to 3 terms:
+        # within 0.0003 of the exact value from 21 degrees of freedom on)
+        z = 1.959964
+        t = z + (z ** 3 + z) / (4 * k) + (5 * z ** 5 + 16 * z ** 3 + 3 * z) / (96 * k * k)
     return round(t * u, 3)
 
 
@@ -1306,15 +1371,124 @@ def _refine(axes, fs, a0, a1, fr, long):
         return fr
     t = np.arange(a1 - a0) / fs
     y = np.column_stack([a[a0:a1] - a[a0:a1].mean() for a in axes])
+    # The searches below try the same tones over and over (each belt tone with every mode
+    # tried, each mode with every belt tone): each tone is made once, and so is each product
+    # of two of them (and of one with the recording). A fit is then a solve of a few
+    # equations, not of the whole window: least squares by its normal equations, scaled
+    # (Jacobi) so the products' sizes don't matter. On a Pi this is most of the work a
+    # pluck next to a long-ringing toolhead line costs.
+    yy = float(np.sum(y * y))
+    cs, ex, cols, dots, ydots = {}, {}, {}, {}, {}
 
-    def tone(F, tau, k=1):
-        e = np.exp(-k * t / max(tau, 0.02))
-        return [e * np.cos(2 * math.pi * k * F * t), e * np.sin(2 * math.pi * k * F * t)]
+    def col(key):
+        v = cols.get(key)
+        if v is None:
+            F, tau, k, part = key
+            w = cs.get((F, k))
+            if w is None:
+                w = cs[(F, k)] = (np.cos(2 * math.pi * k * F * t), np.sin(2 * math.pi * k * F * t))
+            e = ex.get((tau, k))
+            if e is None:
+                e = ex[(tau, k)] = np.exp(-k * t / max(tau, 0.02))
+            v = cols[key] = e * w[part]
+        return v
+
+    def dot(a, b):
+        key = (a, b) if a <= b else (b, a)
+        v = dots.get(key)
+        if v is None:
+            v = dots[key] = float(col(a) @ col(b))
+        return v
+
+    def ydot(a):
+        v = ydots.get(a)
+        if v is None:
+            v = ydots[a] = col(a) @ y
+        return v
+
+    def keys_of(F, tb, ms):
+        return [(F, tb, 1, 0), (F, tb, 1, 1), (F, tb, 2, 0), (F, tb, 2, 1)] + \
+               [(m, tau, 1, p) for m, tau in ms for p in (0, 1)]
+
+    nw = a1 - a0
+    ztone, ytone = {}, {}             # per tone (F, tau, k): its z and z^nw, and its cos and sin with the recording
+    ydec = {}                         # the recording times each decay (tau, k)
+
+    def geo(w, wn):
+        # sum of w^j, j = 0 .. nw-1 (wn = w^nw; a decaying tone times another, summed over the window)
+        d = 1.0 - w
+        small = np.abs(d) < 1e-12
+        return np.where(small, nw, (1.0 - wn) / np.where(small, 1.0, d))
+
+    def resid_many(fits):
+        """resid for many fits (F, tb, ms) at once, each with as many tones. A decaying tone is
+        Re and Im of z^j (z = e^((-k/tau + i 2 pi k F)/fs)), so the product of two summed over
+        the window is a geometric series: exact, without going through the window's samples.
+        The products with the recording are made once per tone, all new tones together. The
+        solves: one batch."""
+        uniq = {}
+        idx = np.array([[uniq.setdefault(x, len(uniq)) for x in [(F, tb, 1), (F, tb, 2)] + [(m, tau, 1) for m, tau in ms]]
+                        for F, tb, ms in fits])
+        new = [x for x in uniq if x not in ztone]
+        # Re and Im of z^j are the tone's cos and sin columns, so z^j times the recording gives
+        # both its products at once. z^j = e^(-k j/(tau fs)) e^(i 2 pi k F j/fs): the decay goes
+        # on the recording (one per ring time), the turning is made once per frequency, and
+        # the tones are tried at three ring times each.
+        for i in range(0, len(new), 96):
+            part = new[i:i + 96]
+            fk = list(dict.fromkeys((F, k) for F, _, k in part))
+            row = {x: r for r, x in enumerate(fk)}
+            turn = np.exp(np.outer([2j * math.pi * k * F / fs for F, k in fk], np.arange(nw)))
+            groups = {}
+            for x in part:
+                groups.setdefault((x[1], x[2]), []).append(x)
+            for (tau, k), xs in groups.items():
+                yd = ydec.get((tau, k))
+                if yd is None:
+                    yd = ydec[(tau, k)] = y * np.exp(-k * np.arange(nw) / (max(tau, 0.02) * fs))[:, None]
+                yz = turn[[row[(F, k)] for F, _, k in xs]] @ yd
+                for x, v in zip(xs, yz):
+                    F = x[0]
+                    e = complex(-k / max(tau, 0.02), 2 * math.pi * k * F) / fs
+                    ztone[x] = (np.exp(e), np.exp(e * nw))
+                    ytone[x] = np.array([v.real, v.imag])
+        u = list(uniq)
+        zz = np.array([ztone[x] for x in u])
+        Z, ZN = zz[:, 0][idx], zz[:, 1][idx]
+        P = geo(Z[:, :, None] * Z[:, None, :], ZN[:, :, None] * ZN[:, None, :])
+        Q = geo(Z[:, :, None] * np.conj(Z[:, None, :]), ZN[:, :, None] * np.conj(ZN[:, None, :]))
+        c, K = Z.shape
+        G = np.empty((c, 2 * K, 2 * K))
+        G[:, 0::2, 0::2] = 0.5 * (P.real + Q.real)          # cos cos
+        G[:, 1::2, 1::2] = 0.5 * (Q.real - P.real)          # sin sin
+        cs = 0.5 * (P.imag - Q.imag)                         # cos (row) sin (column)
+        G[:, 0::2, 1::2] = cs
+        G[:, 1::2, 0::2] = cs.transpose(0, 2, 1)
+        B = np.array([ytone[x] for x in u])[idx].reshape(c, 2 * K, y.shape[1])
+        s = 1.0 / np.sqrt(np.maximum(np.einsum("cii->ci", G), 1e-300))
+        Bs = B * s[:, :, None]
+        try:
+            Z = np.linalg.solve(G * s[:, :, None] * s[:, None, :], Bs)
+        except np.linalg.LinAlgError:
+            return np.array([resid(*f) for f in fits])
+        return yy - np.sum(Bs * Z, axis=(1, 2))
 
     def resid(F, tb, ms):
-        A = np.column_stack(tone(F, tb) + tone(F, tb, 2) + [c for m, tau in ms for c in tone(m, tau)])
-        r = y - A @ np.linalg.lstsq(A, y, rcond=None)[0]
-        return float(np.sum(r * r))
+        keys = keys_of(F, tb, ms)
+        n = len(keys)
+        G = np.empty((n, n))
+        for i in range(n):
+            for j in range(i, n):
+                G[i, j] = G[j, i] = dot(keys[i], keys[j])
+        B = np.array([ydot(k) for k in keys])
+        s = 1.0 / np.sqrt(np.maximum(np.diag(G), 1e-300))
+        try:
+            X = np.linalg.solve(G * s[:, None] * s[None, :], B * s[:, None])
+        except np.linalg.LinAlgError:
+            A = np.column_stack([col(k) for k in keys])
+            r = y - A @ np.linalg.lstsq(A, y, rcond=None)[0]
+            return float(np.sum(r * r))
+        return yy - float(np.sum((B * s[:, None]) * X))
 
     ms = list(near)
     F, tb = fr, 0.2
@@ -1326,28 +1500,32 @@ def _refine(axes, fs, a0, a1, fr, long):
     # a mode a little off pulls the belt, which then holds the mode there)
     j0 = min(range(len(near)), key=lambda j: abs(fr - near[j][0]))
     best = None
+    if not coarse:
+        return fr
     for dm in np.arange(-0.4, 0.4001, 0.1):
         trial = ms[:j0] + [(near[j0][0] + dm, near[j0][1])] + ms[j0 + 1:]
-        for x in coarse:
-            for b in (0.1, 0.2, 0.4):
-                r = resid(x, b, trial)
-                if best is None or r < best[0]:
-                    best = (r, x, b, trial)
+        fits = [(x, b, trial) for x in coarse for b in (0.1, 0.2, 0.4)]
+        r = resid_many(fits)
+        i = int(np.argmin(r))              # (the first of equals, as one at a time in this order)
+        if best is None or r[i] < best[0]:
+            best = (r[i], fits[i][0], fits[i][1], trial)
     F, tb, ms = best[1], best[2], best[3]
     for it in range(3):
         # the belt, for the modes as they are now, then each mode for the belt
         grid = [F + d for d in np.arange(-0.3, 0.3001, 0.02)]
-        best = min((resid(x, b, ms), x, b) for x in grid for b in (0.1, 0.2, 0.4))
-        F, tb = best[1], best[2]
+        fits = [(x, b, ms) for x in grid for b in (0.1, 0.2, 0.4)]
+        i = int(np.argmin(resid_many(fits)))
+        F, tb = fits[i][0], fits[i][1]
         # each mode, for the belt as it is now
         for j, (m0, tau0) in enumerate(near):
             cands = [(m0 + d, tau0 * k) for d in np.arange(-0.4, 0.4001, 0.02) for k in (0.6, 1.0, 1.6)]
             cands.append(ms[j])
-            ms[j] = min(cands, key=lambda c: resid(F, tb, ms[:j] + [c] + ms[j + 1:]))[0:2]
+            r = resid_many([(F, tb, ms[:j] + [c] + ms[j + 1:]) for c in cands])
+            ms[j] = cands[int(np.argmin(r))][0:2]
     if abs(F - fr) >= span - 0.05:
         return fr                     # no clear minimum: keep the spectrum's reading
     # the minimum to a fraction of a step
-    r = [resid(F + d, tb, ms) for d in (-0.02, 0.0, 0.02)]
+    r = list(resid_many([(F + d, tb, ms) for d in (-0.02, 0.0, 0.02)]))
     den = r[0] - 2 * r[1] + r[2]
     off = 0.5 * (r[0] - r[2]) / den if den > 0 else 0.0
     return float(F + max(-0.5, min(0.5, off)) * 0.02)
@@ -1535,7 +1713,96 @@ def _steady(axes, fs, n, nfft):
     return np.where(hi > 2.0 * lo, np.minimum(lo, floor), lo)
 
 
-def _setup(t, ax, ay, az, quiet):
+def sample_rate(t):
+    """Samples per second of the timestamps t, from its ends (not from the median step:
+    timestamps saved rounded have steps that differ by more than a reading may be off).
+    None for fewer than two samples. The samples missing are counted in (fill_gaps)."""
+    t = np.asarray(t, float)
+    if len(t) < 2 or not t[-1] > t[0]:
+        return None
+    t = fill_gaps(t, [])[0]
+    return (len(t) - 1) / float(t[-1] - t[0])
+
+
+FILL_SHADOW = 0.1         # s after samples were filled in where no onset is taken (fill_gaps)
+FILL_DIP = 0.004          # s: a stretch filled in shorter than this doesn't dip the band level
+
+
+FILL_W = 16               # samples either side of a long step that say whether the clock really fell behind
+
+
+def fill_gaps(t, axes, step=None, spans=None, start=0):
+    """The samples the chip or the host dropped put back, on the sample clock, filled in a
+    straight line. Left out, every tone in a recording with a burst of missing samples reads
+    off (by its rate from the ends: a 30 ms burst in 3 s, 1 % low; and each tone after it starts
+    in the wrong place). A step more than 1.5x the usual one (step, or the median) is a gap only
+    when the clock stays behind after it: the FILL_W samples after it sit, on average, a sample or
+    more later than the FILL_W before it say they should. A long step whose neighbours make it up
+    is the timestamps' own jitter, and nothing is missing there.
+    Returns (t, axes) as they were when nothing is missing. spans: a list the filled stretches
+    are added to, as (first, last) times: a straight line has no tone, so where a ringing belt
+    comes back after it, the band level jumps as at a pluck (see FILL_SHADOW). start: the first
+    sample whose step from the one before may be a gap (the ones before are decided already)."""
+    t = np.asarray(t, float)
+    d = np.diff(t)
+    if len(d) < 2:
+        return t, axes
+    usual = float(np.median(d)) if step is None else float(step)
+    if not usual > 0:
+        return t, axes
+    cand = np.flatnonzero(d > 1.5 * usual)
+    cand = cand[cand >= max(start - 1, 0)]
+    if not len(cand):
+        return t, axes
+    n = len(t)
+    # the step: from the ends, over every sample there is and (a second pass) the ones missing.
+    # Not the median (timestamps saved rounded have steps that differ by more than that), and
+    # not the mean of the short steps alone (under jitter that is low, and over FILL_W samples a
+    # step a few % low reads as the clock falling behind)
+    given = step is not None
+    step = float(step) if given else float(t[-1] - t[0]) / len(d)
+    for _ in range(1 if given else 2):
+        k = np.ones(len(d))
+        for i in cand:
+            j = np.arange(1, min(FILL_W, i) + 1)                       # t[i] as the samples before it place it
+            before = float(np.mean(t[i - j] + j * step)) if len(j) else t[i]
+            j = np.arange(1, min(FILL_W, n - 2 - i) + 1)               # t[i + 1] as the samples after it place it
+            after = float(np.mean(t[i + 1 + j] - j * step)) if len(j) else t[i + 1]
+            missing = round((after - before) / step) - 1
+            if missing >= 1:
+                k[i] = missing + 1
+        step = step if given else float(t[-1] - t[0]) / float(np.sum(k))
+    if not (k > 1).any():
+        return t, axes
+    at = np.r_[0.0, np.cumsum(k)]                 # where each sample goes on the clock
+    grid = np.arange(int(at[-1]) + 1, dtype=float)
+    if spans is not None:
+        spans += [(float(t[i]), float(t[i + 1])) for i in np.flatnonzero(k > 1) if d[i] >= FILL_DIP]
+    return np.interp(grid, at, t), [np.interp(grid, at, np.asarray(a, float)) for a in axes]
+
+
+def _near_fill(times, spans):
+    """Which of these times are in a filled stretch or FILL_SHADOW s after it."""
+    times = np.asarray(times, float)
+    out = np.zeros(len(times), bool)
+    for a, b in spans:
+        out |= (times >= a) & (times <= b + FILL_SHADOW)
+    return out
+
+
+def _hears(hears):
+    """Up to where the sensor hears reliably (Hz; inf when not known)."""
+    if hears is None:
+        return math.inf
+    hears = float(hears)
+    if not math.isfinite(hears) or hears <= 0:
+        raise ValueError("hears must be a positive finite frequency")
+    return hears
+
+
+def _setup(t, ax, ay, az, quiet, packed=False):
+    """(t, axes, fs, q) checked, or None if too short. packed: the samples are on the clock as they
+    are (Stream's own stretches, its onsets are sample counts in them): no gap is filled."""
     t = np.asarray(t, float)
     axes = [np.asarray(a, float) for a in (ax, ay, az)]
     if t.ndim != 1 or any(a.ndim != 1 or len(a) != len(t) for a in axes):
@@ -1546,7 +1813,10 @@ def _setup(t, ax, ay, az, quiet):
         raise ValueError("recording timestamps must increase strictly")
     if len(t) < 100:
         return None
-    fs = (len(t) - 1) / (t[-1] - t[0])
+    filled = []
+    if not packed:
+        t, axes = fill_gaps(t, axes, spans=filled)
+    fs = sample_rate(t)
     if fs <= 2 * SEARCH[0] / 0.45:
         raise ValueError("accelerometer sample rate is too low for belt analysis")
     q = None
@@ -1558,7 +1828,7 @@ def _setup(t, ax, ay, az, quiet):
             raise ValueError("quiet recording contains invalid acceleration samples")
         if len(qa[0]) > int(0.5 * fs):
             q = qa
-    return axes, fs, q
+    return t, axes, fs, q, filled
 
 
 def _spectra(axes, q, fs, nfft, f, mask, a0, a1, cache, keep=True):
@@ -1644,7 +1914,7 @@ def analyse(t, ax, ay, az, target=None, expect=None, quiet=None, avoid=(), other
            or not math.isfinite(guard) or guard < 0
            or not math.isfinite(tau) or tau < 0 for freq, guard, tau in modes):
         raise ValueError("toolhead modes require a positive finite frequency and finite nonnegative guard/tau")
-    st = _setup(t, ax, ay, az, quiet)
+    st = _setup(t, ax, ay, az, quiet, packed=stream is not None)
     metadata = {"sample_count": len(t), "sample_rate": None, "duration": 0.0}
 
     hum_at, quiet_at = [], []
@@ -1682,7 +1952,7 @@ def analyse(t, ax, ay, az, target=None, expect=None, quiet=None, avoid=(), other
                 "u95": u95(frequencies) if verdict == "good" else None}
     if st is None:
         return out("none", "no data from the accelerometer")
-    axes, fs, q = st
+    t, axes, fs, q, filled = st
     metadata.update(sample_rate=round(float(fs), 3), duration=round(float(t[-1] - t[0]), 3))
     lo, hi = SEARCH[0], min(SEARCH[1], 0.45 * fs / 2.0)
     if band_hi:
@@ -1695,6 +1965,7 @@ def analyse(t, ax, ay, az, target=None, expect=None, quiet=None, avoid=(), other
     bmask = getattr(mask, "wide", None)       # for the band level: short windows, wide lines
     base = _memo(("base", round(fs, 1), round(lo, 1), round(hi, 1)) + _fp(q), lambda: float(np.median(_band(q, fs, lo, hi, bmask)))) \
         if q is not None else None
+    skip = None               # samples where no onset is taken (after a stretch fill_gaps put back)
     if stream is not None:
         env, onsets = stream["env"], list(stream["onsets"])
         hum, hum_at = stream.get("hum") or (None, [])
@@ -1702,14 +1973,16 @@ def analyse(t, ax, ay, az, target=None, expect=None, quiet=None, avoid=(), other
             mask, bmask = _either(mask, hum), _either(bmask, hum)
     else:
         env = _band(axes, fs, lo, hi, bmask)
-        onsets = find_plucks(axes, fs, lo, hi, bmask, base, env)
+        if filled:
+            skip = _near_fill(t, filled)      # (a belt ringing on jumps back after a filled stretch, as at a pluck)
+        onsets = find_plucks(axes, fs, lo, hi, bmask, base, env, skip)
         # a hum that started after the background was recorded (a fan came on): never the belt
         hum, hum_at = steady_in(axes, fs, q, onsets)
     if stream is None and hum is not None:
         mask = _either(mask, hum)
         bmask = _either(bmask, hum)
         env = _band(axes, fs, lo, hi, bmask)
-        onsets = find_plucks(axes, fs, lo, hi, bmask, base, env)
+        onsets = find_plucks(axes, fs, lo, hi, bmask, base, env, skip)
     # a toolhead that rings long (stiff, all metal) may still ring from a knock when the
     # next pluck comes: look for plucks beside its own lines too
     longm = [(m, g) for m, g, tau in _modes(avoid, True) if tau >= KNOCK_TAU]
@@ -1719,7 +1992,7 @@ def analyse(t, ax, ay, az, target=None, expect=None, quiet=None, avoid=(), other
     pick_avoid = [dict(m, guard=0.3, guard2=m.get("guard", TAP_GUARD)) if isinstance(m, dict) and (m.get("tau") or 0) >= KNOCK_TAU else m
                   for m in (avoid or ())]
     if longm and stream is None:
-        extra, _ = _onsets_beside(axes, fs, lo, hi, bmask, longm, q)
+        extra, _ = _onsets_beside(axes, fs, lo, hi, bmask, longm, q, skip)
         onsets = _merge_onsets(onsets, extra, fs, env)
     seen["on"] = [round(float(o / fs), 3) for o in onsets]
     if not onsets:
@@ -1746,6 +2019,8 @@ def analyse(t, ax, ay, az, target=None, expect=None, quiet=None, avoid=(), other
         rise = np.zeros(len(env), bool)
         rise[bk:] = (env[bk:] > max(5.0 * ((float(np.percentile(env, 10)) if base is None else base) or 1e-9), 0.03 * float(env.max()))) \
             & (env[bk:] > 3.0 * env[:-bk])
+        if skip is not None:
+            rise &= ~skip
     only = None if stream is None else set(stream["only"])
     gap = None if stream is None else stream.get("gap")      # (the knock gap, from the session's plucks)
     gaps = []                 # (a guided measurement: from its own plucks so far, the same rule)
@@ -1795,8 +2070,7 @@ def analyse(t, ax, ay, az, target=None, expect=None, quiet=None, avoid=(), other
             # a toolhead line that rings on next to the tone pulls the spectrum's peak:
             # fit it out (the live count analyses the recording again every second, so a
             # pluck heard to the end of its window is fitted once)
-            key = (a1 - a0, float(axes[0][a0]), float(axes[1][a0]), float(axes[2][a1 - 1]), round(fr, 2),
-                   tuple(ringing))
+            key = (round(fs, 3), _fp(axes, a0, a1), round(fr, 2), tuple(ringing))
             v = _REFINED.get(key)       # (one get: a live analysis may clear it meanwhile)
             if v is None:
                 if len(_REFINED) > 200:
@@ -1836,7 +2110,10 @@ def analyse(t, ax, ay, az, target=None, expect=None, quiet=None, avoid=(), other
                 pk["why"] = "no belt tone"        # no line of its own there
             elif tone_only and not _fresh(axes, fs, on, fr):
                 pk["why"] = "a knock, not a belt"  # the last pluck still ringing: the knock rang the toolhead
-            elif _knock(f, df, halves, fr, d1, d1, avoid, pull is not None):
+            elif pull is None and _on_mode(2 * fr, _modes(avoid)) and _tau(halves, f, df, fr) < KNOCK_TAU:
+                # (twice the tone can't be read, so no pull can be looked for: only a tone that dies
+                # fast with twice it on the toolhead's own line is a knock. A fast-dying tone alone
+                # isn't enough here: a short-ringing belt would go with it)
                 pk["why"] = "a knock, not a belt"
             elif judge_hum and _hum(axes, fs, on, fr):
                 pk["why"] = "steady hum, not a pluck"
@@ -1870,8 +2147,7 @@ def analyse(t, ax, ay, az, target=None, expect=None, quiet=None, avoid=(), other
                             p[np.abs(f - x) <= 0.5].max() <= p[int(round(fr / df))]:
                         continue
                 if _rises(axes, fs, on, x, 3.0):
-                    pk["ok"] = False
-                    pk["hidden"] = x
+                    pk["ok"], pk["hidden"], pk["before"] = False, x, pk["why"]
                     pk["why"] = "hidden by a steady hum at %.0f Hz" % x
                     break
         if pk["ok"]:
@@ -1893,6 +2169,19 @@ def analyse(t, ax, ay, az, target=None, expect=None, quiet=None, avoid=(), other
         if pk["ok"] and d2 is not None and d1 - d2 <= PULL_GAP:
             gaps.append(d1 - d2)
         plucks.append(pk)
+    # a pluck with no reading was taken as hidden by any line in the target band that its attack
+    # lifted: when the belt's note is known (this recording's clear plucks, or its last reading),
+    # a line well away from it and from twice it hides nothing (every attack lifts every line
+    # a little), and the pluck is what it was
+    note = [x["freq"] for x in plucks if x["ok"]]
+    note = float(np.median(note)) if note else (prev or (stream or {}).get("note"))
+    for pk in plucks:
+        if pk.get("hidden") is not None and note and pk.get("before") is not None and \
+                abs(pk["hidden"] - note) > HUM_HZ + 2.0 and abs(pk["hidden"] - 2.0 * note) > HUM_HZ + 2.0:
+            pk["why"] = pk["before"]
+            pk["ok"] = pk["why"] == "" and pk.get("freq") is not None     # (one that was clear is clear again)
+            del pk["hidden"]
+        pk.pop("before", None)
     ok = [x for x in plucks if x["ok"]]
     if other and ok:
         med = float(np.median([x["freq"] for x in ok]))
@@ -1967,7 +2256,7 @@ def _width(f, p, k, df):
     return (j - i) * df
 
 
-def analyse_tap(t, ax, ay, az, quiet=None):
+def analyse_tap(t, ax, ay, az, quiet=None, hears=None):
     """The toolhead's own ringing from a light tap: the strongest lines (up to 5; a hard
     tap brings out more of them) that stand clearly above the noise and are not a belt
     ringing along: no line at twice them or at half them.
@@ -1983,8 +2272,8 @@ def analyse_tap(t, ax, ay, az, quiet=None):
     st = _setup(t, ax, ay, az, quiet)
     if st is None:
         return {"modes": [], "ring": [], "tau": None, "note": "no data from the accelerometer"}
-    axes, fs, q = st
-    lo, hi = SEARCH[0], min(SEARCH[1], 0.45 * fs)
+    t, axes, fs, q, filled = st
+    lo, hi = SEARCH[0], min(SEARCH[1], 0.45 * fs, _hears(hears))
     onsets = find_plucks(axes, fs, lo, hi, None, None)
     if not onsets:
         return {"modes": [], "ring": [], "tau": None, "note": "no tap heard"}
@@ -2089,7 +2378,7 @@ def _tap_ref(taps):
     return best
 
 
-def analyse_taps(t, ax, ay, az, quiet=None, need=TAP_NEED, target=None, belts=()):
+def analyse_taps(t, ax, ay, az, quiet=None, need=TAP_NEED, target=None, belts=(), hears=None):
     """Judge each tap in a recording and learn the toolhead's fingerprint from the first
     `need` good ones. Returns taps (each: t, ok, why, freq = its loudest note), good (count),
     bad (count), main (the toolhead's note: freq, guard, ...), modes, ring and tau (as
@@ -2098,9 +2387,9 @@ def analyse_taps(t, ax, ay, az, quiet=None, need=TAP_NEED, target=None, belts=()
     st = _setup(t, ax, ay, az, quiet)
     if st is None:
         return out
-    axes, fs, q = st
+    t, axes, fs, q, filled = st
     t0 = float(t[0])
-    lo, hi = SEARCH[0], min(SEARCH[1], 0.45 * fs)
+    lo, hi = SEARCH[0], min(SEARCH[1], 0.45 * fs, _hears(hears))
     onsets = find_plucks(axes, fs, lo, hi, None, None)
     nfft = _nfft(fs)
     f = np.fft.rfftfreq(nfft, 1.0 / fs)
@@ -2210,7 +2499,7 @@ def second_knock(t, ax, ay, az, at, main, quiet=None):
     st = _setup(t, ax, ay, az, quiet)
     if st is None or not main:
         return None
-    axes, fs, q = st
+    t, axes, fs, q, filled = st
     env = _band(axes, fs, SEARCH[0], min(SEARCH[1], 0.45 * fs / 2.0), None)
     on, back = int(round(at * fs)), max(1, int(0.04 * fs))
     if on < 0 or on >= len(env):
@@ -2278,7 +2567,7 @@ def toolhead_knock(t, ax, ay, az, at, main, belt, quiet=None, until=None, attack
     st = _setup(t, ax, ay, az, quiet)
     if st is None or not main:
         return False, None, None
-    axes, fs, q = st
+    t, axes, fs, q, filled = st
     on = int(round(at * fs))
     w = next(_windows(axes, fs, [on] + ([int(round(until * fs))] if until is not None else [])), None)
     if w is None:
@@ -2358,7 +2647,7 @@ HUM_HZ = 1.0 / WINDOW + 1.0     # Hz: a background line this close to a belt's n
 HUM_DB = 15.0                   # dB over the noise floor around it: a line, not noise
 
 
-def disturbing(quiet, fs, notes):
+def disturbing(quiet, fs, notes, hears=None):
     """Steady lines in a recording without plucks (fans, motors) within HUM_HZ of a belt's
     note (notes: the target, the belt's last readings, None allowed): [(Hz, the note it is
     near)], loudest first. A loud line's skirt and sidelobes are not lines of their own: a
@@ -2381,7 +2670,7 @@ def disturbing(quiet, fs, notes):
         for i0 in range(0, n - seg + 1, max(1, seg // 2)):
             x = a[i0:i0 + seg]
             p += np.abs(np.fft.rfft((x - x.mean()) * w, nfft)) ** 2
-    band = np.flatnonzero((f >= SEARCH[0]) & (f <= min(SEARCH[1], 0.45 * fs)))
+    band = np.flatnonzero((f >= SEARCH[0]) & (f <= min(SEARCH[1], 0.45 * fs, _hears(hears))))
     if not len(band) or not np.any(p[band] > 0):
         return []
     df = f[1] - f[0]

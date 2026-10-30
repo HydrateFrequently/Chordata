@@ -309,6 +309,29 @@ details.sub > summary { cursor: pointer; color: var(--primary); font-weight: 600
   .test-card { min-height: 64px; }
   .card { padding: 12px; margin: 8px 0; }
   header.top { position: static; padding: 6px 16px; }
+  /* the cue cards sideways: smaller title and number; Tuner Mode in two columns, the number and
+     its lines left, Done, Reset and the history right, so the buttons are on the screen */
+  html:not(.pc) #cue { gap: 8px; padding-top: 10px; padding-bottom: 10px; }
+  html:not(.pc) #cue .cbig { font-size: clamp(20px, 7vh, 30px); }
+  html:not(.pc) #cueLive .lhz { font-size: clamp(32px, 13vh, 56px); }
+  html:not(.pc) #cueLive .ltens { font-size: clamp(20px, 8vh, 32px); }
+  html:not(.pc) #cueLive .marks { font-size: clamp(40px, 20vh, 80px); }
+  html:not(.pc) #cueLive.tuner { position: relative; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 2px 16px; align-items: start;
+    grid-template-areas: "box ." "tens ." "age ." "sub ." "u ." "hum ."; }
+  html:not(.pc) #cueLive.tuner .lbox { grid-area: box; }
+  html:not(.pc) #cueLive.tuner .ltens { grid-area: tens; }
+  html:not(.pc) #cueLive.tuner .lage:not(.u) { grid-area: age; }
+  html:not(.pc) #cueLive.tuner .lsub:not(.hum) { grid-area: sub; }
+  html:not(.pc) #cueLive.tuner .lage.u { grid-area: u; }
+  html:not(.pc) #cueLive.tuner .lsub.hum { grid-area: hum; }
+  /* the right column is laid over the grid's empty half: as tall as the left column, whatever the
+     history holds (the history scrolls inside it, and never sizes the rows the left column sits in) */
+  html:not(.pc) #cueLive.tuner .lside { display: flex; flex-direction: column; position: absolute; top: 0; bottom: 0; right: 0;
+    width: calc(50% - 8px); }
+  html:not(.pc) #cueLive.tuner .lbtns { margin: 0; flex: none; }
+  html:not(.pc) #cueLive.tuner .lbtns button { margin-top: 0; min-height: 44px; font-size: 17px; }
+  html:not(.pc) #cueLive.tuner .hist { margin-top: 8px; max-height: none; flex: 1 1 0; min-height: 0; overflow-y: auto; }
+  html:not(.pc) #cueLive.tuner .hist li { font-size: 15px; min-height: 24px; }
 }
 .measurements { overflow-x:auto; }
 table { border-collapse:collapse; width:100%; font-size:14px; font-variant-numeric:tabular-nums; }
@@ -352,6 +375,37 @@ html.pc #cue { inset: var(--hdr, 0px) 0 auto 0; flex-direction: row; flex-wrap: 
   box-shadow: 0 6px 20px rgba(0,0,0,.45); }
 html.pc #cue .cbig { font-size: 30px; max-width: none; }
 html.pc #cueLive { grid-auto-flow: column; align-items: center; gap: 16px; }
+/* Tuner Mode's band: fixed columns, sized by the window and not by the text in them, so nothing
+   moves as readings come and go: the number | its lines | the history | the buttons */
+html.pc #cue .cbig { flex: 1 0 100%; }
+html.pc #cueLive.tuner { width: 100%; max-width: 1180px; grid-auto-flow: row; gap: 4px 20px; align-items: start;
+  justify-items: start; grid-template-columns: 240px minmax(0, 1fr) minmax(0, 300px) 170px;
+  grid-template-areas: "box tens hist btns" "box age hist btns" "box sub hist btns" "box u hist btns" "box hum hist btns";
+  grid-template-rows: repeat(5, minmax(0, 1fr)); height: min(40vh, 360px); }
+@media (max-width: 1150px) {
+  /* a narrower PC window: narrower history and buttons, smaller type, and room for two lines in each row */
+  html.pc #cueLive.tuner { grid-template-columns: 200px minmax(0, 1fr) minmax(0, 190px) 130px; gap: 4px 14px;
+    height: clamp(300px, 40vh, 360px); }
+  html.pc #cueLive .lsub { font-size: 14px; }
+  html.pc #cueLive .lage { font-size: 13px; }
+  html.pc #cueLive .ltens { font-size: 20px; }
+  html.pc #cueLive.tuner .hist li { flex-wrap: wrap; font-size: 15px; gap: 4px 8px; }
+}
+/* each line keeps to its row whatever the window: a line too long for it is cut, never laid over the next */
+html.pc #cueLive.tuner .ltens, html.pc #cueLive.tuner .lage, html.pc #cueLive.tuner .lsub { max-height: 100%; overflow: hidden;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+html.pc #cueLive.tuner .ltens[hidden], html.pc #cueLive.tuner .lage[hidden], html.pc #cueLive.tuner .lsub[hidden] { display: -webkit-box !important; }
+html.pc #cueLive.tuner .lbox { grid-area: box; justify-self: center; align-self: center; }
+html.pc #cueLive.tuner .ltens { grid-area: tens; }
+html.pc #cueLive.tuner .lage:not(.u) { grid-area: age; }
+html.pc #cueLive.tuner .lsub:not(.hum) { grid-area: sub; }
+html.pc #cueLive.tuner .lage.u { grid-area: u; }
+html.pc #cueLive.tuner .lsub.hum { grid-area: hum; }
+html.pc #cueLive.tuner .hist { grid-area: hist; height: 100%; max-height: none; width: 100%; overflow-y: auto; margin: 0; align-self: stretch; }
+html.pc #cueLive.tuner .hist[hidden] { display: block !important; visibility: hidden; }
+html.pc #cueLive.tuner .lbtns { grid-area: btns; flex-direction: column; align-self: center; width: 100%; }
+html.pc #cueLive.tuner .lbtns button { width: 100%; }
+html.pc #cueLive.tuner > * { text-align: left; }
 html.pc #cueLive .lhz { font-size: 40px; }
 html.pc #cueLive .ltens { font-size: 24px; }
 html.pc #cueLive .lsub { font-size: 16px; }
@@ -373,10 +427,17 @@ html.pc #cueLive .hist { max-height: 40vh; }
 /* Tuner Mode: "Pluck either belt" and the number stay put at the top; the lines under the number keep
    their place whether they show anything or not, and only the history below grows */
 html:not(.pc) #cue.green { justify-content: flex-start; overflow-y: auto; }
-html:not(.pc) #cue.green #cueLive .lage[hidden], html:not(.pc) #cue.green #cueLive .lsub[hidden],
-html:not(.pc) #cue.green #cueLive .ltens[hidden] { display: block !important; visibility: hidden; }
+#cue.green #cueLive .lage[hidden], #cue.green #cueLive .lsub[hidden],
+#cue.green #cueLive .ltens[hidden] { display: block !important; visibility: hidden; }
 html:not(.pc) #cue.green #cueLive .lage, html:not(.pc) #cue.green #cueLive .lsub { min-height: 1.45em; }   /* (the body's line height: a line shown takes no more than its empty place) */
-html:not(.pc) #cue.green #cueLive .lage.u { min-height: 2.9em; }
+html:not(.pc) #cue.green #cueLive .lage.u, html:not(.pc) #cue.green #cueLive .lsub.hum { height: 2.9em; min-height: 0;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; line-height: 1.45; }
+html:not(.pc) #cue.green #cueLive .lage.u[hidden], html:not(.pc) #cue.green #cueLive .lsub.hum[hidden] { display: -webkit-box !important; }
+@media (max-width: 359px) {
+  /* the smallest phones: the lines under the number in smaller type, so two lines hold them */
+  html:not(.pc) #cueLive .lage { font-size: 13px; }
+  html:not(.pc) #cueLive .lsub { font-size: 15px; }
+}
 #cue .cbig {
   font-size: clamp(30px, 10vw, 64px); font-weight: 900; line-height: 1.1; letter-spacing: .02em;
   text-transform: uppercase; text-wrap: balance; max-width: 14em; }
@@ -385,13 +446,18 @@ html:not(.pc) #cue.green #cueLive .lage.u { min-height: 2.9em; }
 #cueLive .lhz { font-size: clamp(40px, 16vw, 96px); font-weight: 900; font-variant-numeric: tabular-nums; line-height: 1; }
 #cueLive .lsub { font-size: clamp(16px, 4.5vw, 22px); font-weight: 700; }
 /* the number in a box: a pluck heard this instant lights the box only; a reading whose window isn't all in yet: dimmed */
-#cueLive .lbox { border: 3px solid var(--cfg); border-radius: 18px; padding: 4px 22px; transition: background-color 0.12s, color 0.12s; }
+#cueLive .lbox { border: 3px solid var(--cfg); border-radius: 18px; padding: 4px 16px; transition: background-color 0.12s, color 0.12s; }
+#cueLive .lhz { width: 4.7em; white-space: nowrap; text-align: center; }   /* ("000.0 Hz": the box never changes size) */
 #cueLive .lbox.lit { background: var(--cfg); color: var(--cbg); }
 #cueLive .lhz { transition: opacity 0.2s; }
 #cueLive .lhz.prov { opacity: 0.6; }
 #cueLive .hist { max-height: 26vh; margin-top: 4px; }
 #cueLive .hist li { border-bottom-color: rgba(127,127,127,.4); font-size: 18px; }
 #cueLive .lbtns { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
+#cueLive .lside { display: contents; }     /* (the buttons and the history: in the grid themselves, except sideways) */
+html:not(.pc) #cueLive.tuner { width: 100%; }   /* (the card's width, not its widest line's) */
+html:not(.pc) #cueLive .lbtns { flex-wrap: nowrap; width: 100%; max-width: 420px; margin-bottom: 6px; }
+html:not(.pc) #cueLive .lbtns button { flex: 1 1 0; min-width: 0; margin-top: 8px; }
 #cueLive button.lreset { background: transparent; color: var(--cfg); border: 2px solid var(--cfg); min-width: 0; }
 #cueLive .lage { font-size: clamp(14px, 4vw, 18px); font-weight: 600; opacity: 0.85; }
 /* the tension under the number: its line keeps its place (empty until the first pluck) */
@@ -557,6 +623,7 @@ function toast(msg, ok) {
   t.hidden = false;
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => { t.hidden = true; }, ok ? 3000 : 7000);
+  t.onclick = () => { t.hidden = true; };      // (a tap takes it away from what it covers)
 }
 
 // In-page confirm dialog; resolves true/false.
@@ -621,6 +688,8 @@ function connect() {
   };
   ws.onclose = () => {
     connected = false;
+    staleStatus = true;
+    klippyState = "";
     for (const p of pending.values()) { clearTimeout(p.timer); p.reject({ message: "Connection lost" }); }
     pending.clear();
     render();
@@ -728,6 +797,8 @@ async function subscribe() {
     resetPrompt();
     for (const line of st.gcode_store || []) handleLine(line.message || "", true);
   } catch (e) { /* history is optional */ }
+  if (!prompt) targetTyped = null;       // (no step on screen: nothing typed is waiting)
+  staleStatus = false;
   render();
 }
 
@@ -842,7 +913,11 @@ function handlePrompt(s, replay) {
         prompt = null; promptSeq++; lastEndAt = Date.now();
         // wait a moment before hiding: a button that re-shows the same prompt
         // would otherwise collapse the page and throw the view to the top
-        if (!replay) { clearTimeout(endTimer); endTimer = setTimeout(render, 400); }
+        if (!replay) {
+          clearTimeout(endTimer);
+          // (the step gone for good: a target typed into it and not set goes with it)
+          endTimer = setTimeout(() => { if (!prompt) targetTyped = null; render(); }, 400);
+        }
       }
       break;
   }
@@ -880,11 +955,12 @@ function targetUnit() { const u = tensNow().target_unit; return u === "N" || u =
 // the Hz for a value typed in a unit (NaN if it can't be had)
 function hzOf(v, unit) {
   if (!Number.isFinite(v) || v <= 0) return NaN;
-  if (unit === "Hz") return Math.round(v);
+  if (unit === "Hz") return v >= 40 && v <= 300 ? Math.round(v) : v;
   const k = kIn(unit);
   return k > 0 ? Math.round(Math.sqrt(v / k) * 10) / 10 : NaN;
 }
 function inUnit(hz, unit) { return unit === "Hz" ? fmtTgt(hz) : (kIn(unit) * hz * hz).toFixed(unit === "lbf" ? 2 : 1); }
+let targetTyped = null;
 function targetBox(text) {
   const now = Number((text.match(/([\d.]+)\s*Hz/) || [])[1]);
   let unit = targetUnit();
@@ -917,7 +993,10 @@ function targetBox(text) {
     inp.setAttribute("aria-label", "Target in " + u);
     if (Number.isFinite(hz)) inp.value = inUnit(hz, u);
     // a unit change alone is no new target; a number typed before it still is
-    if (touched) typed = Number.isFinite(hz) ? { v: inp.value, hz } : null;
+    if (touched) {
+      typed = Number.isFinite(hz) ? { v: inp.value, hz } : null;
+      targetTyped = { v: inp.value, unit: u, base: now };
+    }
     else { typed = null; inp.defaultValue = inp.value; }
     for (const b of units.children) b.setAttribute("aria-pressed", String(b.textContent === u));
     showConv();
@@ -928,15 +1007,23 @@ function targetBox(text) {
       // a tension needs the span and the belt: say so, with a way there; Hz needs nothing more
       if (u !== "Hz" && !tens()) { needSpan(); return; }
       setUnit(u);
-      runGcode("_CHORDATA_TENSION TARGET_UNIT=" + u + (u !== "Hz" ? " UNIT=" + u : "")).catch(() => {});
       tensSent.target_unit = u;
       if (u !== "Hz") tensSent.unit = u;
+      runGcode("_CHORDATA_TENSION TARGET_UNIT=" + u + (u !== "Hz" ? " UNIT=" + u : "")).catch(() => {
+        delete tensSent.target_unit; delete tensSent.unit;      // (not taken: back to what is set)
+        promptRendered = -1; render();
+      });
     };
   }
   inp.value = Number.isFinite(now) ? inUnit(now, unit) : "";
   inp.defaultValue = inp.value;
-  inp.oninput = showConv;
+  // what was typed and not set yet: kept when the step is shown again for something else (a
+  // reconnect, Mainsail's +1 elsewhere moves the target and drops it)
+  inp.oninput = () => { targetTyped = inp.value === inp.defaultValue ? null : { v: inp.value, unit, base: now }; showConv(); };
   setUnit(unit);
+  if (targetTyped && targetTyped.base === now && targetTyped.unit === unit) inp.value = targetTyped.v;
+  else targetTyped = null;
+  showConv();
   // after the belt card: the belt may be new or gone, so the unit and the numbers follow it
   f.refresh = () => {
     if (targetUnit() !== unit) setUnit(targetUnit());
@@ -958,6 +1045,7 @@ function targetBox(text) {
         : "Error: " + inp.value + " " + unit + " is " + fmtTgt(hz) + " Hz on this belt: the target must be 40-300 Hz");
       return;
     }
+    targetTyped = null;
     pressPromptButton("_CHORDATA_BELTS HZ=" + hz);
   };
   return f;
@@ -973,6 +1061,7 @@ function withTypedTarget(gcode) {
   if (!Number.isFinite(v) || v < 40 || v > 300 || Math.abs(v - Number(box.dataset.hz)) < 0.05) return gcode;
   // Start: set it and show the step again, so a target the accelerometer can't hear is flagged
   // before anything starts; Start is then pressed once more
+  targetTyped = null;                  // (sent: no longer waiting in the box)
   return /STEP=start\b/.test(gcode) ? "_CHORDATA_BELTS HZ=" + v : gcode + " HZ=" + v;
 }
 
@@ -1260,7 +1349,7 @@ function jogUpdate() {
 // A fan humming on the belt's note: the plucks can't be read there
 function humText(st) {
   const h = (st || pt()).belt_hum || [];
-  return h.length ? "Steady hum at " + h.map((x) => Math.round(x)).join(" and ") + " Hz on the belt's note (a fan?): turn fans off" : "";
+  return h.length ? "Steady hum at " + h.map((x) => Math.round(x)).join(" and ") + " Hz on the belt's note (a fan?): turn it off" : "";
 }
 // Tuner Mode: one big number, the newest clear pluck, and how far it is from the target; the
 // session's history below it. Built once (freeBuild), then updated in place (renderFree)
@@ -1269,7 +1358,7 @@ function freeBuild(box) {
   v.box = live.appendChild(el("div", { class: "hzbox" }));
   v.hz = v.box.appendChild(el("div", { class: "hz" }));
   v.tens = live.appendChild(el("div", { class: "tens" }));
-  v.age = live.appendChild(el("div", { class: "age" }));
+  v.age = live.appendChild(el("div", { class: "age", "aria-live": "off" }));
   v.d = live.appendChild(el("div", { class: "d" }));
   v.u = live.appendChild(el("div", { class: "age u" }));
   v.sub = live.appendChild(el("div", { class: "sub" }));
@@ -1287,8 +1376,8 @@ function freeBuild(box) {
 // close together (all within 1 Hz of each other, or twice the tolerance, one after another back from it, at
 // most U_N, stopping at the first that doesn't: Tuner Mode doesn't know which belt a pluck was, and
 // a tensioner turned in between moves the next one). The 95 % interval of ONE reading from that
-// scatter: Student's t for n - 1 degrees of freedom times s (n - 1 in the divisor). Only from 3
-// plucks on (from 2, t is 12.7: no use), and none for readings exactly alike (real plucks scatter
+// scatter: Student's t for n - 1 degrees of freedom times s (n - 1 in the divisor). Only from 4
+// plucks on (from 2, t is 12.7, from 3 still 4.3: no use), and none for readings exactly alike (real plucks scatter
 // 0.1-0.4 Hz; the same number to the last digit is an artefact repeating, not a sure reading). It
 // is the pluck-to-pluck repeatability, not the engine's systematic error.
 const T95 = [12.706, 4.303, 3.182, 2.776, 2.571, 2.447, 2.365, 2.306, 2.262, 2.228];
@@ -1401,7 +1490,7 @@ function histUpdate(list) {
 // of encouragement after its reason, the same one each time for the same pluck
 const PLUCKER = ["too weak", "too soft", "two plucks at once", "a knock, not a belt"];
 function quip(e) {
-  return PLUCKER.includes(e.why) ? (e.n % 2 ? " \u00b7 skill issue" : " \u00b7 git good") : "";
+  return PLUCKER.includes(e.why) ? (e.n % 2 ? " \u00b7 skill issue" : " \u00b7 git gud") : "";
 }
 // Reset history is not G-code either (a listen may be running): to the plugin through Moonraker
 let resetting = false;
@@ -1438,9 +1527,9 @@ function noteCheck() {
   if (at !== noteAt) { noteAt = at; if (n && n.text) { markCleared(n.upto); toast(n.text, true); renderBelts(); cueUpdate(); } }
 }
 
-let beltViewKey = "", freeView = null;
+let beltViewKey = "", freeView = null, tapSig = "";
 function renderBelts() {
-  const listen = pt().state === "listening" && !!pt().belt_now;
+  const listen = pt().state === "listening" && !!pt().belt_now && connected && klippyState === "ready";
   if (listen && !ageTimer) ageTimer = setInterval(() => { renderBelts(); cueUpdate(); }, 250);
   else if (!listen && ageTimer) { clearInterval(ageTimer); ageTimer = null; }
   const b = pt().belts || {};
@@ -1454,7 +1543,12 @@ function renderBelts() {
     renderFree(freeView, b);
     return;
   }
-  beltViewKey = "tap";                 // (nothing to press on the tap step: drawn afresh)
+  // the tap step: nothing to press, drawn afresh, but only when what it says changes (a screen
+  // reader would hear it again each time)
+  const sig = [pt().state, pt().message, humText(), targetText(b)].join("|");
+  if (beltViewKey === "tap" && sig === tapSig) return;
+  beltViewKey = "tap";
+  tapSig = sig;
   box.textContent = "";
   // the tap step: what it is listening for, and the target
   const live = el("div", { class: "live" });
@@ -1471,6 +1565,7 @@ function renderBelts() {
 const S = {};             // merged printer status
 let klippyState = "";     // "ready", "startup", "shutdown", "error", "disconnected"
 let connected = false;
+let staleStatus = false;  // the connection dropped: the status held is old until subscribe() brings fresh
 function obj(name) { return S[name] || {}; }
 // ---------- cue cards: red = hands off (recording the background noise), yellow = tap the toolhead, green = pluck ----------
 let cueKey = "";
@@ -1478,15 +1573,24 @@ const CUES = {     // the big text only: the card says one thing
   background: ["red", "Stand by: recording background noise"],
   tap: ["yellow", "Tap your toolhead"],
   "pluck:free": ["green", "Pluck either belt"],
+  lost: ["red", "Not listening: connection lost"],
+  down: ["red", "Not listening: Klipper stopped"],
 };
 // No card closes on a timer or needs a press on the phone: each stays until the printer is done
 // with that step (red until the quiet is recorded, yellow until the tap is heard, green until
 // the plucking is over). The green ones show each pluck as it is heard. No card flashes: a new
 // card simply replaces the last (only the box around the number lights, on each pluck heard).
+function cueInert() {
+  // a full-screen card on a phone: the page under it can't be reached with Tab either (on a PC the
+  // card is a band at the top; also after the window switched layout under a card)
+  for (const e of [document.querySelector("main"), $("hdrTop")]) if (e) e.inert = !!cueKey && !isPc();
+}
 function cueSet(key) {
-  if (key === cueKey) return;
+  if (key === cueKey) { cueInert(); return; }
   const box = $("cue");
   cueKey = key;
+  cueInert();
+  if (key && !isPc() && document.activeElement && !box.contains(document.activeElement)) document.activeElement.blur();
   if (!key) { box.hidden = true; return; }
   const [colour, big] = CUES[key];
   box.className = colour;
@@ -1519,12 +1623,18 @@ function beepUnlock() {
 // screen that goes dark hides the cue cards. The browser's wake lock where it is allowed (HTTPS or
 // localhost); a printer's plain-http page doesn't get it, so there a tiny silent black video loops
 // unseen, which phones also keep the screen on for. Both need a first press on the page.
-let wakeLock = null, wakeVideo = null;
+let wakeLock = null, wakeVideo = null, wantAwake = false;
 async function keepAwake() {
+  wantAwake = true;              // (asked for once: asked again each time the page comes back into view)
   if (document.visibilityState !== "visible") return;
   try {
     if (navigator.wakeLock && window.isSecureContext) {
-      if (!wakeLock) {               // one press fires several events: they share one request
+      if (wakeLock) {                // one press fires several events: they share one request
+        const held = await wakeLock.catch(() => null);
+        if (held && !held.released) return;
+        wakeLock = null;             // (released while the page was hidden: asked for again)
+      }
+      if (!wakeLock) {
         wakeLock = navigator.wakeLock.request("screen").then((lock) => {
           lock.addEventListener("release", () => { wakeLock = null; });
           return lock;
@@ -1569,27 +1679,41 @@ function cueBuild(box) {
   v.box = box.appendChild(el("div", { class: "lbox" }));
   v.hz = v.box.appendChild(el("div", { class: "lhz" }));
   v.tens = box.appendChild(el("div", { class: "ltens" }));
-  v.age = box.appendChild(el("div", { class: "lage" }));
+  v.age = box.appendChild(el("div", { class: "lage", "aria-live": "off" }));
   v.sub = box.appendChild(el("div", { class: "lsub" }));
   v.u = box.appendChild(el("div", { class: "lage u" }));
-  v.hum = box.appendChild(el("div", { class: "lsub" }));
-  v.list = box.appendChild(el("ul", { class: "hist", "aria-label": "Plucks this session, newest first" }));
-  const row = box.appendChild(el("div", { class: "lbtns" }));
+  v.hum = box.appendChild(el("div", { class: "lsub hum" }));
+  // the buttons above the history: only the history grows, nothing under it to push down
+  // (both in a side box: a column of their own when the phone is held sideways, see .lside)
+  const side = box.appendChild(el("div", { class: "lside" }));
+  const row = side.appendChild(el("div", { class: "lbtns" }));
   v.done = row.appendChild(el("button", { type: "button" }, "Done"));
   v.done.onclick = freeDone;
   v.reset = row.appendChild(el("button", { type: "button", class: "lreset" }, "Reset history"));
   v.reset.onclick = historyReset;
+  v.list = side.appendChild(el("ul", { class: "hist", "aria-label": "Plucks this session, newest first" }));
+  box.className = "tuner";
   return v;
+}
+// the red card when the connection or Klipper is gone: nothing can be heard, and a phone can't
+// reach the page under the card: a way back to Mainsail or Fluidd (the listen, if it still runs,
+// ends by itself: see stopListen)
+function cueLeave(box) {
+  const b = box.appendChild(el("button", { type: "button", class: "lreset" }, "Back to the printer page"));
+  b.onclick = () => { location.href = $("backUi").href; };
+  return { leave: b };
 }
 function cueLive(key, st) {
   const box = $("cueLive");
   if (key !== cueViewKey) {
     cueViewKey = key;
     box.textContent = "";
+    box.className = "";
     cueView = key === "tap" ? { marks: box.appendChild(el("div", { class: "marks" })) }
-      : key.startsWith("pluck:") ? cueBuild(box) : null;
+      : key.startsWith("pluck:") ? cueBuild(box)
+      : key === "lost" || key === "down" ? cueLeave(box) : null;
   }
-  if (!cueView) return;
+  if (!cueView || key === "lost" || key === "down") return;
   if (key === "tap") {             // the setup taps: a check mark or an X for each, a circle for each still needed
     const taps = st.tap_live || [], good = taps.filter((x) => x.ok).length;
     const need = (st.measurement || {}).expected || 3;
@@ -1622,8 +1746,14 @@ function cueUpdate() {
   if (st.state !== "listening") accepting = false;
   const kind = m.belt, phase = m.phase;
   let key = "";
-  if (st.state === "listening" && phase === "background") key = "background";
-  else if (kind === "tap" && (phase === "listening" || phase === "analysing")) key = "tap";
+  // the connection or Klipper lost during a listen: what was last heard says nothing now, and
+  // nobody is listening: red (hands off) until it is back, never a green card left standing
+  if (st.state === "listening" && !demo && (!connected || staleStatus || klippyState !== "ready")) {
+    accepting = false;
+    key = connected && !staleStatus ? "down" : "lost";
+  }
+  else if (st.state === "listening" && phase === "background") key = "background";
+  else if (st.state === "listening" && kind === "tap" && (phase === "listening" || phase === "analysing")) key = "tap";
   else if (st.state === "listening" && phase === "listening" && kind === "free") key = "pluck:free";
   cueSet(key);
   cueLive(key, st);
@@ -1635,7 +1765,7 @@ function freeDone() {
   if (accepting) return;
   accepting = true;
   render();
-  rpc("server.chordata.accept", {}).catch((e) => { accepting = false; toast(errText(e)); render(); });
+  rpc("server.chordata.accept", {}, 10000).catch((e) => { accepting = false; toast(errText(e)); render(); });
 }
 // leaving the page (Back, Close Chordata) ends a listen still running: G-code waits for it, so
 // homing from Mainsail or Fluidd would otherwise wait until Tuner Mode stopped by itself
@@ -1757,6 +1887,7 @@ function placeLayout() {
   const changed = pc !== isPc();
   document.documentElement.classList.toggle("pc", pc);
   document.documentElement.style.setProperty("--hdr", $("hdrTop").offsetHeight + "px");
+  cueInert();
   return changed;
 }
 
@@ -1803,7 +1934,7 @@ function init() {
   // the screen stays on (keepAwake): started by a press, again whenever the page comes back into view
   for (const ev of ["pointerup", "touchend", "click", "keydown"])
     document.addEventListener(ev, () => { if (!demo) keepAwake(); }, { capture: true });
-  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && (wakeLock || wakeVideo)) { wakeLock = null; keepAwake(); } });
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && wantAwake) keepAwake(); });
 
   render();
   if (demo) {

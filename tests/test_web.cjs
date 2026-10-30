@@ -73,7 +73,7 @@ const path = require('node:path');
     await page.evaluate(()=>{ S.chordata.history=S.chordata.history.concat([{n:3,freq:90,ok:false,why:'too weak',at:3},
       {n:4,freq:null,ok:false,why:'steady hum, not a pluck',at:4},{n:6,freq:null,ok:false,why:'two plucks at once',at:6}]); render(); });
     assert.deepEqual((await page.locator('#cueLive .hist li .why').allTextContents()).slice(0,3),
-      ['two plucks at once \u00b7 git good','steady hum, not a pluck','too weak \u00b7 skill issue']);
+      ['two plucks at once \u00b7 git gud','steady hum, not a pluck','too weak \u00b7 skill issue']);
     // Reset history goes to the plugin through Moonraker (G-code is busy listening)
     await page.evaluate(()=>{ window.__rpc=[]; rpc=(m)=>{ window.__rpc.push(m); return Promise.resolve({}); }; });
     await page.locator('#cueLive button',{hasText:'Reset history'}).click();
@@ -229,6 +229,9 @@ const path = require('node:path');
     await live.evaluate(()=>{ keepAwake(); });
     await live.waitForTimeout(300);
     assert.equal(await live.evaluate(()=>!!document.querySelector('video[aria-hidden=true]')),true);
+    // and asked for again when the page comes back into view, also where the browser dropped its wake lock (HTTPS: no video)
+    assert.equal(await live.evaluate(()=>{ let n=0; const real=keepAwake, v=wakeVideo; keepAwake=()=>{ n++; }; wakeLock=null; wakeVideo=null;
+      document.dispatchEvent(new Event('visibilitychange')); keepAwake=real; wakeVideo=v; return n; }),1);
     // Belt tension: the setup block sends each choice at once; Other opens the g/m box; the cue shows N or lbf, or nothing
     const tens=await live.evaluate(async()=>{ const sent=[]; const real=runGcode; runGcode=(g)=>{ sent.push(g); return Promise.resolve(); };
       S.chordata.tension={span:0,mass:12.6,unit:'N',k:0};
@@ -285,7 +288,21 @@ const path = require('node:path');
     assert.deepEqual(await cueT({span:150,mass:8.4,unit:'N',k:4*0.0084*0.0225}),[false,'9.2 N']);
     assert.deepEqual(await cueT({span:150,mass:8.4,unit:'lbf',k:4*0.0084*0.0225/4.4482216152605}),[false,'2.07 lbf']);
     assert.deepEqual(await cueT({span:0,mass:8.4,unit:'N',k:0}),[true,'']);
-    await live.evaluate(()=>{ S.chordata.state='idle'; S.chordata.measurement={phase:'idle',belt:null}; S.chordata.belt_live=[]; cueUpdate(); });
+    // the number's box keeps one size whatever the number; the buttons sit above the history, which alone grows
+    const geo=await live.evaluate(()=>{ const r=[]; for (const f of [null, 98.7, 110.43, 250.2]) {
+      S.chordata.belt_live=f==null?[]:[{freq:f,ok:true,t:91}]; S.chordata.history=f==null?[]:[...Array(12)].map((_,i)=>({n:i+1,freq:110,ok:true}));
+      cueUpdate(); const b=document.querySelector('#cueLive .lbox').getBoundingClientRect(), d=document.querySelector('#cueLive .lbtns').getBoundingClientRect();
+      r.push([Math.round(b.left),Math.round(b.width),Math.round(d.top)]); } return r; });
+    assert.ok(geo.every(g=>JSON.stringify(g)===JSON.stringify(geo[0])), JSON.stringify(geo));
+    // the connection or Klipper lost during a listen: a red card, never the green one left standing
+    const lost=await live.evaluate(()=>{ const r=[]; klippyState='shutdown'; cueUpdate(); r.push($('cue').className,$('cueBig').textContent);
+      klippyState='ready'; connected=false; cueUpdate(); r.push($('cueBig').textContent); connected=true; cueUpdate(); r.push($('cue').className); return r; });
+    assert.deepEqual(lost,['red','Not listening: Klipper stopped','Not listening: connection lost','green']);
+    await live.evaluate(()=>{ S.chordata.state='idle'; S.chordata.measurement={phase:'idle',belt:null}; S.chordata.belt_live=[]; S.chordata.history=[]; cueUpdate(); });
+    // a tap step that ended early (a hum stop): no tap card left over it
+    const tapLeft=await live.evaluate(()=>{ Object.assign(S.chordata,{state:'idle',measurement:{belt:'tap',phase:'analysing'}}); cueUpdate(); const h=$('cue').hidden;
+      S.chordata.measurement={phase:'idle',belt:null}; cueUpdate(); return h; });
+    assert.equal(tapLeft,true);
     assert.deepEqual(errors,[]);
     console.log('Web checks passed: offline demo, live replacement, rejected plucks, Tuner history and stable buttons, How it works steps, phone and PC layouts, keep-awake, belt tension, no JS errors.');
   } finally { await browser.close(); }

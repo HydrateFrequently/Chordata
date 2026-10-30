@@ -104,11 +104,12 @@ your belt tensioning position. The screen stays on while the page is open, once 
 pressed anything on it. On a PC the page looks like Mainsail's
 own pop-ups. The same steps also run as prompts from the **CHORDATA** macro in Mainsail or Fluidd.
 
-Settings (`chordata_settings.cfg`): `belt_target` (Hz, default 110; you can also change it on the first prompt)
-and `belt_tolerance` (Hz, default 0.25). The fans you allowed Chordata to turn off are kept in
-`chordata/fans_ok.json` in the config folder (delete it to take them all back). The latest 5 recordings (`recordings_keep` in `[chordata]`)
-are kept in `chordata/recordings/` in the config folder, written there when you close Chordata, so you can
-download them from Mainsail. `CHORDATA_RECORD SECONDS=10 NAME=test` records any accelerometer
+Settings (`chordata_settings.cfg`): `belt_target` (Hz, default 110; you can also change it on the first prompt),
+`belt_tolerance` (Hz, default 0.25), `recordings_keep`, the belt tension's `belt_span`, `belt_mass` and
+`tension_unit`, and `path`. The fans you allowed Chordata to turn off are kept in
+`chordata/fans_ok.json` in the config folder (delete it to take them all back). The latest 5 tap and Tuner Mode
+recordings (`recordings_keep`) are kept in `chordata/recordings/` in the config folder, written there in the
+background after each listen ends (Close Chordata waits for them), so you can download them from Mainsail. `CHORDATA_RECORD SECONDS=10 NAME=test` records any accelerometer
 (`CHIP=` as in Klipper's own commands) into the same folder. Every option, macro and file Chordata uses is listed in the
 **[configuration reference](docs/CONFIGURATION.md)**.
 
@@ -220,6 +221,7 @@ replaced by Tuner Mode), the safety interlocks, the installer hardening, the gui
 Chordata was written entirely with an AI assistant ("vibecoded"). It comes without any warranty
 (GPL-3.0): you use it at your own risk, and no responsibility is accepted for anything that happens to your
 printer. Chordata only measures; it never prints, and it moves the toolhead only when you press one of its
-move buttons (Home, the arrows, Move for a typed X/Y, or Go to belt tensioning position).
+move buttons (Home, the arrows, Move for a typed X/Y, or Go to belt tensioning position), or when you run
+`_CHORDATA_ST` yourself (Shake&Tune's belt graph, which moves the toolhead).
 
 License: GPL-3.0-or-later.
