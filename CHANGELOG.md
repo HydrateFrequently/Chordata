@@ -3,6 +3,63 @@
 What changed in each update of Chordata's main branch, newest first.
 Update from Mainsail's Update Manager, then restart Klipper.
 
+## 2026-10-30
+
+- **Belt tension in N or lbf.** Tuner Mode can show each pluck's belt tension under the Hz, in the
+  average and in the history. Set the span you pluck and the belt (6 mm or 9 mm, Gates-Unitta 2GT or
+  Gates GT2 / GT3, or its mass in g/m) on Set Target Frequency, or with `belt_span`, `belt_mass` and `tension_unit` in `[chordata]`.
+  Without a span nothing changes. The absolute tension is good to about 15-20 % and reads a little
+  high on short spans (the span must be at least 40 mm); two belts with the same span and belt compare as well as their Hz do.
+- **Target in Hz, N or lbf.** Set Target Frequency now starts with **Belt**, which opens the belt
+  card (span, belt, unit; each make has a hint with the print to look for on the belt: LL-2GT or
+  2MGT / 2MR). The target can then be typed in Hz, N or lbf; a tension target is set as its Hz
+  (to 0.1 Hz) and Tuner Mode shows how far each pluck is in that unit. Picking N or lbf without a
+  span opens a pop-up that leads to the belt card; Hz needs nothing more.
+- **Tuner Mode keeps up beside a long-ringing toolhead.** When the taps learn a toolhead line that
+  rings long next to the belt's note, each pluck's fit now costs about a tenth of what it did (a
+  minute of plucking took about twice real time on a PC, now about a fifth), with the same readings.
+- **Dropped samples no longer pull the reading.** Samples the accelerometer or the host dropped are
+  put back on the sample clock, live and in a saved recording; a burst of them made every pluck in
+  the recording read low (0.1 s lost in 7 s: 110 Hz read as 108.4 Hz). Timestamps that jitter are
+  left alone, and a pluck shortly after a dropped burst is still heard (one within 0.1 s of the burst is left out rather than read wrong). A sample that is not a number
+  (NaN, inf) is dropped instead of silencing the plucks around it. A hum well away from the belt's
+  note no longer gets the blame for a pluck that simply had no tone.
+- **The taps only use what the accelerometer hears.** A line above its range (an MPU-6050 or a
+  LIS2DW12) is no longer learned as the toolhead's note.
+- **The ± on 22 or more plucks** uses Student's t for that many (it was about 6 % too narrow).
+- **Errors no longer stop the printer.** An internal error in a belt step, or a full or read-only SD
+  card when saving the belt tensioning position, shows as an error message instead of shutting
+  Klipper down. A Klipper restart in the middle of a listen no longer hangs Klipper for 2 minutes,
+  and its recordings are still written; after an MCU shutdown the listen ends instead of keeping
+  Klipper busy. Recordings that wait in memory go to the SD card without holding Klipper up; a full
+  card while listening is reported once, the listen goes on with a capped memory, and the recording
+  says where samples are missing. Close Chordata brings the fans back before it writes the
+  recordings. Leftover part files of a Klipper that died while writing are cleared.
+- **The page says when nothing is listening.** If the connection or Klipper is lost during Tuner
+  Mode, the green card turns red ("Not listening", with a way back to the printer page), and no stale
+  green card flashes when the connection comes back. The phone screen stays on after the tab was in
+  the background, the tap card no longer sticks after a fan-hum stop, and nothing on the Tuner Mode
+  card moves any more (number box, Done and Reset history stay put, on the smallest phones and the
+  PC layout too; a phone held sideways shows the number left and the buttons and history right). A target
+  being typed survives the page updating; one left untyped-in when the setup closes is forgotten. An
+  error message goes away when tapped. A Hz target is checked before it is rounded (39.5 is not 40).
+- **Recordings made with `CHORDATA_RECORD` are kept;** only tap and Tuner Mode recordings are pruned
+  (a tap recording and its background recording together).
+  A pluck right after Reset history is no longer dropped. The command's target range is 40-300 Hz,
+  as on the page.
+- **Installer and uninstaller:** a comment after `primary_branch` no longer leads to a duplicate
+  option that stops Moonraker, and indented options in `[update_manager chordata]` keep their
+  indent; a symlinked `moonraker.conf` or `navi.json` stays a link with its
+  permissions (uninstall too); includes and `[respond]` / `[resonance_tester]` are found in printer.cfg and the files it
+  includes (not in Klipper's SAVE_CONFIG backups, not indented lines); a branch missing on GitHub is reported.
+  Uninstall removes the includes from whichever file holds them and refuses to remove the plugin while
+  one it cannot strip remains (Klipper would not start), and removes the whole update section even with
+  comments in it. Switching the same folder between Klipper and Kalico moves the plugin link instead
+  of leaving one in both. printer.cfg is rewritten in one step and backed up again on a reinstall.
+- **Shake&Tune macro** (`_CHORDATA_ST`) refuses while printing or paused, as do the tap and Tuner
+  Mode buttons of a prompt left open when a print starts (no stuck "Stand by" card). The macros no
+  longer need `print_stats` (a printer without `[virtual_sdcard]`).
+
 ## 2026-10-29
 
 - **Fixed: Chordata kept listening after Back** ([#27](https://github.com/HydrateFrequently/Chordata/issues/27)).

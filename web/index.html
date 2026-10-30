@@ -164,11 +164,11 @@ input[type=text], input[type=number], input[type=password] {
 .how { margin: 8px 0; padding: 0 0 0 20px; }
 #howBtn, #exitBtn { background: var(--card); color: var(--primary); border: 2px solid var(--primary); }
 #prompt .perr { color: var(--err); font-weight: 700; font-size: 18px; }
-/* "Target Frequency [110] Hz" on one line (the box holds three digits: no belt is tuned above
-   999 Hz), Set centred below it */
+/* "Target [110] Hz" on one line (the box holds a tension like 12.34 too), Hz / N / lbf and the
+   other unit's value under it, Set centred below */
 #prompt form.ptarget { display: flex; flex-direction: column; align-items: center; gap: 10px; margin: 4px 0 10px; font-size: 22px; font-weight: 700; }
 #prompt form.ptarget .trow { display: flex; flex-wrap: nowrap; align-items: center; justify-content: center; gap: 10px; white-space: nowrap; }
-#prompt form.ptarget input { width: calc(3ch + 24px); font-size: 22px; font-weight: 700; padding: 6px 10px; text-align: center;
+#prompt form.ptarget input { width: calc(5ch + 24px); font-size: 22px; font-weight: 700; padding: 6px 10px; text-align: center;
   -moz-appearance: textfield; appearance: textfield; }
 #prompt form.ptarget input::-webkit-outer-spin-button, #prompt form.ptarget input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 #prompt form.ptarget button { min-width: 88px; }
@@ -216,6 +216,32 @@ details.sub > summary { cursor: pointer; color: var(--primary); font-weight: 600
 #beltView .live .hz { transition: opacity 0.25s; }
 #beltView .live .hz.prov { opacity: 0.55; }
 #beltView .live .age { color: var(--muted); font-size: 14px; }
+#beltView .live .tens { font-size: 28px; font-weight: 700; font-variant-numeric: tabular-nums; min-height: 1.2em; }
+.hist .t { flex: none; font-size: 13px; opacity: .8; font-variant-numeric: tabular-nums; }
+/* Belt tension on Set Target Frequency: span, belt (6 mm, 9 mm or its g/m), unit */
+.ptens { margin: 6px 0 10px; }
+#needSpan { max-width: min(420px, calc(100vw - 32px)); color: var(--text); }
+#needSpan::backdrop { background: rgba(0,0,0,.55); }
+#needSpan .pbuttons { display: grid; gap: 10px; margin-top: 12px; }
+#prompt .plabel { font-weight: 700; font-size: 18px; margin: 8px 0 -4px; }
+#prompt button.tbelt { font-weight: 600; }
+.ptens .thint { color: var(--muted); font-size: 12px; font-weight: 400; line-height: 1.3; margin: 4px 0 0; }   /* fine print */
+.ptens .thint + .chips { margin-top: 10px; }
+#prompt form.ptarget .tunits { grid-template-columns: repeat(3, 72px); justify-content: center; }
+#prompt form.ptarget .tunits button { min-height: 44px; min-width: 0; }
+#prompt form.ptarget .tconv { color: var(--muted); font-size: 16px; font-weight: 600; min-height: 1.45em; }
+#tensionCard h3 { margin-top: 18px; }
+#tensionCard .why { margin: 6px 0; padding-left: 20px; }
+#tensionCard .why li { margin: 6px 0; }
+.ptens .tl { font-weight: 600; margin: 12px 0 6px; }
+.ptens .tr { display: flex; align-items: center; gap: 10px; font-size: 20px; font-weight: 700; margin-top: 6px; }
+.ptens .tr input { width: calc(5ch + 24px); font-size: 20px; font-weight: 700; text-align: center; min-height: 48px; padding: 6px 10px;
+  -moz-appearance: textfield; appearance: textfield; }
+.ptens .tr input::-webkit-outer-spin-button, .ptens .tr input::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.ptens .help { margin: 4px 0; }
+.ptens .tm { color: var(--muted); font-size: 15px; margin: 8px 0 4px; }
+.ptens .chips + .chips { margin-top: 8px; }
+.ptens .chips { grid-template-columns: repeat(auto-fit, minmax(72px, 1fr)); }
 #beltView .live .sub { color: var(--muted); font-size: 16px; }
 #beltView .live .d { font-size: 20px; font-weight: 600; }
 #beltView .live .d.good { color: var(--ok); } #beltView .live .d.near { color: var(--warn); } #beltView .live .d.far { color: var(--err); }
@@ -283,6 +309,29 @@ details.sub > summary { cursor: pointer; color: var(--primary); font-weight: 600
   .test-card { min-height: 64px; }
   .card { padding: 12px; margin: 8px 0; }
   header.top { position: static; padding: 6px 16px; }
+  /* the cue cards sideways: smaller title and number; Tuner Mode in two columns, the number and
+     its lines left, Done, Reset and the history right, so the buttons are on the screen */
+  html:not(.pc) #cue { gap: 8px; padding-top: 10px; padding-bottom: 10px; }
+  html:not(.pc) #cue .cbig { font-size: clamp(20px, 7vh, 30px); }
+  html:not(.pc) #cueLive .lhz { font-size: clamp(32px, 13vh, 56px); }
+  html:not(.pc) #cueLive .ltens { font-size: clamp(20px, 8vh, 32px); }
+  html:not(.pc) #cueLive .marks { font-size: clamp(40px, 20vh, 80px); }
+  html:not(.pc) #cueLive.tuner { position: relative; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 2px 16px; align-items: start;
+    grid-template-areas: "box ." "tens ." "age ." "sub ." "u ." "hum ."; }
+  html:not(.pc) #cueLive.tuner .lbox { grid-area: box; }
+  html:not(.pc) #cueLive.tuner .ltens { grid-area: tens; }
+  html:not(.pc) #cueLive.tuner .lage:not(.u) { grid-area: age; }
+  html:not(.pc) #cueLive.tuner .lsub:not(.hum) { grid-area: sub; }
+  html:not(.pc) #cueLive.tuner .lage.u { grid-area: u; }
+  html:not(.pc) #cueLive.tuner .lsub.hum { grid-area: hum; }
+  /* the right column is laid over the grid's empty half: as tall as the left column, whatever the
+     history holds (the history scrolls inside it, and never sizes the rows the left column sits in) */
+  html:not(.pc) #cueLive.tuner .lside { display: flex; flex-direction: column; position: absolute; top: 0; bottom: 0; right: 0;
+    width: calc(50% - 8px); }
+  html:not(.pc) #cueLive.tuner .lbtns { margin: 0; flex: none; }
+  html:not(.pc) #cueLive.tuner .lbtns button { margin-top: 0; min-height: 44px; font-size: 17px; }
+  html:not(.pc) #cueLive.tuner .hist { margin-top: 8px; max-height: none; flex: 1 1 0; min-height: 0; overflow-y: auto; }
+  html:not(.pc) #cueLive.tuner .hist li { font-size: 15px; min-height: 24px; }
 }
 .measurements { overflow-x:auto; }
 table { border-collapse:collapse; width:100%; font-size:14px; font-variant-numeric:tabular-nums; }
@@ -326,7 +375,39 @@ html.pc #cue { inset: var(--hdr, 0px) 0 auto 0; flex-direction: row; flex-wrap: 
   box-shadow: 0 6px 20px rgba(0,0,0,.45); }
 html.pc #cue .cbig { font-size: 30px; max-width: none; }
 html.pc #cueLive { grid-auto-flow: column; align-items: center; gap: 16px; }
+/* Tuner Mode's band: fixed columns, sized by the window and not by the text in them, so nothing
+   moves as readings come and go: the number | its lines | the history | the buttons */
+html.pc #cue .cbig { flex: 1 0 100%; }
+html.pc #cueLive.tuner { width: 100%; max-width: 1180px; grid-auto-flow: row; gap: 4px 20px; align-items: start;
+  justify-items: start; grid-template-columns: 240px minmax(0, 1fr) minmax(0, 300px) 170px;
+  grid-template-areas: "box tens hist btns" "box age hist btns" "box sub hist btns" "box u hist btns" "box hum hist btns";
+  grid-template-rows: repeat(5, minmax(0, 1fr)); height: min(40vh, 360px); }
+@media (max-width: 1150px) {
+  /* a narrower PC window: narrower history and buttons, smaller type, and room for two lines in each row */
+  html.pc #cueLive.tuner { grid-template-columns: 200px minmax(0, 1fr) minmax(0, 190px) 130px; gap: 4px 14px;
+    height: clamp(300px, 40vh, 360px); }
+  html.pc #cueLive .lsub { font-size: 14px; }
+  html.pc #cueLive .lage { font-size: 13px; }
+  html.pc #cueLive .ltens { font-size: 20px; }
+  html.pc #cueLive.tuner .hist li { flex-wrap: wrap; font-size: 15px; gap: 4px 8px; }
+}
+/* each line keeps to its row whatever the window: a line too long for it is cut, never laid over the next */
+html.pc #cueLive.tuner .ltens, html.pc #cueLive.tuner .lage, html.pc #cueLive.tuner .lsub { max-height: 100%; overflow: hidden;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+html.pc #cueLive.tuner .ltens[hidden], html.pc #cueLive.tuner .lage[hidden], html.pc #cueLive.tuner .lsub[hidden] { display: -webkit-box !important; }
+html.pc #cueLive.tuner .lbox { grid-area: box; justify-self: center; align-self: center; }
+html.pc #cueLive.tuner .ltens { grid-area: tens; }
+html.pc #cueLive.tuner .lage:not(.u) { grid-area: age; }
+html.pc #cueLive.tuner .lsub:not(.hum) { grid-area: sub; }
+html.pc #cueLive.tuner .lage.u { grid-area: u; }
+html.pc #cueLive.tuner .lsub.hum { grid-area: hum; }
+html.pc #cueLive.tuner .hist { grid-area: hist; height: 100%; max-height: none; width: 100%; overflow-y: auto; margin: 0; align-self: stretch; }
+html.pc #cueLive.tuner .hist[hidden] { display: block !important; visibility: hidden; }
+html.pc #cueLive.tuner .lbtns { grid-area: btns; flex-direction: column; align-self: center; width: 100%; }
+html.pc #cueLive.tuner .lbtns button { width: 100%; }
+html.pc #cueLive.tuner > * { text-align: left; }
 html.pc #cueLive .lhz { font-size: 40px; }
+html.pc #cueLive .ltens { font-size: 24px; }
 html.pc #cueLive .lsub { font-size: 16px; }
 html.pc #cueLive .marks { font-size: 36px; }
 html.pc #cueLive button { margin: 0; min-height: 36px; min-width: 0; font-size: 14px; }
@@ -346,9 +427,17 @@ html.pc #cueLive .hist { max-height: 40vh; }
 /* Tuner Mode: "Pluck either belt" and the number stay put at the top; the lines under the number keep
    their place whether they show anything or not, and only the history below grows */
 html:not(.pc) #cue.green { justify-content: flex-start; overflow-y: auto; }
-html:not(.pc) #cue.green #cueLive .lage[hidden], html:not(.pc) #cue.green #cueLive .lsub[hidden] { display: block !important; visibility: hidden; }
-html:not(.pc) #cue.green #cueLive .lage, html:not(.pc) #cue.green #cueLive .lsub { min-height: 1.35em; }
-html:not(.pc) #cue.green #cueLive .lage.u { min-height: 2.7em; }
+#cue.green #cueLive .lage[hidden], #cue.green #cueLive .lsub[hidden],
+#cue.green #cueLive .ltens[hidden] { display: block !important; visibility: hidden; }
+html:not(.pc) #cue.green #cueLive .lage, html:not(.pc) #cue.green #cueLive .lsub { min-height: 1.45em; }   /* (the body's line height: a line shown takes no more than its empty place) */
+html:not(.pc) #cue.green #cueLive .lage.u, html:not(.pc) #cue.green #cueLive .lsub.hum { height: 2.9em; min-height: 0;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; line-height: 1.45; }
+html:not(.pc) #cue.green #cueLive .lage.u[hidden], html:not(.pc) #cue.green #cueLive .lsub.hum[hidden] { display: -webkit-box !important; }
+@media (max-width: 359px) {
+  /* the smallest phones: the lines under the number in smaller type, so two lines hold them */
+  html:not(.pc) #cueLive .lage { font-size: 13px; }
+  html:not(.pc) #cueLive .lsub { font-size: 15px; }
+}
 #cue .cbig {
   font-size: clamp(30px, 10vw, 64px); font-weight: 900; line-height: 1.1; letter-spacing: .02em;
   text-transform: uppercase; text-wrap: balance; max-width: 14em; }
@@ -357,15 +446,22 @@ html:not(.pc) #cue.green #cueLive .lage.u { min-height: 2.7em; }
 #cueLive .lhz { font-size: clamp(40px, 16vw, 96px); font-weight: 900; font-variant-numeric: tabular-nums; line-height: 1; }
 #cueLive .lsub { font-size: clamp(16px, 4.5vw, 22px); font-weight: 700; }
 /* the number in a box: a pluck heard this instant lights the box only; a reading whose window isn't all in yet: dimmed */
-#cueLive .lbox { border: 3px solid var(--cfg); border-radius: 18px; padding: 4px 22px; transition: background-color 0.12s, color 0.12s; }
+#cueLive .lbox { border: 3px solid var(--cfg); border-radius: 18px; padding: 4px 16px; transition: background-color 0.12s, color 0.12s; }
+#cueLive .lhz { width: 4.7em; white-space: nowrap; text-align: center; }   /* ("000.0 Hz": the box never changes size) */
 #cueLive .lbox.lit { background: var(--cfg); color: var(--cbg); }
 #cueLive .lhz { transition: opacity 0.2s; }
 #cueLive .lhz.prov { opacity: 0.6; }
 #cueLive .hist { max-height: 26vh; margin-top: 4px; }
 #cueLive .hist li { border-bottom-color: rgba(127,127,127,.4); font-size: 18px; }
 #cueLive .lbtns { display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; }
+#cueLive .lside { display: contents; }     /* (the buttons and the history: in the grid themselves, except sideways) */
+html:not(.pc) #cueLive.tuner { width: 100%; }   /* (the card's width, not its widest line's) */
+html:not(.pc) #cueLive .lbtns { flex-wrap: nowrap; width: 100%; max-width: 420px; margin-bottom: 6px; }
+html:not(.pc) #cueLive .lbtns button { flex: 1 1 0; min-width: 0; margin-top: 8px; }
 #cueLive button.lreset { background: transparent; color: var(--cfg); border: 2px solid var(--cfg); min-width: 0; }
 #cueLive .lage { font-size: clamp(14px, 4vw, 18px); font-weight: 600; opacity: 0.85; }
+/* the tension under the number: its line keeps its place (empty until the first pluck) */
+#cueLive .ltens { font-size: clamp(28px, 9vw, 44px); font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1.1; min-height: 1.1em; }
 #cueLive .marks { font-size: clamp(40px, 14vw, 80px); font-weight: 900; letter-spacing: .15em; line-height: 1; }
 #cueLive button { margin-top: 14px; min-width: 12em; min-height: 56px; font-size: 20px; font-weight: 800;
   background: var(--cfg); color: var(--cbg); border: 0; }
@@ -447,12 +543,31 @@ html:not(.pc) #cue.green #cueLive .lage.u { min-height: 2.7em; }
           A new session, Close Chordata and Reset history clear it.</li>
         <li>A pluck is on target within <span id="howTol">0.25</span> Hz. Only clear plucks count: 12 dB over the background
           noise and not a knock on the toolhead.</li>
+        <li>Belt tension: give the span you pluck (at the belt tensioning position, from where the belt leaves one
+          pulley to where it meets the next one or the clamp) and the belt's
+          weight per metre under Belt on Set Target Frequency, and the tension shows under the Hz, in N or lbf. The
+          target can then be typed in Hz, N or lbf; a tension is set as its Hz (to 0.1 Hz). Gates-Unitta 2GT
+          (most printers' belts) weighs 1.3 g/m per mm of width: 6 mm 7.8 g/m, 9 mm 11.7 g/m; Gates GT2 / GT3 1.4: 6 mm
+          8.4 g/m, 9 mm 12.6 g/m, 12 mm 16.8 g/m. Other makes differ: type theirs under Other. Tension goes with the span squared: 3% off on the span is 6% off in tension, so the N are good to
+          about 15-20%, and read a little high on short spans. Your two belts, same span and same belt, compare as
+          well as their Hz do.</li>
         <li>A fan hums at one steady level; a pluck starts loud and dies away. A hum that starts after the background was
           recorded is left out, and if it sits on the belt's note Chordata says so.</li>
       </ul>
     </details>
   </div>
 </section>
+<!-- BELT TENSION: its own page (#tension), opened from Set Target Frequency -->
+<section id="tension" hidden>
+  <button type="button" id="tensionBack">Back</button>
+  <div class="card" id="tensionCard"></div>
+</section>
+<dialog id="needSpan" class="card" aria-labelledby="needSpanT">
+  <h2 id="needSpanT">Tension needs the span</h2>
+  <p>A target in N or lbf needs the span you pluck and the belt. Set them first, or keep the target in Hz.</p>
+  <div class="pbuttons"><button type="button" class="primary" id="needSpanGo">Set the belt and span</button>
+    <button type="button" id="needSpanHz">Keep Hz</button></div>
+</dialog>
 <details class="card" id="authPanel" hidden><summary>Printer connection</summary><form id="authForm"><div class="field"><label for="moonrakerKey">Moonraker API key</label><input id="moonrakerKey" type="password" autocomplete="off"></div><p class="help">Held in memory for this page only. Reload to forget it.</p><button type="submit">Authenticate</button></form></details>
   <p class="disclaimer">Chordata comes without any warranty. You use it at your own risk.</p>
 </main>
@@ -508,6 +623,7 @@ function toast(msg, ok) {
   t.hidden = false;
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => { t.hidden = true; }, ok ? 3000 : 7000);
+  t.onclick = () => { t.hidden = true; };      // (a tap takes it away from what it covers)
 }
 
 // In-page confirm dialog; resolves true/false.
@@ -572,6 +688,8 @@ function connect() {
   };
   ws.onclose = () => {
     connected = false;
+    staleStatus = true;
+    klippyState = "";
     for (const p of pending.values()) { clearTimeout(p.timer); p.reject({ message: "Connection lost" }); }
     pending.clear();
     render();
@@ -679,6 +797,8 @@ async function subscribe() {
     resetPrompt();
     for (const line of st.gcode_store || []) handleLine(line.message || "", true);
   } catch (e) { /* history is optional */ }
+  if (!prompt) targetTyped = null;       // (no step on screen: nothing typed is waiting)
+  staleStatus = false;
   render();
 }
 
@@ -793,7 +913,11 @@ function handlePrompt(s, replay) {
         prompt = null; promptSeq++; lastEndAt = Date.now();
         // wait a moment before hiding: a button that re-shows the same prompt
         // would otherwise collapse the page and throw the view to the top
-        if (!replay) { clearTimeout(endTimer); endTimer = setTimeout(render, 400); }
+        if (!replay) {
+          clearTimeout(endTimer);
+          // (the step gone for good: a target typed into it and not set goes with it)
+          endTimer = setTimeout(() => { if (!prompt) targetTyped = null; render(); }, 400);
+        }
       }
       break;
   }
@@ -813,24 +937,116 @@ function pressPromptButton(gcode) {
   runGcode(gcode).catch(() => unlockButtons());
 }
 
-// Set Target Frequency: the target is typed (40-300 Hz, rounded to whole Hz): quicker than buttons.
-// Mainsail's pop-up can't hold a box, so the prompt keeps its -5..+5 buttons; this page leaves them out.
+// Set Target Frequency: the target is typed: quicker than buttons. In Hz (40-300, whole Hz), or as a
+// tension in N or lbf once the belt is set: Chordata measures Hz, so a tension goes to the macro as
+// its Hz (to 0.1 Hz). Mainsail's pop-up can't hold a box, so the prompt keeps its -5..+5 Hz buttons;
+// this page leaves them out.
+const LBF = 4.4482216152605;           // N per lbf
+function fmtTgt(f) { f = Math.round(f * 10) / 10; return Number.isInteger(f) ? String(f) : f.toFixed(1); }
+// k for a unit: tension in that unit = k f^2 (the plugin's k is in the display unit)
+function kIn(unit) {
+  const t = tens();
+  if (!t) return 0;
+  const kN = t.unit === "lbf" ? t.k * LBF : t.k;
+  return unit === "lbf" ? kN / LBF : kN;
+}
+// what the target box is in: Hz unless a tension was picked and a belt is set
+function targetUnit() { const u = tensNow().target_unit; return u === "N" || u === "lbf" ? (tens() ? u : "Hz") : "Hz"; }
+// the Hz for a value typed in a unit (NaN if it can't be had)
+function hzOf(v, unit) {
+  if (!Number.isFinite(v) || v <= 0) return NaN;
+  if (unit === "Hz") return v >= 40 && v <= 300 ? Math.round(v) : v;
+  const k = kIn(unit);
+  return k > 0 ? Math.round(Math.sqrt(v / k) * 10) / 10 : NaN;
+}
+function inUnit(hz, unit) { return unit === "Hz" ? fmtTgt(hz) : (kIn(unit) * hz * hz).toFixed(unit === "lbf" ? 2 : 1); }
+let targetTyped = null;
 function targetBox(text) {
-  const now = (text.match(/([\d.]+)\s*Hz/) || [])[1] || "";
+  const now = Number((text.match(/([\d.]+)\s*Hz/) || [])[1]);
+  let unit = targetUnit();
   const f = el("form", { class: "ptarget" });
   const row = f.appendChild(el("div", { class: "trow" }));
-  row.appendChild(el("label", { for: "targetHz" }, "Target Frequency"));
-  const inp = el("input", { id: "targetHz", type: "number", inputmode: "numeric", min: "40", max: "300", step: "any", value: now });
+  row.appendChild(el("label", { for: "targetHz" }, "Target"));
+  const inp = el("input", { id: "targetHz", type: "number", inputmode: "decimal", step: "any" });
+  inp.dataset.hz = Number.isFinite(now) ? String(now) : "";
   row.appendChild(inp);
-  row.appendChild(el("span", {}, "Hz"));
+  const uLabel = row.appendChild(el("span", {}, unit));
+  const units = f.appendChild(el("div", { class: "chips tunits", role: "group", "aria-label": "Target in" }));
+  const conv = f.appendChild(el("div", { class: "tconv" }));
+  // the other unit's value under the box: "= 9.1 N" for a Hz target, "= 105.6 Hz" for a tension
+  // the box's Hz: the set target while the box shows it untouched (9.1 N is 110 Hz, not 109.7)
+  // and a typed target carried over a unit change keeps its own Hz, not the one rounded back
+  let typed = null;
+  const boxHz = () => typed && inp.value === typed.v ? typed.hz
+    : inp.value === inp.defaultValue && inp.dataset.hz !== "" ? Number(inp.dataset.hz)
+    : hzOf(Number(inp.value), unit);
+  const showConv = () => {
+    const hz = boxHz();
+    setText(conv, !Number.isFinite(hz) ? ""
+      : unit === "Hz" ? (tens() ? "= " + fmtT(hz) : "") : "= " + fmtTgt(hz) + " Hz");
+  };
+  const setUnit = (u) => {
+    const hz = boxHz(), touched = inp.value !== inp.defaultValue;
+    unit = u;
+    inp.dataset.unit = u;
+    uLabel.textContent = u;
+    inp.setAttribute("aria-label", "Target in " + u);
+    if (Number.isFinite(hz)) inp.value = inUnit(hz, u);
+    // a unit change alone is no new target; a number typed before it still is
+    if (touched) {
+      typed = Number.isFinite(hz) ? { v: inp.value, hz } : null;
+      targetTyped = { v: inp.value, unit: u, base: now };
+    }
+    else { typed = null; inp.defaultValue = inp.value; }
+    for (const b of units.children) b.setAttribute("aria-pressed", String(b.textContent === u));
+    showConv();
+  };
+  for (const u of ["Hz", "N", "lbf"]) {
+    const b = units.appendChild(el("button", { type: "button", "aria-pressed": "false" }, u));
+    b.onclick = () => {
+      // a tension needs the span and the belt: say so, with a way there; Hz needs nothing more
+      if (u !== "Hz" && !tens()) { needSpan(); return; }
+      setUnit(u);
+      tensSent.target_unit = u;
+      if (u !== "Hz") tensSent.unit = u;
+      runGcode("_CHORDATA_TENSION TARGET_UNIT=" + u + (u !== "Hz" ? " UNIT=" + u : "")).catch(() => {
+        delete tensSent.target_unit; delete tensSent.unit;      // (not taken: back to what is set)
+        promptRendered = -1; render();
+      });
+    };
+  }
+  inp.value = Number.isFinite(now) ? inUnit(now, unit) : "";
+  inp.defaultValue = inp.value;
+  // what was typed and not set yet: kept when the step is shown again for something else (a
+  // reconnect, Mainsail's +1 elsewhere moves the target and drops it)
+  inp.oninput = () => { targetTyped = inp.value === inp.defaultValue ? null : { v: inp.value, unit, base: now }; showConv(); };
+  setUnit(unit);
+  if (targetTyped && targetTyped.base === now && targetTyped.unit === unit) inp.value = targetTyped.v;
+  else targetTyped = null;
+  showConv();
+  // after the belt card: the belt may be new or gone, so the unit and the numbers follow it
+  f.refresh = () => {
+    if (targetUnit() !== unit) setUnit(targetUnit());
+    else if (inp.value === inp.defaultValue && inp.dataset.hz !== "") { setUnit(unit); }
+    else {
+      if (typed && inp.value === typed.v) inp.value = typed.v = inUnit(typed.hz, unit);
+      showConv();
+    }
+  };
+  f.boxHz = boxHz;
   const set = el("button", { type: "submit", "data-g": "1" }, "Set");
   set.disabled = buttonsLocked;
   f.appendChild(set);
   f.onsubmit = (e) => {
     e.preventDefault();
-    const v = Math.round(Number(inp.value));
-    if (!Number.isFinite(v) || v < 40 || v > 300) { errorNote("Error: target must be 40-300 Hz"); return; }
-    pressPromptButton("_CHORDATA_BELTS HZ=" + v);
+    const hz = boxHz();
+    if (!Number.isFinite(hz) || hz < 40 || hz > 300) {
+      errorNote(unit === "Hz" || !Number.isFinite(hz) ? "Error: target must be 40-300 Hz"
+        : "Error: " + inp.value + " " + unit + " is " + fmtTgt(hz) + " Hz on this belt: the target must be 40-300 Hz");
+      return;
+    }
+    targetTyped = null;
+    pressPromptButton("_CHORDATA_BELTS HZ=" + hz);
   };
   return f;
 }
@@ -839,11 +1055,145 @@ function targetBox(text) {
 function withTypedTarget(gcode) {
   const box = $("targetHz");
   if (!box || !/^_CHORDATA_BELTS STEP=(start|go|save)\b/.test(gcode) || /\b(HZ|DT)=/.test(gcode)) return gcode;
-  const v = Math.round(Number(box.value)), was = Math.round(Number(box.defaultValue));
-  if (!Number.isFinite(v) || v < 40 || v > 300 || v === was) return gcode;
+  const u = box.dataset.unit || "Hz";
+  if (box.value === box.defaultValue) return gcode;
+  const v = box.form && box.form.boxHz ? box.form.boxHz() : hzOf(Number(box.value), u);
+  if (!Number.isFinite(v) || v < 40 || v > 300 || Math.abs(v - Number(box.dataset.hz)) < 0.05) return gcode;
   // Start: set it and show the step again, so a target the accelerometer can't hear is flagged
   // before anything starts; Start is then pressed once more
+  targetTyped = null;                  // (sent: no longer waiting in the box)
   return /STEP=start\b/.test(gcode) ? "_CHORDATA_BELTS HZ=" + v : gcode + " HZ=" + v;
+}
+
+// Belt tension on Set Target Frequency: the span plucked, the belt (6 mm, 9 mm, or Other: its g/m)
+// and the unit. Each change is sent at once (_CHORDATA_TENSION) and saved by the plugin for next
+// time; the controls show what was picked straight away, the plugin's status then holds it
+// g/m: Gates-Unitta 2GT (the belts most printers use, RF and EPDM) 1.3 g/m per mm of width (Unitta's
+// sonic tension meter manuals); Gates PowerGrip GT2 / GT3 2 mm 1.4 g/m per mm (Gates' 550C manual).
+// Each make's row has a hint: what is printed on that belt
+const BELT_HINT = { "Gates-Unitta 2GT": "Hint: the belt reads LL-2GT or LL-2GT-E", "Gates GT2 / GT3": "Hint: the belt reads 2MGT or 2MR" };
+const BELT_MASS = [["Gates-Unitta 2GT", "6 mm", 7.8], ["Gates-Unitta 2GT", "9 mm", 11.7],
+  ["Gates GT2 / GT3", "6 mm", 8.4], ["Gates GT2 / GT3", "9 mm", 12.6]];
+// what the page sent last, until the plugin's status holds it: a prompt drawn again in between
+// (Set, +1 Hz) shows the new choice, not the old one
+const tensSent = {};
+function tensNow() {
+  const t = Object.assign({ span: 0, mass: 7.8, unit: "N", target_unit: "Hz" }, pt().tension || {});
+  for (const k in tensSent) { if (t[k] === tensSent[k]) delete tensSent[k]; else t[k] = tensSent[k]; }
+  return t;
+}
+function tensionBox() {
+  const t = tensNow();
+  const box = el("div", { class: "ptens" });
+  const send = (key, v) => {
+    tensSent[key.toLowerCase()] = v;
+    runGcode("_CHORDATA_TENSION " + key + "=" + v).catch(() => { delete tensSent[key.toLowerCase()]; });
+  };
+  const num = (label, unit, value, min, max, id) => {
+    const row = box.appendChild(el("div", { class: "tr" }));
+    row.appendChild(el("label", { for: id }, label));
+    const inp = row.appendChild(el("input", { id, type: "number", inputmode: "decimal", min: String(min), max: String(max), step: "any" }));
+    inp.value = value;
+    row.appendChild(el("span", {}, unit));
+    return [row, inp];
+  };
+  const [, span] = num("Span", "mm", t.span > 0 ? String(t.span) : "", 40, 2000, "tensSpan");
+  span.onchange = () => {
+    const v = span.value.trim() === "" ? 0 : Number(span.value);
+    if (!Number.isFinite(v) || (v !== 0 && (v < 40 || v > 2000))) { errorNote("Error: span must be 40-2000 mm (empty: Hz only)"); return; }
+    send("SPAN", Math.round(v * 10) / 10);
+  };
+  box.appendChild(el("div", { class: "tl" }, "Belt"));
+  // one row of 6 mm / 9 mm per make, then Other (its g/m typed)
+  const btns = [];
+  const preset = BELT_MASS.findIndex(([, , m]) => Math.abs(m - t.mass) < 1e-6);
+  const note = el("p", { class: "help" });
+  const [mrow, mass] = num("Mass", "g/m", String(t.mass), 1, 100, "tensMass");
+  const mhelp = el("p", { class: "help" }, "Weight of 1 m of your belt. Gates GT2 12 mm: 16.8 g/m.");
+  const pick = (i) => {
+    btns.forEach((b, j) => b.setAttribute("aria-pressed", String(i === j)));
+    const p = BELT_MASS[i];
+    mrow.hidden = mhelp.hidden = !!p;
+    note.hidden = !p;
+    if (p) note.textContent = p[0] + " " + p[1] + ": " + p[2] + " g/m";
+  };
+  let chips = null;
+  BELT_MASS.concat([["", "Other", null]]).forEach(([make, label, m], i) => {
+    if (!chips || make !== BELT_MASS[i - 1][0]) {
+      if (make) box.appendChild(el("div", { class: "tm" }, make));
+      chips = box.appendChild(el("div", { class: "chips" }));
+    }
+    const b = chips.appendChild(el("button", { type: "button", "aria-pressed": "false",
+      "aria-label": make ? make + " " + label : label }, label));
+    btns.push(b);
+    if (make && (i === BELT_MASS.length - 1 || BELT_MASS[i + 1][0] !== make)) box.appendChild(el("div", { class: "thint" }, BELT_HINT[make]));
+    b.onclick = () => { pick(i); if (m != null) { mass.value = String(m); send("MASS", m); } };
+  });
+  box.appendChild(note);
+  box.appendChild(mrow);
+  box.appendChild(mhelp);
+  mass.onchange = () => {
+    const v = Number(mass.value);
+    if (!Number.isFinite(v) || v < 1 || v > 100) { errorNote("Error: belt mass must be 1-100 g/m"); return; }
+    send("MASS", Math.round(v * 100) / 100);
+  };
+  pick(preset >= 0 ? preset : BELT_MASS.length);
+  box.appendChild(el("div", { class: "tl" }, "Show tension in"));
+  const units = box.appendChild(el("div", { class: "chips" }));
+  for (const u of ["N", "lbf"]) {
+    const b = units.appendChild(el("button", { type: "button", "aria-pressed": String(t.unit === u) }, u));
+    b.onclick = () => {
+      for (const x of units.children) x.setAttribute("aria-pressed", String(x === b));
+      send("UNIT", u);
+      if (tensNow().target_unit !== "Hz") send("TARGET_UNIT", u);   // (a tension target follows)
+    };
+  }
+  return box;
+}
+
+// Set Target Frequency: the belt first, as one button saying what is set; its inputs and which belt
+// is which are on their own page (#tension), like How it works. Then the target, in Hz or a tension
+function tensionLink(body) {
+  body.appendChild(el("div", { class: "plabel" }, "Belt"));
+  const b = el("button", { type: "button", id: "tensionBtn", class: "tbelt" });
+  b.onclick = openTension;
+  body.appendChild(el("div", { class: "pbuttons" })).appendChild(b);
+  tensionSum();
+}
+// the belt button says what is set: "Gates-Unitta 2GT 6 mm, 150 mm span", or that it is Hz only
+function tensionSum() {
+  const e = $("tensionBtn");
+  if (!e) return;
+  const t = tens();
+  const p = t && BELT_MASS.find(([, , m]) => Math.abs(m - t.mass) < 1e-6);
+  setText(e, !t ? "Not set: Hz only" : (p ? p[0] + " " + p[1] : t.mass + " g/m") + ", " + t.span + " mm span");
+  const box = $("targetHz");
+  if (box && box.form && box.form.refresh) box.form.refresh();
+}
+// the pop-up for a tension target without a span: set the belt, or carry on in Hz
+function needSpan() {
+  const d = $("needSpan");
+  if (!d.showModal) { toast("A target in N or lbf needs the span and the belt: press Belt first"); return; }
+  d.showModal();
+}
+let tensionFromPage = false;
+function openTension() { tensionFromPage = true; location.hash = "tension"; }
+// built when the page opens, then left alone: a number being typed is never wiped by a status update
+function tensionPage() {
+  const c = $("tensionCard");
+  c.textContent = "";
+  c.appendChild(el("h2", {}, "Belt tension"));
+  c.appendChild(el("p", { class: "help" }, "Optional. With the span and the belt set, Tuner Mode shows each pluck's tension under the Hz."));
+  c.appendChild(tensionBox());
+  c.appendChild(el("h3", {}, "Which belt do I have?"));
+  const ul = c.appendChild(el("ul", { class: "why small" }));
+  ul.appendChild(el("li", {}, "Gates-Unitta 2GT: LL-2GT, LL-2GT-E"));
+  ul.appendChild(el("li", {}, "Gates PowerGrip GT2 / GT3: 2MGT, 2MR"));
+  ul.appendChild(el("li", {}, "Another make: its g/m under Other"));
+  c.appendChild(el("p", { class: "help" }, "The tension is good to about 15-20 % (span and belt mass are rarely known better) and " +
+    "reads a little high on short spans. Your two belts, same span and same belt, compare as well as their Hz do."));
+  const done = c.appendChild(el("button", { type: "button", class: "primary block" }, "Done"));
+  done.onclick = () => $("tensionBack").click();
 }
 
 function promptButton(b) {
@@ -893,6 +1243,13 @@ function ageOf(p) {
 // in place: the elements stay, so a button under the user's finger is never swapped for a new one
 function setText(e, t) { if (e.textContent !== t) e.textContent = t; }
 function fmtHz(v) { return v == null ? "--" : Number(v).toFixed(1); }
+// Belt tension beside the Hz: the plugin gives k for the span and belt set (tension = k f^2, in its
+// unit), 0 when no span is set (Hz only)
+function tens() { const t = pt().tension; return t && t.k > 0 ? t : null; }
+function fmtT(f, t) {
+  t = t || tens();
+  return !t || f == null ? "" : (t.k * f * f).toFixed(t.unit === "lbf" ? 2 : 1) + " " + t.unit;
+}
 // Jog pad on Set Target Frequency: the user moves the toolhead to where their printer's guide says to pluck,
 // with the arrows or by typing X and Y. Chordata itself never moves it; every move here is a button press.
 // Built once per prompt and updated in place, so a coordinate being typed is never wiped by a status update.
@@ -992,7 +1349,7 @@ function jogUpdate() {
 // A fan humming on the belt's note: the plucks can't be read there
 function humText(st) {
   const h = (st || pt()).belt_hum || [];
-  return h.length ? "Steady hum at " + h.map((x) => Math.round(x)).join(" and ") + " Hz on the belt's note (a fan?): turn fans off" : "";
+  return h.length ? "Steady hum at " + h.map((x) => Math.round(x)).join(" and ") + " Hz on the belt's note (a fan?): turn it off" : "";
 }
 // Tuner Mode: one big number, the newest clear pluck, and how far it is from the target; the
 // session's history below it. Built once (freeBuild), then updated in place (renderFree)
@@ -1000,7 +1357,8 @@ function freeBuild(box) {
   const v = {}, live = el("div", { class: "live" });
   v.box = live.appendChild(el("div", { class: "hzbox" }));
   v.hz = v.box.appendChild(el("div", { class: "hz" }));
-  v.age = live.appendChild(el("div", { class: "age" }));
+  v.tens = live.appendChild(el("div", { class: "tens" }));
+  v.age = live.appendChild(el("div", { class: "age", "aria-live": "off" }));
   v.d = live.appendChild(el("div", { class: "d" }));
   v.u = live.appendChild(el("div", { class: "age u" }));
   v.sub = live.appendChild(el("div", { class: "sub" }));
@@ -1018,8 +1376,8 @@ function freeBuild(box) {
 // close together (all within 1 Hz of each other, or twice the tolerance, one after another back from it, at
 // most U_N, stopping at the first that doesn't: Tuner Mode doesn't know which belt a pluck was, and
 // a tensioner turned in between moves the next one). The 95 % interval of ONE reading from that
-// scatter: Student's t for n - 1 degrees of freedom times s (n - 1 in the divisor). Only from 3
-// plucks on (from 2, t is 12.7: no use), and none for readings exactly alike (real plucks scatter
+// scatter: Student's t for n - 1 degrees of freedom times s (n - 1 in the divisor). Only from 4
+// plucks on (from 2, t is 12.7, from 3 still 4.3: no use), and none for readings exactly alike (real plucks scatter
 // 0.1-0.4 Hz; the same number to the last digit is an artefact repeating, not a sure reading). It
 // is the pluck-to-pluck repeatability, not the engine's systematic error.
 const T95 = [12.706, 4.303, 3.182, 2.776, 2.571, 2.447, 2.365, 2.306, 2.262, 2.228];
@@ -1056,14 +1414,24 @@ function shownGroup(p) {
 // follows; and the pluck-to-pluck +- once there are enough
 function uText(g) {
   if (!g || g.n < 2) return "";
-  return "Average " + g.mean.toFixed(2) + " Hz of the last " + g.n + " (within " + Number(g.span.toFixed(2)) + " Hz)" +
+  const t = fmtT(g.mean);
+  return "Average " + g.mean.toFixed(2) + " Hz" + (t ? " (" + t + ")" : "") + " of the last " + g.n + " (within " + Number(g.span.toFixed(2)) + " Hz)" +
     (g.u != null ? "  \u00b7  \u00b1 " + g.u.toFixed(1) + " Hz per pluck" : "");
 }
 // how far a reading is from the target, and its class: one wording for the card and the cue
+// (on target or not is judged in Hz, the tolerance's unit; a tension target says how far in its unit)
 function deltaText(last, b) {
-  const d = last - b.target, tol = b.tol || 0.25;
+  const d = last - b.target, tol = b.tol || 0.25, u = targetUnit();
+  const far = u === "Hz" ? Math.abs(d).toFixed(1) + " Hz"
+    : (kIn(u) * Math.abs(last * last - b.target * b.target)).toFixed(u === "lbf" ? 2 : 1) + " " + u;
   return [Math.abs(d) <= tol ? "good" : (Math.abs(d) <= 2 ? "near" : "far"), Math.abs(d) <= tol ? "On target"
-    : (d < 0 ? "-" : "+") + Math.abs(d).toFixed(1) + " Hz, " + (d < 0 ? "tighten" : "loosen")];
+    : (d < 0 ? "-" : "+") + far + ", " + (d < 0 ? "tighten" : "loosen")];
+}
+// "Target 110 Hz", and its tension when one is shown
+function targetText(b) {
+  const f = Number(b.target || 0), t = fmtT(f);
+  if (targetUnit() !== "Hz") return "Target " + inUnit(f, targetUnit()) + " " + targetUnit() + " (" + fmtTgt(f) + " Hz)";
+  return "Target " + fmtTgt(f) + " Hz" + (t ? " \u00b7 " + t : "");
 }
 function renderFree(v, b) {
   const listening = pt().state === "listening" && pt().belt_now === "free";
@@ -1073,6 +1441,8 @@ function renderFree(v, b) {
   setText(v.hz, last != null ? fmtHz(last) + " Hz" : (listening ? "..." : "--"));
   v.hz.className = hzClass("hz", lastP);
   v.box.classList.toggle("lit", listening && heardNow());
+  v.tens.hidden = !tens();
+  setText(v.tens, fmtT(last));
   v.age.hidden = !(listening && last != null);
   setText(v.age, v.age.hidden ? "" : ageText(ageOf(lastP)));
   v.d.hidden = last == null;
@@ -1082,7 +1452,7 @@ function renderFree(v, b) {
   v.u.hidden = !v.u.textContent;
   // (a listen that ran into its longest time: say so, it didn't just stop)
   const capped = !listening && (b.free || {}).stopped === "limit";
-  setText(v.sub, "Target " + Number(b.target).toFixed(0) + " Hz" + (listening ? "  ·  " + (pt().message || "Listening")
+  setText(v.sub, targetText(b) + (listening ? "  ·  " + (pt().message || "Listening")
     : (capped ? "  ·  Stopped after " + b.free.max_min + " minutes: start Tuner Mode again to go on" : "")));
   setText(v.hum, humText());
   v.hum.hidden = !v.hum.textContent;
@@ -1098,7 +1468,7 @@ function renderFree(v, b) {
 // when the history changes; the list itself stays
 function histUpdate(list) {
   const h = pt().history || [];
-  const sig = runSpan() + "/" + h.map((e) => [e.n, e.freq, e.ok, e.why].join(":")).join("|");
+  const sig = runSpan() + "/" + JSON.stringify(tens()) + "/" + h.map((e) => [e.n, e.freq, e.ok, e.why].join(":")).join("|");
   if (list.dataset.sig === sig) return;
   list.dataset.sig = sig;
   // each clear pluck's +-: from the run of clear plucks just before it that agree (u1)
@@ -1108,6 +1478,7 @@ function histUpdate(list) {
     const li = el("li", { class: e.ok ? "ok" : "out" });
     li.appendChild(el("span", { class: "n" }, "#" + e.n));
     li.appendChild(el("span", { class: "f" }, e.freq != null ? fmtHz(e.freq) + " Hz" : "--"));
+    if (e.ok && tens()) li.appendChild(el("span", { class: "t" }, fmtT(e.freq)));
     const u = um.get(e);
     if (u != null) li.appendChild(el("span", { class: "u" }, "\u00b1 " + u.toFixed(1)));
     if (!e.ok && e.why) li.appendChild(el("span", { class: "why" }, e.why + quip(e)));
@@ -1119,7 +1490,7 @@ function histUpdate(list) {
 // of encouragement after its reason, the same one each time for the same pluck
 const PLUCKER = ["too weak", "too soft", "two plucks at once", "a knock, not a belt"];
 function quip(e) {
-  return PLUCKER.includes(e.why) ? (e.n % 2 ? " \u00b7 skill issue" : " \u00b7 git good") : "";
+  return PLUCKER.includes(e.why) ? (e.n % 2 ? " \u00b7 skill issue" : " \u00b7 git gud") : "";
 }
 // Reset history is not G-code either (a listen may be running): to the plugin through Moonraker
 let resetting = false;
@@ -1156,9 +1527,9 @@ function noteCheck() {
   if (at !== noteAt) { noteAt = at; if (n && n.text) { markCleared(n.upto); toast(n.text, true); renderBelts(); cueUpdate(); } }
 }
 
-let beltViewKey = "", freeView = null;
+let beltViewKey = "", freeView = null, tapSig = "";
 function renderBelts() {
-  const listen = pt().state === "listening" && !!pt().belt_now;
+  const listen = pt().state === "listening" && !!pt().belt_now && connected && klippyState === "ready";
   if (listen && !ageTimer) ageTimer = setInterval(() => { renderBelts(); cueUpdate(); }, 250);
   else if (!listen && ageTimer) { clearInterval(ageTimer); ageTimer = null; }
   const b = pt().belts || {};
@@ -1172,7 +1543,12 @@ function renderBelts() {
     renderFree(freeView, b);
     return;
   }
-  beltViewKey = "tap";                 // (nothing to press on the tap step: drawn afresh)
+  // the tap step: nothing to press, drawn afresh, but only when what it says changes (a screen
+  // reader would hear it again each time)
+  const sig = [pt().state, pt().message, humText(), targetText(b)].join("|");
+  if (beltViewKey === "tap" && sig === tapSig) return;
+  beltViewKey = "tap";
+  tapSig = sig;
   box.textContent = "";
   // the tap step: what it is listening for, and the target
   const live = el("div", { class: "live" });
@@ -1182,13 +1558,14 @@ function renderBelts() {
   }
   if (humText()) live.appendChild(el("div", { class: "d far" }, humText()));
   if (live.childNodes.length) box.appendChild(live);
-  box.appendChild(el("div", { class: "tgt" }, "Target " + Number(b.target).toFixed(0) + " Hz"));
+  box.appendChild(el("div", { class: "tgt" }, targetText(b)));
 }
 
 // ---------- state ----------
 const S = {};             // merged printer status
 let klippyState = "";     // "ready", "startup", "shutdown", "error", "disconnected"
 let connected = false;
+let staleStatus = false;  // the connection dropped: the status held is old until subscribe() brings fresh
 function obj(name) { return S[name] || {}; }
 // ---------- cue cards: red = hands off (recording the background noise), yellow = tap the toolhead, green = pluck ----------
 let cueKey = "";
@@ -1196,15 +1573,24 @@ const CUES = {     // the big text only: the card says one thing
   background: ["red", "Stand by: recording background noise"],
   tap: ["yellow", "Tap your toolhead"],
   "pluck:free": ["green", "Pluck either belt"],
+  lost: ["red", "Not listening: connection lost"],
+  down: ["red", "Not listening: Klipper stopped"],
 };
 // No card closes on a timer or needs a press on the phone: each stays until the printer is done
 // with that step (red until the quiet is recorded, yellow until the tap is heard, green until
 // the plucking is over). The green ones show each pluck as it is heard. No card flashes: a new
 // card simply replaces the last (only the box around the number lights, on each pluck heard).
+function cueInert() {
+  // a full-screen card on a phone: the page under it can't be reached with Tab either (on a PC the
+  // card is a band at the top; also after the window switched layout under a card)
+  for (const e of [document.querySelector("main"), $("hdrTop")]) if (e) e.inert = !!cueKey && !isPc();
+}
 function cueSet(key) {
-  if (key === cueKey) return;
+  if (key === cueKey) { cueInert(); return; }
   const box = $("cue");
   cueKey = key;
+  cueInert();
+  if (key && !isPc() && document.activeElement && !box.contains(document.activeElement)) document.activeElement.blur();
   if (!key) { box.hidden = true; return; }
   const [colour, big] = CUES[key];
   box.className = colour;
@@ -1237,12 +1623,18 @@ function beepUnlock() {
 // screen that goes dark hides the cue cards. The browser's wake lock where it is allowed (HTTPS or
 // localhost); a printer's plain-http page doesn't get it, so there a tiny silent black video loops
 // unseen, which phones also keep the screen on for. Both need a first press on the page.
-let wakeLock = null, wakeVideo = null;
+let wakeLock = null, wakeVideo = null, wantAwake = false;
 async function keepAwake() {
+  wantAwake = true;              // (asked for once: asked again each time the page comes back into view)
   if (document.visibilityState !== "visible") return;
   try {
     if (navigator.wakeLock && window.isSecureContext) {
-      if (!wakeLock) {               // one press fires several events: they share one request
+      if (wakeLock) {                // one press fires several events: they share one request
+        const held = await wakeLock.catch(() => null);
+        if (held && !held.released) return;
+        wakeLock = null;             // (released while the page was hidden: asked for again)
+      }
+      if (!wakeLock) {
         wakeLock = navigator.wakeLock.request("screen").then((lock) => {
           lock.addEventListener("release", () => { wakeLock = null; });
           return lock;
@@ -1286,27 +1678,42 @@ function cueBuild(box) {
   const v = {};
   v.box = box.appendChild(el("div", { class: "lbox" }));
   v.hz = v.box.appendChild(el("div", { class: "lhz" }));
-  v.age = box.appendChild(el("div", { class: "lage" }));
+  v.tens = box.appendChild(el("div", { class: "ltens" }));
+  v.age = box.appendChild(el("div", { class: "lage", "aria-live": "off" }));
   v.sub = box.appendChild(el("div", { class: "lsub" }));
   v.u = box.appendChild(el("div", { class: "lage u" }));
-  v.hum = box.appendChild(el("div", { class: "lsub" }));
-  v.list = box.appendChild(el("ul", { class: "hist", "aria-label": "Plucks this session, newest first" }));
-  const row = box.appendChild(el("div", { class: "lbtns" }));
+  v.hum = box.appendChild(el("div", { class: "lsub hum" }));
+  // the buttons above the history: only the history grows, nothing under it to push down
+  // (both in a side box: a column of their own when the phone is held sideways, see .lside)
+  const side = box.appendChild(el("div", { class: "lside" }));
+  const row = side.appendChild(el("div", { class: "lbtns" }));
   v.done = row.appendChild(el("button", { type: "button" }, "Done"));
   v.done.onclick = freeDone;
   v.reset = row.appendChild(el("button", { type: "button", class: "lreset" }, "Reset history"));
   v.reset.onclick = historyReset;
+  v.list = side.appendChild(el("ul", { class: "hist", "aria-label": "Plucks this session, newest first" }));
+  box.className = "tuner";
   return v;
+}
+// the red card when the connection or Klipper is gone: nothing can be heard, and a phone can't
+// reach the page under the card: a way back to Mainsail or Fluidd (the listen, if it still runs,
+// ends by itself: see stopListen)
+function cueLeave(box) {
+  const b = box.appendChild(el("button", { type: "button", class: "lreset" }, "Back to the printer page"));
+  b.onclick = () => { location.href = $("backUi").href; };
+  return { leave: b };
 }
 function cueLive(key, st) {
   const box = $("cueLive");
   if (key !== cueViewKey) {
     cueViewKey = key;
     box.textContent = "";
+    box.className = "";
     cueView = key === "tap" ? { marks: box.appendChild(el("div", { class: "marks" })) }
-      : key.startsWith("pluck:") ? cueBuild(box) : null;
+      : key.startsWith("pluck:") ? cueBuild(box)
+      : key === "lost" || key === "down" ? cueLeave(box) : null;
   }
-  if (!cueView) return;
+  if (!cueView || key === "lost" || key === "down") return;
   if (key === "tap") {             // the setup taps: a check mark or an X for each, a circle for each still needed
     const taps = st.tap_live || [], good = taps.filter((x) => x.ok).length;
     const need = (st.measurement || {}).expected || 3;
@@ -1319,10 +1726,12 @@ function cueLive(key, st) {
   setText(v.hz, last && last.freq != null ? fmtHz(last.freq) + " Hz" : "...");
   v.hz.className = "lhz" + (last && last.final === false ? " prov" : "");
   v.box.classList.toggle("lit", heardNow());
+  v.tens.hidden = !tens();
+  setText(v.tens, last ? fmtT(last.freq) : "");
   v.age.hidden = !last;
   setText(v.age, last ? ageText(ageOf(last)) : "");
   const g = shownGroup(last);
-  setText(v.sub, last ? deltaText(last.freq, b)[1] : "Target " + Number(b.target || 0).toFixed(0) + " Hz");
+  setText(v.sub, last ? deltaText(last.freq, b)[1] : targetText(b));
   setText(v.u, uText(g));
   v.u.hidden = !v.u.textContent;
   setText(v.hum, humText(st));
@@ -1337,8 +1746,14 @@ function cueUpdate() {
   if (st.state !== "listening") accepting = false;
   const kind = m.belt, phase = m.phase;
   let key = "";
-  if (st.state === "listening" && phase === "background") key = "background";
-  else if (kind === "tap" && (phase === "listening" || phase === "analysing")) key = "tap";
+  // the connection or Klipper lost during a listen: what was last heard says nothing now, and
+  // nobody is listening: red (hands off) until it is back, never a green card left standing
+  if (st.state === "listening" && !demo && (!connected || staleStatus || klippyState !== "ready")) {
+    accepting = false;
+    key = connected && !staleStatus ? "down" : "lost";
+  }
+  else if (st.state === "listening" && phase === "background") key = "background";
+  else if (st.state === "listening" && kind === "tap" && (phase === "listening" || phase === "analysing")) key = "tap";
   else if (st.state === "listening" && phase === "listening" && kind === "free") key = "pluck:free";
   cueSet(key);
   cueLive(key, st);
@@ -1350,7 +1765,7 @@ function freeDone() {
   if (accepting) return;
   accepting = true;
   render();
-  rpc("server.chordata.accept", {}).catch((e) => { accepting = false; toast(errText(e)); render(); });
+  rpc("server.chordata.accept", {}, 10000).catch((e) => { accepting = false; toast(errText(e)); render(); });
 }
 // leaving the page (Back, Close Chordata) ends a listen still running: G-code waits for it, so
 // homing from Mainsail or Fluidd would otherwise wait until Tuner Mode stopped by itself
@@ -1399,6 +1814,7 @@ function renderPrompt() {
       }
       solo = null;
       if (it.type === "text" && /^Target Frequency:/.test(it.text)) body.appendChild(targetBox(it.text));
+      else if (it.type === "text" && /^Belt tension:/.test(it.text) && !demo) tensionLink(body);
       else if (it.type === "text" && /^Error:/.test(it.text)) {
         body.appendChild(el("p", { class: "ptext perr" }, it.text));
         errorNote(it.text.replace(/^Error:\s*/, "Error: "));
@@ -1446,13 +1862,16 @@ function render() {
   const missing = connected && klippyState === "ready" && !S.chordata;
   $("hdrState").textContent = missing ? "Chordata plugin not loaded" : (pt().state === "listening" ? "Listening" : "");
   // How it works is its own page (#how), so the phone's back button returns
-  const how = location.hash === "#how";
+  const how = location.hash === "#how", tn = location.hash === "#tension" && !demo;
   show("how", how);
+  show("tension", tn);
+  if (tn && !$("tensionCard").firstChild) tensionPage();
   if (how && pt().belt_tol) $("howTol").textContent = String(pt().belt_tol);
-  show("home", !prompt && !how);
-  if (!prompt && !how) renderHome();
+  show("home", !prompt && !how && !tn);
+  if (!prompt && !how && !tn) renderHome();
   renderPrompt();
-  if (how) $("prompt").hidden = true;
+  tensionSum();
+  if (how || tn) $("prompt").hidden = true;
   cueUpdate();
   noteCheck();
 }
@@ -1468,6 +1887,7 @@ function placeLayout() {
   const changed = pc !== isPc();
   document.documentElement.classList.toggle("pc", pc);
   document.documentElement.style.setProperty("--hdr", $("hdrTop").offsetHeight + "px");
+  cueInert();
   return changed;
 }
 
@@ -1499,8 +1919,13 @@ function init() {
   $("howBtn").onclick = openHow;
   $("exitBtn").onclick = () => { location.href = $("backUi").href; };   // back to Mainsail or Fluidd
   $("howBack").onclick = () => { if (howFromPage) history.back(); else location.hash = ""; };
+  $("tensionBack").onclick = () => { if (tensionFromPage) history.back(); else location.hash = ""; };
+  $("needSpanGo").onclick = () => { $("needSpan").close(); openTension(); };
+  $("needSpanHz").onclick = () => $("needSpan").close();
   window.addEventListener("hashchange", () => {
     if (location.hash !== "#how") howFromPage = false;
+    if (location.hash !== "#tension") tensionFromPage = false;
+    else $("tensionCard").textContent = "";      // (built again from what is set now)
     render(); window.scrollTo(0, 0);
   });
   // the beep needs a sound context started by a press on the page (browsers block sound until then)
@@ -1509,7 +1934,7 @@ function init() {
   // the screen stays on (keepAwake): started by a press, again whenever the page comes back into view
   for (const ev of ["pointerup", "touchend", "click", "keydown"])
     document.addEventListener(ev, () => { if (!demo) keepAwake(); }, { capture: true });
-  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && (wakeLock || wakeVideo)) { wakeLock = null; keepAwake(); } });
+  document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible" && wantAwake) keepAwake(); });
 
   render();
   if (demo) {
@@ -1517,7 +1942,7 @@ function init() {
     const hist=[[7,null,false,"no belt tone"],[8,null,false,"no belt tone"],[9,110.2,false,"a knock, not a belt"],[10,110.0,true,""],
       [11,110.2,false,"a knock, not a belt"],[12,109.7,true,""],[13,110.6,true,""],[14,109.6,true,""],[15,110.4,true,""]];
     const plucks=hist.map(([n,freq,ok,why])=>({t:n,freq,ok,why,final:true,at:n}));
-    S.chordata={state:"idle",tools:{accel:true,corexy:true},belt_tol:0.25,
+    S.chordata={state:"idle",tools:{accel:true,corexy:true},belt_tol:0.25,tension:{span:150,mass:8.4,unit:"N",k:4*0.0084*0.15*0.15},
       belts:{target:110,tol:0.25,free:{plucks,last:110.4,stopped:"done"}},belt_live:plucks,belt_heard:9,
       history:hist.map(([n,freq,ok,why])=>({n,freq,ok,why,at:n}))};
     prompt={title:"Chordata - Tuner Mode: 110.4 Hz",items:[{type:"text",text:"Last clear pluck 110.4 Hz, target 110 Hz."},
