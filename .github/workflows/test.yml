@@ -17,9 +17,21 @@ jobs:
       - run: pip install -r requirements-dev.txt
       - run: python -m unittest discover -s tests -v
       - run: python tests/test_belts.py
-      - run: bash -n install.sh
+      - run: bash -n install.sh && bash -n uninstall.sh
+      # (ShellCheck comes with GitHub's Ubuntu images)
+      - run: shellcheck -S warning install.sh uninstall.sh
+  # the macros rendered with the Jinja Klipper and Kalico ship on Raspberry Pi OS Bullseye
+  jinja-2-11:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.9'
+      - run: pip install "numpy>=1.21,<2" "jinja2==2.11.3" "markupsafe==1.1.1"
+      - run: python -m unittest discover -s tests -p "test_chordata.py" -v
   browser:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

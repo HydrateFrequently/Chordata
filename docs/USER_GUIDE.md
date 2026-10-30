@@ -147,9 +147,9 @@ Restart Klipper after changing configuration. You can also adjust the session ta
 in Chordata's initial prompts. A session target does not rewrite the config file.
 
 Use the page's explicit toolhead controls, or Mainsail's own controls, to home and
-move to the documented belt-measurement position. Select **Save this position**
-(**Save belt tensioning position** in the setup prompt) if you want to reuse it.
-**Go to saved position** (**Go to belt tensioning position** in the prompt) is a separate
+move to the documented belt-measurement position. Select **Save belt tensioning position**
+(on the page and in the setup prompt) if you want to reuse it.
+**Go to belt tensioning position** is a separate
 movement action and requires homing first. It only raises Z when the saved position
 requires more clearance; it does not lower Z to the saved value.
 
@@ -190,7 +190,8 @@ flowchart TD
    belt, compare as well as their Hz do.
 2. Select **Start**. No fan is turned off by Chordata on its own (a fan humming on the belt's note
    gets an Allow button first). It goes straight into the taps: keep your hands off while the red card
-   records the background noise. This is the only background recording of the session.
+   records the background noise. Tuner Mode uses the same one (it is recorded again when you redo the
+   taps).
    When the card turns yellow, tap one solid spot on the toolhead (the extruder is a good
    one) lightly, one tap at a time. Each tap shows a check mark or an X; keep tapping until
    3 check marks. It stops by itself. A tap counts when it is heard, alone (not a double
@@ -265,9 +266,9 @@ before starting another measurement.
 
 Raw recordings appear under `chordata/recordings/` in the config file browser.
 Each Tuner Mode run is one file (`free-*.csv`); the taps and the session's background
-capture (saved with the taps) have their own names. Chordata keeps the latest 5 files
+capture (saved with the taps) have their own names. Chordata keeps the latest 5 of these
 (`recordings_keep` in `[chordata]` sets how many; a 30-minute Tuner Mode listen is about 300 MB of
-CSV); save important captures elsewhere before continuing.
+CSV); save important captures elsewhere before continuing. `CHORDATA_RECORD` files are never deleted.
 
 For a standalone capture:
 

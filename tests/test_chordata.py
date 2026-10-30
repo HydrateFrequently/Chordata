@@ -30,10 +30,14 @@ class Command:
         return None if value is None else float(value)
 
     def error(self, message):
-        return ValueError(message)
+        return CommandError(message)
 
     def respond_info(self, message):
         self.messages.append(message)
+
+
+class CommandError(ValueError):
+    """gcmd.error's class: Klipper's CommandError, which an internal error is not."""
 
 
 def plugin(objects=None):
@@ -339,10 +343,19 @@ class SafetyTests(unittest.TestCase):
             raise RuntimeError("shutdown")
         obj = plugin({"resonance_tester": SimpleNamespace(accel_chips=[("xy", object())]),
                       "toolhead": SimpleNamespace(wait_moves=fail)})
-        with self.assertRaisesRegex(RuntimeError, "shutdown"):
+        # (an unexpected error comes out as a G-code error: anything else would shut Klipper down)
+        with self.assertLogs(level="ERROR"), self.assertRaisesRegex(ValueError, "internal error \\(RuntimeError: shutdown\\)"):
             obj.cmd_CHORDATA_TAP(Command())
         self.assertEqual(obj.state, "idle")
         self.assertEqual(obj.measurement["phase"], "error")
+
+    def test_phase_kept_once_the_measurement_has_ended(self):
+        # a step that ended early (a hum stop) keeps its phase: the page would show that step's card
+        obj = plugin()
+        obj._begin_measurement("tap", 3)
+        obj._end_measurement()
+        obj._measurement_phase("analysing")
+        self.assertEqual((obj.state, obj.measurement["phase"]), ("idle", "complete"))
 
     def test_start_clears_old_live_results(self):
         obj = plugin({"resonance_tester": object()})
@@ -414,6 +427,18 @@ class SafetyTests(unittest.TestCase):
             with open(obj._belt_pos_file(), "w") as output:
                 json.dump({"x": float("nan"), "y": 20.}, output)
             self.assertIsNone(obj._belt_pos())
+
+    def test_position_save_error_is_a_gcode_error(self):
+        # a full or read-only SD card: an error message, not a Klipper shutdown
+        with tempfile.TemporaryDirectory() as directory:
+            blocker = os.path.join(directory, "file")
+            open(blocker, "w").close()
+            obj = plugin({"toolhead": SimpleNamespace(wait_moves=lambda: None,
+                          get_status=lambda now: {"homed_axes": "xyz"}),
+                          "gcode_move": status(gcode_position=[50., 50., 20.])})
+            obj.out_dir = os.path.join(blocker, "chordata")      # (a path through a file: can't be made)
+            with self.assertRaisesRegex(ValueError, "could not save the belt tensioning position"):
+                obj.cmd_CHORDATA_POS(Command(SAVE=1))
 
     def test_position_move_restores_gcode_state_after_failure(self):
         scripts = []
@@ -544,6 +569,25 @@ class CaptureTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "timer unavailable"):
             obj._record(chip, SimpleNamespace(), 2., live=lambda samples: None)
         self.assertEqual(events, ["finish"])
+
+    def test_after_an_mcu_shutdown_the_listen_loop_waits_instead_of_spinning(self):
+        # after a shutdown dwell and wait_moves return at once: each step is still waited out
+        # (the reactor gets its time), and a shut-down printer ends the listen
+        samples = [(0.1, 0., 0., 0.)]
+        client = SimpleNamespace(finish_measurements=lambda: None, get_samples=lambda: samples)
+        obj = plugin()
+        clock, paused, dwells = [100.], [], []
+        obj.reactor = SimpleNamespace(monotonic=lambda: clock[0], NEVER=1e30,
+                                      pause=lambda when: (paused.append(when - clock[0]), clock.__setitem__(0, when)))
+        th = SimpleNamespace(dwell=lambda seconds: dwells.append(seconds), wait_moves=lambda: None)
+        obj._record(SimpleNamespace(start_internal_client=lambda: client), th, 2., stop=lambda: False)
+        self.assertEqual(len(dwells), int(round(2. / obj.LISTEN_STEP)))
+        self.assertEqual(len(paused), len(dwells))
+        self.assertTrue(all(abs(p - obj.LISTEN_STEP) < 0.02 for p in paused))
+        obj.printer.is_shutdown = lambda: True
+        dwells.clear()
+        obj._record(SimpleNamespace(start_internal_client=lambda: client), th, 2., stop=lambda: False)
+        self.assertEqual(dwells, [])
 
     def test_late_live_analysis_cannot_overwrite_final_result(self):
         workers = []
@@ -1288,6 +1332,77 @@ class RecordingBufferTests(unittest.TestCase):
     def piece(self, t0):
         return [(t0 + i / 3200., 1., 2., 9806.65) for i in range(3200)]
 
+    def test_only_chordatas_own_recordings_are_pruned(self):
+        # a recording asked for by name (CHORDATA_RECORD NAME=) is the user's: never deleted
+        self.obj.REC_KEEP = 1
+        # (also one named tap-..., from CHORDATA_RECORD CHIP=tap NAME=mine: not a listen's)
+        self.obj._save_recording("accel-mine", self.piece(0), now=True)
+        self.obj._save_recording("tap-mine", self.piece(0), now=True)
+        for k in range(3):
+            self.obj._save_recording("free-20261030-10000%d" % k, self.piece(k), now=True)
+            self.files()
+        self.assertEqual(self.files(), ["accel-mine.csv", "free-20261030-100002.csv", "tap-mine.csv"])
+        # a tap recording and its background recording go together (count as one); a second
+        # listen in the same second is named -2
+        for name in ("tap-20261030-100001-quiet", "tap-20261030-100001", "tap-20261030-100001-2-quiet", "tap-20261030-100001-2"):
+            self.obj._save_recording(name, self.piece(0), now=True)
+            self.files()
+        self.assertEqual(self.files(), ["accel-mine.csv", "tap-20261030-100001-2-quiet.csv", "tap-20261030-100001-2.csv", "tap-mine.csv"])
+
+    def test_a_second_listen_in_the_same_second_gets_its_own_name(self):
+        a = self.obj._rec_name("free")
+        self.assertRegex(a, r"^free-\d{8}-\d{6}$")
+        self.obj._save_recording(a, self.piece(0), append=True)       # waiting in RAM
+        b = self.obj._rec_name("free")
+        self.assertEqual(b, a + "-2")
+        self.obj._save_recording(b, self.piece(0), now=True)         # on disk
+        self.files()
+        self.assertEqual(self.obj._rec_name("free"), a + "-3")
+
+    def test_a_full_disk_while_listening_keeps_the_listen_going(self):
+        # the numbers cannot be set aside: warned about once, tried again after a minute, and
+        # the RAM they take is capped (the oldest go; the recording says so)
+        import logging as _logging
+        self.obj._rec_limit = lambda: 100000
+        self.obj.state = "listening"
+        d = os.path.join(self.dir, "recordings")
+        os.makedirs(d, exist_ok=True)
+        real_open = open
+
+        def fail_open(path, mode="r", *a, **k):
+            if "b" in mode and "a" in mode:
+                raise OSError(28, "No space left on device")
+            return real_open(path, mode, *a, **k)
+        warned = []
+        with patch("builtins.open", fail_open), patch.object(_logging, "warning", lambda *a, **k: warned.append(a[0])):
+            for k in range(8):
+                self.obj._save_recording("free-20261030-100005", self.piece(k), append=True)
+                t = getattr(self.obj, "_spill_thread", None)
+                if t is not None:
+                    t.join()
+        e = self.obj._rec_buf["free-20261030-100005"]
+        self.assertEqual(sum(1 for w in warned if "set aside" in w), 1)
+        self.assertLessEqual(sum(c.nbytes for c in e["chunks"]), 2 * 100000 + 3200 * 32)
+        self.assertGreater(e.get("lost", 0), 0)
+        self.assertEqual([n for n in os.listdir(d) if n.endswith(".bin")], [])
+        kept = sum(len(c) for c in e["chunks"])
+        self.assertEqual(kept + e["lost"], 8 * 3200)
+        self.obj.state = "idle"
+        self.obj._flush_recordings(wait=True)
+        with real_open(os.path.join(d, "free-20261030-100005.csv")) as f:
+            lines = f.read().splitlines()
+        self.assertIn("samples missing", lines[1])
+        self.assertEqual(len(lines), 2 + kept)
+
+    def test_a_restart_during_a_listen_still_writes_the_recordings(self):
+        # Moonraker's restart doesn't wait for the listen: state stays "listening", the writer must not wait for it
+        self.obj.state = "listening"
+        self.obj._save_recording("free-9", self.piece(0), append=True)
+        self.obj._klippy_stopping(wait=False)
+        self.obj._rec_prev.join(5.0)
+        self.assertFalse(self.obj._rec_prev.is_alive())
+        self.assertEqual(self.files(), ["free-9.csv"])
+
     def test_pieces_wait_in_ram_until_close(self):
         for k in range(3):
             self.obj._save_recording("free-1", self.piece(k), append=True)
@@ -1311,13 +1426,35 @@ class RecordingBufferTests(unittest.TestCase):
         ts = [float(x.split(",")[0]) for x in lines[1:]]
         self.assertTrue(all(b > a for a, b in zip(ts, ts[1:])))
 
+    def test_rows_after_klipper_stops_mid_listen_are_kept_in_order(self):
+        # Klipper stops while a listen sets numbers aside: what is waiting is written at once, and
+        # rows that still come after that go to a file of their own, appended after it in order
+        self.obj._rec_limit = lambda: 1                # every piece is set aside
+        self.obj.state = "listening"
+        for k in range(3):
+            self.obj._save_recording("free-4", self.piece(k), append=True)
+        self.obj._spill_thread.join()
+        self.obj._klippy_stopping(wait=False)
+        for k in range(3, 6):
+            self.obj._save_recording("free-4", self.piece(k), append=True)
+            self.obj._spill_thread.join()
+        self.obj.state = "idle"
+        self.obj._flush_recordings(wait=True)
+        self.assertEqual(self.files(), ["free-4.csv"])
+        with open(os.path.join(self.dir, "recordings", "free-4.csv")) as f:
+            lines = f.read().splitlines()
+        self.assertEqual(len(lines), 1 + 6 * 3200)
+        ts = [float(x.split(",")[0]) for x in lines[1:]]
+        self.assertTrue(all(b > a for a, b in zip(ts, ts[1:])))
+
     def test_while_listening_no_csv_full_ram_set_aside_as_numbers(self):
         self.obj._rec_limit = lambda: 200000
         self.obj.state = "listening"
         for k in range(3):
             self.obj._save_recording("free-3", self.piece(k), append=True)
+        self.obj._spill_thread.join()            # (set aside off Klipper's reactor, in a thread)
         d = os.path.join(self.dir, "recordings")
-        self.assertEqual(sorted(os.listdir(d)), [".free-3.bin"])        # numbers, no CSV yet
+        self.assertEqual(sorted(os.listdir(d)), [".free-3-1.bin"])        # numbers, no CSV yet
         self.obj.state = "idle"
         self.obj._flush_recordings()
         self.assertEqual(self.files(), ["free-3.csv"])                    # the .bin is gone
@@ -1349,6 +1486,50 @@ class ConfigLoadTest(unittest.TestCase):
         self.assertTrue(macros)
         for section in macros:
             env.from_string(cfg.get(section, "gcode"))
+
+    def test_the_prompts_render_from_any_state(self):
+        # rendered, not only compiled: a status field missing (no session after a Klipper restart, a
+        # card left open) must not stop a macro with a template error
+        import configparser
+        try:
+            import jinja2
+        except ImportError:
+            self.skipTest("jinja2 not installed (Klipper's own dependency)")
+        cfg = configparser.RawConfigParser(strict=False, inline_comment_prefixes=(";", "#"))
+        cfg.read(os.path.join(os.path.dirname(__file__), "..", "chordata.cfg"))
+        env = jinja2.Environment("{%", "%}", "{", "}", extensions=["jinja2.ext.do", "jinja2.ext.loopcontrols"])
+        macro = {s.split(" ", 1)[1]: env.from_string(cfg.get(s, "gcode"))
+                 for s in cfg.sections() if s.startswith("gcode_macro ") and cfg.has_option(s, "gcode")}
+
+        def status(**over):
+            pt = {"tools": {"accel": True, "corexy": True}, "accel": {"name": "ADXL345", "lo": 0, "hi": 1440.0},
+                  "belts": {}, "belt_target": 110.0, "belt_pos": None,
+                  "tension": {"span": 0., "mass": 7.8, "unit": "N", "k": 0., "target_unit": "Hz"}}
+            pt.update(over)
+            return {"chordata": pt, "print_stats": {"state": "standby"}, "gcode_macro _CHORDATA_BELTS": {"target": 0}}
+        full = {"target": 110.0, "tap": [95.2, 140.1], "tap_main": {"freq": 95.2}, "tap_done": True, "tap_good": 3,
+                "tap_bad": 0, "tap_range": "", "hum_note": [], "disturb": None,
+                "free": {"last": 110.4, "hum": [], "stopped": "limit", "max_min": 30}}
+        hum = dict(full, disturb={"lines": [110.2], "fans": [{"label": "part fan", "button": True, "ask": False,
+                                                              "on": True, "kind": "fan", "why": ""}]})
+        cases = [("CHORDATA", {}, status()), ("_CHORDATA_ST", {}, status()),
+                 ("_CHORDATA_BELTS", {}, status()), ("_CHORDATA_BELTS", {"DT": "5"}, status()),
+                 ("_CHORDATA_BELTS", {"HZ": "abc"}, status()),
+                 ("_CHORDATA_SETUP", {}, status(accel=None)), ("_CHORDATA_SETUP", {}, status(tension=None)),
+                 ("_CHORDATA_SETUP", {}, status(tension={"span": 150., "mass": 7.8, "unit": "lbf", "k": 0.0158}))]
+        for belts in ({}, full, hum, dict(full, tap_done=False, tap_main=None, tap_good=None, tap_note="")):
+            for step in ("tapnow", "tapped", "freepluck", "freedone", "stop"):
+                cases.append(("_CHORDATA_UI", {"STEP": step}, status(belts=belts)))
+        cases.append(("_CHORDATA_UI", {"STEP": "tapped"}, status(accel=None, belts=full)))
+        for name, params, st in cases:
+            with self.subTest(macro=name, params=params, belts=st["chordata"]["belts"]):
+                macro[name].render({"printer": st, "params": params, "rawparams": "", "target": 0})
+        # a step left open after a restart starts over at Set Target Frequency
+        out = macro["_CHORDATA_UI"].render({"printer": status(), "params": {"STEP": "tapped"}, "rawparams": ""})
+        self.assertIn("_CHORDATA_BELTS", out)
+        # Shake&Tune moves the toolhead: not while printing
+        busy = dict(status(), print_stats={"state": "printing"})
+        self.assertNotIn("COMPARE_BELTS_RESPONSES\n", macro["_CHORDATA_ST"].render({"printer": busy, "params": {}}))
 
 
 class MacroRecursionTest(unittest.TestCase):
