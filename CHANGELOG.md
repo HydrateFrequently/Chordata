@@ -3,6 +3,11 @@
 What changed in each update of Chordata's main branch, newest first.
 Update from Mainsail's Update Manager, then restart Klipper.
 
+## 2026-10-31
+
+- **README: new screenshots.** The screens in How it works are retaken on the current page, with the
+  belt tension in N, and a new one shows the belt tension card. Docs only: no update needed.
+
 ## 2026-10-30
 
 - **Belt tension in N or lbf.** Tuner Mode can show each pluck's belt tension under the Hz, in the

@@ -14,10 +14,17 @@ microphone on two printers so far; the numbers are in [How it was tested](#how-i
 Chordata is a page on your printer, made for a phone held next to it. The screens below are from a
 virtual printer, so the numbers are made up; the page is the real one.
 
-<img src="docs/images/setup.png" width="260" alt="Set Target Frequency: the target, the accelerometer, a jog pad to park the toolhead, Start">
+<img src="docs/images/setup.png" width="260" alt="Set Target Frequency: the belt, the target in Hz, N or lbf, the accelerometer, a jog pad to park the toolhead, Start">
 
 **1. Set up.** Enter the target frequency your printer's documentation gives and park the toolhead where it
-says to pluck (the jog pad moves it; the position can be saved for next time). Press **Start**.
+says to pluck (the jog pad moves it; the position can be saved for next time).
+
+<img src="docs/images/tension.png" width="260" alt="Belt tension card: the span, the belt (6 mm or 9 mm, Gates-Unitta 2GT or Gates GT2 / GT3, or Other) and N or lbf">
+
+Optional: to see the tension in N or lbf as well, press the button under **Belt** (it reads *Not set: Hz
+only*), give the span you pluck and pick your belt. The target can then be typed in Hz, N or lbf. The
+tension is good to about 15-20 % and reads a little high on short spans; your two belts, same span and same
+belt, compare as well as their Hz do. Then press **Start**.
 
 <img src="docs/images/hands-off.png" width="260" alt="Red screen: Stand by, recording background noise">
 
@@ -38,7 +45,7 @@ nothing to learn).
 
 Then the card shows the toolhead's note and the **Tuner Mode** button.
 
-<img src="docs/images/tuner.png" width="260" alt="Green screen, Tuner Mode: the last pluck's frequency, how far from target and which way to turn, the average of the last plucks, the history">
+<img src="docs/images/tuner.png" width="260" alt="Green screen, Tuner Mode: the last pluck's frequency and tension, how far from target and which way to turn, the average of the last plucks, the history with a knock left out">
 
 **4. Tune (Tuner Mode).** The screen turns green: pluck either belt. The stream is analysed as it comes, so
 each clear pluck shows its frequency within about a second, how far it is from your target and which way
@@ -54,7 +61,7 @@ when you switch belts. Turn the tensioner a little between plucks until the belt
 target (within 0.25 Hz; the last pluck decides, the average under it shows whether that holds), then do the
 other belt. A listen ends 60 s after the last pluck, or after 30 minutes at most; start it again to go on.
 
-<img src="docs/images/done.png" width="260" alt="After Done: the last pluck, the average, the whole history">
+<img src="docs/images/done.png" width="260" alt="After Done: the last pluck and its tension, the average, the whole history">
 
 **5. Match.** CoreXY belts pull on each other, so turning one moves the other a little: pluck both once
 more at the end. Done when both are on target, and so match each other. After **Done**, the card keeps the
