@@ -24,7 +24,7 @@ without it, the page tries to connect to Moonraker on the same host. Demo mode
 opens no printer connection and disables printer commands. Stop this preview
 server with Ctrl+C when finished. A static preview server does not measure belts.
 
-This is the page after a Tuner Mode session (illustrative data): the last pluck, the average of the last
+The page after a Tuner Mode session looks like this (from a virtual printer; the demo's numbers differ): the last pluck, the average of the last
 plucks that agree with its ±, and the session's history.
 
 ![The Chordata page after a Tuner Mode session (virtual printer)](images/done.png)
