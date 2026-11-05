@@ -177,12 +177,15 @@ class Chordata:
     # smaller of the datasheet's -3 dB bandwidth at the configured rate and 0.45 x that rate.
     # The lower limit is 0 Hz for all of them (DC-coupled, no high-pass filter turned on).
     #   adxl345: bandwidth rate/2 (default rate 3200): 0.45 x rate, 1440 Hz
-    #   lis2dw: 1600 Hz, high-performance, BW_FILT=00: 400 Hz anti-alias filter (ST AN5038 table 12)
-    #   lis3dh: 1344 Hz in high-resolution mode: ODR/9, 149 Hz (ST AN3308 table 3)
-    #   mpu9250 (MPU-9250/9255/6500/6515): 4 kHz, DLPF bypassed: 1130 Hz; an MPU-6050 on the same
-    #     driver runs at 1 kHz with a 184 Hz filter (told apart by its sample rate)
+    #   lis2dw: 1600 Hz, high-performance, BW_FILT=00: 400 Hz, not ODR/2 at this rate (LIS2DW12
+    #     datasheet, table 41)
+    #   lis3dh: 1344 Hz in high-resolution mode: ODR/9, 149 Hz (LIS3DH datasheet rev 2, table 10)
+    #   mpu9250 (MPU-9250/9255/6500/6515): 4 kHz, accelerometer filter bypassed: 1130 Hz (1046 Hz on
+    #     the MPU-6500); an MPU-6050 on the same driver runs at 1 kHz, its DLPF set to 184 Hz by
+    #     CONFIG=0x01 (told apart by its sample rate)
     #   icm20948: 4.5 kHz, filter bypassed: 1209 Hz
-    #   bmi160: 1600 Hz, normal filter: 684 Hz in X and Y, 353 Hz in Z (the lower is used)
+    #   bmi160: 1600 Hz, normal filter: 684 Hz in X and Y, 353 Hz in Z (the lower is used; BMI160
+    #     datasheet, table 12)
     #   beacon: chip and filter not published: 0.45 x its measured sample rate
     # The highest target Chordata takes: the engine looks for lines up to 500 Hz
     # (chordata_belts.SEARCH); a target above what the accelerometer hears is refused too
