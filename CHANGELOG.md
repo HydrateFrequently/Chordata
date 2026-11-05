@@ -3,6 +3,13 @@
 What changed in each update of Chordata's main branch, newest first.
 Update from Mainsail's Update Manager, then restart Klipper.
 
+## 2026-11-05
+
+- **Works with Printune.** Printune now uses Chordata for its belt step instead of carrying its own
+  copy. Opened from Printune, Chordata's Back and Close Chordata take you back to Printune. Chordata
+  also reports its release, so Printune can tell when it needs an update. Nothing changes when you
+  use Chordata on its own.
+
 ## 2026-10-31
 
 - **README: new screenshots.** The screens in How it works are retaken on the current page, with the

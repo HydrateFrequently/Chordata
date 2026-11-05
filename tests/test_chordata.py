@@ -11,6 +11,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from chordata import Chordata
+import chordata as chordata_module
 import chordata_belts as belts
 
 
@@ -373,6 +374,14 @@ class SafetyTests(unittest.TestCase):
         self.assertEqual(snapshot["measurement"]["elapsed"], 3.5)
         self.assertEqual(snapshot["measurement"]["belt"], "B")
         self.assertEqual(obj.measurement["elapsed"], 0.)
+
+    def test_status_has_the_release_version(self):
+        # Printune checks printer.chordata.version against its minimum (dates compare as numbers)
+        obj = plugin()
+        obj._bpos = None
+        version = obj.get_status(0.)["version"]
+        self.assertRegex(version, r"^\d{4}\.\d{2}\.\d{2}$")
+        self.assertEqual(version, chordata_module.VERSION)
 
     def test_background_is_recorded_once_per_session(self):
         obj = plugin({"resonance_tester": SimpleNamespace(accel_chips=[("xy", object())]),
