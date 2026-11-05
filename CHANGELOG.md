@@ -5,6 +5,13 @@ Update from Mainsail's Update Manager, then restart Klipper.
 
 ## Unreleased (dev)
 
+- **The highest target follows the accelerometer:** instead of a fixed 300 Hz, the target can go up to what
+  the accelerometer hears (500 Hz at most, the engine's own limit), and only a target above that is refused.
+- **A warning for a target too high to measure twice:** when Chordata can't hear twice the target with the
+  accelerometer (an ADXL345 above 250 Hz, an LIS2DW above 200 Hz, an LIS3DH or MPU-6050 at any usual
+  target), the setup card and the card after the taps say so in amber: it can't measure the belt at twice
+  its frequency, so readings may be unreliable, and targets up to half that avoid it. The page also says it
+  while you type a new target, in Hz, N or lbf.
 - **Tests: a recording-name test no longer fails at a second boundary.** It held the clock still
   instead of assuming three names land in the same second. Tests only: no update needed.
 

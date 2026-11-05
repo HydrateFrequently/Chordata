@@ -42,7 +42,7 @@ class Chordata:
         self.out_dir = os.path.expanduser(
             config.get("path", os.path.join(self.cfg_dir, "chordata")))
         self.belt_tol = config.getfloat("belt_tolerance", 0.25, above=0.)   # Hz: a pluck this close to the target is on target
-        self.belt_target = config.getfloat("belt_target", 110., minval=40., maxval=300.)  # as the setup prompt allows
+        self.belt_target = config.getfloat("belt_target", 110., minval=40., maxval=self.TARGET_MAX)   # (the accelerometer may allow less)
         self.REC_KEEP = config.getint("recordings_keep", self.REC_KEEP, minval=1)   # raw recordings kept (newest)
         # belt tension beside the Hz (optional): the span plucked and the belt's mass; the page's
         # setup saves its own choice in tension.json, which wins over these
@@ -184,6 +184,9 @@ class Chordata:
     #   icm20948: 4.5 kHz, filter bypassed: 1209 Hz
     #   bmi160: 1600 Hz, normal filter: 684 Hz in X and Y, 353 Hz in Z (the lower is used)
     #   beacon: chip and filter not published: 0.45 x its measured sample rate
+    # The highest target Chordata takes: the engine looks for lines up to 500 Hz
+    # (chordata_belts.SEARCH); a target above what the accelerometer hears is refused too
+    TARGET_MAX = 500.
     ACCELS = {"adxl345": "ADXL345", "lis2dw": "LIS2DW12", "lis3dh": "LIS3DH", "mpu9250": "MPU-9250",
               "icm20948": "ICM-20948", "bmi160": "BMI160", "beacon": "Beacon"}
     ACCEL_BW = {"lis2dw": 400., "lis3dh": 149., "mpu9250": 1130., "icm20948": 1209., "bmi160": 353.}
@@ -215,7 +218,9 @@ class Chordata:
             name, hi = "MPU-6050", 184.             # the 1 kHz chip on the same driver
         elif hi is None and fs:
             hi = 0.45 * fs                          # not published: what its sample rate allows
-        return {"name": name, "lo": 0, "hi": None if hi is None else int(hi)}
+        # top: the highest target Chordata takes with it (what it hears, and the engine's own limit)
+        return {"name": name, "lo": 0, "hi": None if hi is None else int(hi),
+                "top": int(self.TARGET_MAX) if hi is None else int(min(hi, self.TARGET_MAX))}
 
     def _analyse(self, *cols, **kw):
         """The belt engine's analyse(), told how high the accelerometer hears (a pluck's
@@ -258,9 +263,10 @@ class Chordata:
         at the start and again before each measure (an MPU-6050 or a Beacon is only known once
         it has recorded)."""
         acc = self._accel()
-        if acc and acc["hi"] is not None and target > acc["hi"]:
-            raise gcmd.error("Chordata: error frequency target out of range: the %s hears 0-%d Hz"
-                             % (acc["name"], acc["hi"]))
+        top = acc and acc.get("top", acc["hi"])
+        if top is not None and acc and acc["hi"] is not None and target > top:
+            raise gcmd.error("Chordata: error frequency target out of range: Chordata hears up to %d Hz with the %s"
+                             % (top, acc["name"]))
 
     # ---------------- belt tension from plucks ----------------
     cmd_CHORDATA_START_help = "Chordata: start belt tensioning (TARGET=Hz)"
@@ -271,15 +277,15 @@ class Chordata:
             raise gcmd.error("Chordata: belt tension needs an accelerometer ([resonance_tester])")
         if not self._tools()["corexy"]:
             raise gcmd.error("Chordata: the belt step is made for CoreXY printers")
-        target = gcmd.get_float("TARGET", self.belt_target, minval=40., maxval=300.)
+        target = gcmd.get_float("TARGET", self.belt_target, minval=40., maxval=self.TARGET_MAX)
         if not math.isfinite(target):
             raise gcmd.error("Chordata: TARGET must be finite")
         self._check_target(gcmd, target)
         acc = self._accel()
-        if acc and acc["hi"] is not None and 2 * target > acc["hi"]:
-            gcmd.respond_info("Chordata: the %s hears up to %d Hz, less than twice the target: it can't hear "
-                              "a pluck's tone at twice its note, which tells a pluck from a knock, so many plucks may be "
-                              "refused. An ADXL345 or a Beacon hears both" % (acc["name"], acc["hi"]))
+        if acc and acc.get("top", acc["hi"]) is not None and 2 * target > acc.get("top", acc["hi"]):
+            gcmd.respond_info("Chordata: with the %s Chordata hears up to %d Hz, less than twice the target: it can't measure "
+                              "the belt at twice its frequency, so readings may be unreliable, knocks may be counted as "
+                              "plucks and many plucks may be refused (targets up to %d Hz avoid this)" % (acc["name"], acc.get("top", acc["hi"]), acc.get("top", acc["hi"]) // 2))
         self.belts = {"target": target, "tol": self.belt_tol,
                       "tap": [], "tap_ring": [], "tap_tau": None, "tap_done": False}
         self.belt_live = []
