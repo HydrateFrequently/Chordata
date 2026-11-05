@@ -146,6 +146,19 @@ const path = require('node:path');
     assert.equal(await live.locator('#cue').isVisible(),false);
     assert.match(await live.locator('#toast').textContent(),/frequency target out of range/);
     assert.equal(await live.locator('#prompt .howlink').count(),1);    // still there without Start
+    // a target the accelerometer hears, but not twice of: an amber warning on the card, and as it is typed
+    await live.evaluate(()=>{ S.chordata=Object.assign(S.chordata||{}, {accel:{name:'LIS2DW12',lo:0,hi:400,top:400}});
+      for (const l of ['action:prompt_begin Set Target Frequency','action:prompt_text Target Frequency: 250 Hz',
+      'action:prompt_text Accelerometer: LIS2DW12, frequency range 0-400 Hz',
+      "action:prompt_text Warning: with the LIS2DW12, Chordata hears up to 400 Hz, less than twice the target (500 Hz). Chordata can't measure the belt at twice its frequency, so readings are less accurate and knocks are harder to tell from plucks. Targets up to 200 Hz avoid this.",
+      'action:prompt_button Start|_CHORDATA_BELTS STEP=start|primary','action:prompt_show']) handleLine('// '+l); });
+    assert.match(await live.locator('#prompt .pwarn').textContent(),/less than twice the target/);
+    assert.equal(await live.locator('#prompt .tnote').textContent(),'');    // (the card's own warning says it)
+    await live.locator('#targetHz').fill('150');
+    assert.equal(await live.locator('#prompt .tnote').textContent(),'');
+    await live.locator('#targetHz').fill('210');
+    assert.match(await live.locator('#prompt .tnote').textContent(),/less than twice this target/);
+    await live.evaluate(()=>{ S.chordata.accel=null; });
     await live.evaluate(()=>{ for (const l of ['action:prompt_begin Set Target Frequency','action:prompt_text Target Frequency: 110 Hz',
       'action:prompt_button Go to belt tensioning position|_CHORDATA_BELTS STEP=go|secondary',
       'action:prompt_button Save belt tensioning position|_CHORDATA_BELTS STEP=save|secondary','action:prompt_show']) handleLine('// '+l); });

@@ -40,7 +40,7 @@ Restart Klipper after editing it.
 
 | Option | Default | Allowed | What it does |
 |---|---|---|---|
-| `belt_target` | `110` | 40–300 (Hz) | The target frequency the setup screen starts with. Use the value your printer's documentation gives for the stretch of belt you pluck. You can change it on the setup screen for the session; that change is not written back here. |
+| `belt_target` | `110` | 40 Hz up to what the accelerometer allows (500 Hz at most) | The target frequency the setup screen starts with. Use the value your printer's documentation gives for the stretch of belt you pluck. You can change it on the setup screen for the session; that change is not written back here. |
 | `belt_tolerance` | `0.25` | above 0 (Hz) | How close a pluck must be to the target to show **On target**. The last pluck decides; the average under it shows whether that holds. |
 | `recordings_keep` | `5` | 1 or more | How many tap and Tuner Mode recordings (`tap-…` and `free-…`) Chordata keeps in `chordata/recordings/`, newest first. Older ones are deleted when new ones are written (a tap recording and its background recording count as one); recordings you make with `CHORDATA_RECORD` are never deleted, nor are older `beltA-`, `beltB-` and `both-` recordings from earlier versions (delete those by hand). A 30-minute Tuner Mode listen is about 300 MB of CSV. |
 | `belt_span` | `0` | 0, or 40–2000 (mm) | The free length of belt you pluck at the belt tensioning position: from where the belt leaves one pulley or idler to where it meets the next one, or the toolhead's belt clamp. With a span, Tuner Mode shows the belt tension under the Hz; `0` shows Hz only. |
@@ -61,6 +61,24 @@ A settings file written before 24 October 2026 lists only the first two options;
 you need them. Its comment above `belt_tolerance` says "the average of 5 good plucks" must be within it,
 which was out of date: the table above is what the code does.
 
+## How high the target can go
+
+The highest target depends on the accelerometer: what it hears, and at most 500 Hz, the highest line the
+engine looks at. A target above that is refused. A target whose twice is above it is accepted with a
+warning: Chordata can't measure the belt at twice its frequency, so readings may be unreliable and knocks
+may be counted as plucks. (On emulated sensors, a chip whose filter rolls off gradually still lets a
+weakened twice-the-tone through and reads as well as an ADXL345; one that cuts it off cleanly fails.)
+
+| Accelerometer | Highest target | Warning above |
+|---|---|---|
+| ADXL345 (3200 Hz rate) | 500 Hz | 250 Hz |
+| LIS2DW | 400 Hz | 200 Hz |
+| MPU-6050 | 184 Hz | 92 Hz |
+| LIS3DH | 149 Hz | 74 Hz |
+| Beacon, others | from the measured sample rate, 500 Hz at most | half of that |
+
+Only targets up to about 130 Hz have been measured on real printers so far.
+
 ## What else `printer.cfg` needs
 
 Chordata doesn't add these, it needs them already there:
@@ -79,8 +97,8 @@ edit to `chordata.cfg` itself is lost on the next update.
 | Macro | For you? | What it does |
 |---|---|---|
 | `CHORDATA` | Yes | Starts Chordata from Mainsail or Fluidd. Refuses while the plugin isn't loaded or while printing or paused. |
-| `_CHORDATA_BELTS` | Internal | Runs each step. `STEP=` is `setup` (default), `go`, `save`, `start`, `tap` or `free`. `DT=` (−5, −1, +1, +5 from the pop-up) or `HZ=` (typed on the page) changes the target, rounded and held between 40 and 300 Hz. `ANYWAY=1` measures despite a hum. It keeps the session's target in its variable `target` (0: use `belt_target`). |
-| `_CHORDATA_SETUP` | Internal | The **Set Target Frequency** prompt: target, accelerometer and its range, the target buttons, Go to / Save belt tensioning position, Start. Start is hidden while the target is above what the accelerometer hears. |
+| `_CHORDATA_BELTS` | Internal | Runs each step. `STEP=` is `setup` (default), `go`, `save`, `start`, `tap` or `free`. `DT=` (−5, −1, +1, +5 from the pop-up) or `HZ=` (typed on the page) changes the target, rounded and held between 40 Hz and the highest target the accelerometer allows. `ANYWAY=1` measures despite a hum. It keeps the session's target in its variable `target` (0: use `belt_target`). |
+| `_CHORDATA_SETUP` | Internal | The **Set Target Frequency** prompt: target, accelerometer and its range, the target buttons, Go to / Save belt tensioning position, Start. Start is hidden while the target is above what the accelerometer hears; when only twice the target is above it, a warning says readings will be less accurate and which targets avoid it. |
 | `_CHORDATA_UI` | Internal | The other prompts. `STEP=` is `tapnow`, `tapped` (the taps' result, or the hum card with the fan buttons), `freepluck`, `freedone` or `stop`. |
 | `_CHORDATA_FANOFF` | Internal | Turns off an allowed fan (`INDEX=`, its place in the fan list), waits 5 s for it to slow down, then records the background again. |
 | `_CHORDATA_FANALLOW` | Internal | Allows Chordata to turn off a fan (`INDEX=`), then shows the hum card again. |
@@ -92,7 +110,7 @@ edit to `chordata.cfg` itself is lost on the next update.
 | Command | Parameters | What it does |
 |---|---|---|
 | `CHORDATA_RECORD` | `SECONDS=` 0.5–30 (default 10), `NAME=`, `CHIP=` | Records an accelerometer and saves it at once as `chordata/recordings/<chip>-<name>.csv` (the time if `NAME` is left out). `CHIP=` is the accelerometer's name as in Klipper's own commands. |
-| `_CHORDATA_START` | `TARGET=` 40–300 Hz (default `belt_target`) | Starts a session. Needs `[resonance_tester]` and CoreXY. |
+| `_CHORDATA_START` | `TARGET=` 40–500 Hz (default `belt_target`) | Starts a session. Needs `[resonance_tester]` and CoreXY. Refuses a target above what the accelerometer allows. |
 | `_CHORDATA_TAP` | `UI=1`, `ANYWAY=1` | Records the background, then listens for the taps (120 s at most, or until the page's ‹ Back, Close Chordata or × is pressed). `ANYWAY=1` skips the hum check. |
 | `_CHORDATA_FREE` | `UI=1`, `SECONDS=` 0–1800 | Tuner Mode. Without `SECONDS` it ends 60 s after the last pluck, on **Done** on the page, on the page's **‹ Back**, **Close Chordata** or ×, or after 30 minutes. Other G-code waits while it listens. |
 | `_CHORDATA_POS` | `SAVE=1` or `GO=1` | Saves where the toolhead is as the belt tensioning position, or moves there. Needs X and Y homed. Z only ever moves up. |

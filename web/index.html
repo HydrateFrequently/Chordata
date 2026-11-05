@@ -164,6 +164,8 @@ input[type=text], input[type=number], input[type=password] {
 .how { margin: 8px 0; padding: 0 0 0 20px; }
 #howBtn, #exitBtn { background: var(--card); color: var(--primary); border: 2px solid var(--primary); }
 #prompt .perr { color: var(--err); font-weight: 700; font-size: 18px; }
+#prompt .pwarn, #prompt .tnote { color: var(--warn); font-weight: 600; }
+#prompt .tnote { font-size: 15px; text-align: center; margin: 0; max-width: 34em; }
 /* "Target [110] Hz" on one line (the box holds a tension like 12.34 too), Hz / N / lbf and the
    other unit's value under it, Set centred below */
 #prompt form.ptarget { display: flex; flex-direction: column; align-items: center; gap: 10px; margin: 4px 0 10px; font-size: 22px; font-weight: 700; }
@@ -937,7 +939,7 @@ function pressPromptButton(gcode) {
   runGcode(gcode).catch(() => unlockButtons());
 }
 
-// Set Target Frequency: the target is typed: quicker than buttons. In Hz (40-300, whole Hz), or as a
+// Set Target Frequency: the target is typed: quicker than buttons. In Hz (40 up to what the accelerometer allows, whole Hz), or as a
 // tension in N or lbf once the belt is set: Chordata measures Hz, so a tension goes to the macro as
 // its Hz (to 0.1 Hz). Mainsail's pop-up can't hold a box, so the prompt keeps its -5..+5 Hz buttons;
 // this page leaves them out.
@@ -955,12 +957,14 @@ function targetUnit() { const u = tensNow().target_unit; return u === "N" || u =
 // the Hz for a value typed in a unit (NaN if it can't be had)
 function hzOf(v, unit) {
   if (!Number.isFinite(v) || v <= 0) return NaN;
-  if (unit === "Hz") return v >= 40 && v <= 300 ? Math.round(v) : v;
+  if (unit === "Hz") return v >= 40 && v <= targetTop() ? Math.round(v) : v;
   const k = kIn(unit);
   return k > 0 ? Math.round(Math.sqrt(v / k) * 10) / 10 : NaN;
 }
 function inUnit(hz, unit) { return unit === "Hz" ? fmtTgt(hz) : (kIn(unit) * hz * hz).toFixed(unit === "lbf" ? 2 : 1); }
 let targetTyped = null;
+// the highest target the accelerometer allows (Hz; 500, the engine's own limit, while it isn't known)
+function targetTop() { const a = pt().accel; return (a && (a.top || a.hi)) || 500; }
 function targetBox(text) {
   const now = Number((text.match(/([\d.]+)\s*Hz/) || [])[1]);
   let unit = targetUnit();
@@ -1037,18 +1041,34 @@ function targetBox(text) {
   const set = el("button", { type: "submit", "data-g": "1" }, "Set");
   set.disabled = buttonsLocked;
   f.appendChild(set);
+  // as it is typed: a target the accelerometer can't hear twice of (or at all) is flagged at once
+  const note = f.appendChild(el("p", { class: "tnote", role: "status" }));
+  // (the target already set has its warning on the card from the printer; this is for a new one being typed)
+  const check = () => setText(note, inp.value === inp.defaultValue ? "" : targetNote(boxHz()));
+  inp.addEventListener("input", check);
+  check();
   f.onsubmit = (e) => {
     e.preventDefault();
     const hz = boxHz();
-    if (!Number.isFinite(hz) || hz < 40 || hz > 300) {
-      errorNote(unit === "Hz" || !Number.isFinite(hz) ? "Error: target must be 40-300 Hz"
-        : "Error: " + inp.value + " " + unit + " is " + fmtTgt(hz) + " Hz on this belt: the target must be 40-300 Hz");
+    if (!Number.isFinite(hz) || hz < 40 || hz > targetTop()) {
+      errorNote(unit === "Hz" || !Number.isFinite(hz) ? "Error: target must be 40-" + targetTop() + " Hz"
+        : "Error: " + inp.value + " " + unit + " is " + fmtTgt(hz) + " Hz on this belt: the target must be 40-" + targetTop() + " Hz");
       return;
     }
     targetTyped = null;
     pressPromptButton("_CHORDATA_BELTS HZ=" + hz);
   };
   return f;
+}
+
+// what the accelerometer allows for a target (Hz): "" when it hears the tone and twice it
+function targetNote(v) {
+  const acc = pt().accel, hi = acc && targetTop();
+  if (!hi || !Number.isFinite(v) || v < 40) return "";
+  if (v > hi) return "With the " + acc.name + ", Chordata hears up to " + hi + " Hz: it can't measure this target.";
+  if (2 * v > hi) return "With the " + acc.name + ", Chordata hears up to " + hi + " Hz, less than twice this target: it can't " +
+    "measure the belt at twice its frequency, so readings may be unreliable. Targets up to " + Math.floor(hi / 2) + " Hz avoid this.";
+  return "";
 }
 
 // A target typed but not Set yet goes with whichever setup button is pressed (Start, Go, Save), so it isn't lost
@@ -1058,7 +1078,7 @@ function withTypedTarget(gcode) {
   const u = box.dataset.unit || "Hz";
   if (box.value === box.defaultValue) return gcode;
   const v = box.form && box.form.boxHz ? box.form.boxHz() : hzOf(Number(box.value), u);
-  if (!Number.isFinite(v) || v < 40 || v > 300 || Math.abs(v - Number(box.dataset.hz)) < 0.05) return gcode;
+  if (!Number.isFinite(v) || v < 40 || v > targetTop() || Math.abs(v - Number(box.dataset.hz)) < 0.05) return gcode;
   // Start: set it and show the step again, so a target the accelerometer can't hear is flagged
   // before anything starts; Start is then pressed once more
   targetTyped = null;                  // (sent: no longer waiting in the box)
@@ -1819,6 +1839,7 @@ function renderPrompt() {
         body.appendChild(el("p", { class: "ptext perr" }, it.text));
         errorNote(it.text.replace(/^Error:\s*/, "Error: "));
       }
+      else if (it.type === "text" && /^Warning:/.test(it.text)) body.appendChild(el("p", { class: "ptext pwarn" }, it.text));
       else if (it.type === "text") body.appendChild(el("p", { class: "ptext" }, it.text));
       else if (it.type === "group" && it.list.some((b) => /\bDT=/.test(b.gcode))) continue;   // the box replaces them
       else if (it.type === "group") {
