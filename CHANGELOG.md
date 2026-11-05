@@ -3,6 +3,11 @@
 What changed in each update of Chordata's main branch, newest first.
 Update from Mainsail's Update Manager, then restart Klipper.
 
+## Unreleased (dev)
+
+- **Tests: a recording-name test no longer fails at a second boundary.** It held the clock still
+  instead of assuming three names land in the same second. Tests only: no update needed.
+
 ## 2026-11-05
 
 - **Works with Printune.** Printune now uses Chordata for its belt step instead of carrying its own

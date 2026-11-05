@@ -1359,14 +1359,16 @@ class RecordingBufferTests(unittest.TestCase):
         self.assertEqual(self.files(), ["accel-mine.csv", "tap-20261030-100001-2-quiet.csv", "tap-20261030-100001-2.csv", "tap-mine.csv"])
 
     def test_a_second_listen_in_the_same_second_gets_its_own_name(self):
-        a = self.obj._rec_name("free")
-        self.assertRegex(a, r"^free-\d{8}-\d{6}$")
-        self.obj._save_recording(a, self.piece(0), append=True)       # waiting in RAM
-        b = self.obj._rec_name("free")
-        self.assertEqual(b, a + "-2")
-        self.obj._save_recording(b, self.piece(0), now=True)         # on disk
-        self.files()
-        self.assertEqual(self.obj._rec_name("free"), a + "-3")
+        # (the clock held at one second: the real one can tick over between the three names)
+        with patch("chordata.time.strftime", lambda fmt: "20261030-100001"):
+            a = self.obj._rec_name("free")
+            self.assertEqual(a, "free-20261030-100001")
+            self.obj._save_recording(a, self.piece(0), append=True)       # waiting in RAM
+            b = self.obj._rec_name("free")
+            self.assertEqual(b, "free-20261030-100001-2")
+            self.obj._save_recording(b, self.piece(0), now=True)         # on disk
+            self.files()
+            self.assertEqual(self.obj._rec_name("free"), "free-20261030-100001-3")
 
     def test_a_full_disk_while_listening_keeps_the_listen_going(self):
         # the numbers cannot be set aside: warned about once, tried again after a minute, and
