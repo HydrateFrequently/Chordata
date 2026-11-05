@@ -12,6 +12,9 @@ Update from Mainsail's Update Manager, then restart Klipper.
   target), the setup card and the card after the taps say so in amber: it can't measure the belt at twice
   its frequency, so readings may be unreliable, and targets up to half that avoid it. The page also says it
   while you type a new target, in Hz, N or lbf.
+- **Docs: every supported accelerometer in the target table.** The MPU-9250 family, ICM-20948 and BMI160
+  were missing, and the code's notes now name the datasheet tables the limits come from. Docs only: no
+  update needed.
 - **Tests: a recording-name test no longer fails at a second boundary.** It held the clock still
   instead of assuming three names land in the same second. Tests only: no update needed.
 

@@ -72,10 +72,16 @@ weakened twice-the-tone through and reads as well as an ADXL345; one that cuts i
 | Accelerometer | Highest target | Warning above |
 |---|---|---|
 | ADXL345 (3200 Hz rate) | 500 Hz | 250 Hz |
+| MPU-9250, MPU-9255, MPU-6500, MPU-6515 | 500 Hz | 250 Hz |
+| ICM-20948 | 500 Hz | 250 Hz |
 | LIS2DW | 400 Hz | 200 Hz |
+| BMI160 (Klipper only) | 353 Hz | 176 Hz |
 | MPU-6050 | 184 Hz | 92 Hz |
 | LIS3DH | 149 Hz | 74 Hz |
-| Beacon, others | from the measured sample rate, 500 Hz at most | half of that |
+| Beacon, any other | from the measured sample rate, 500 Hz at most | half of that |
+
+These are the chips' filters as Klipper's and Kalico's drivers set them up, from the datasheets. Neither
+lets a user change them.
 
 Only targets up to about 130 Hz have been measured on real printers so far.
 
