@@ -303,6 +303,13 @@ const path = require('node:path');
     const tapLeft=await live.evaluate(()=>{ Object.assign(S.chordata,{state:'idle',measurement:{belt:'tap',phase:'analysing'}}); cueUpdate(); const h=$('cue').hidden;
       S.chordata.measurement={phase:'idle',belt:null}; cueUpdate(); return h; });
     assert.equal(tapLeft,true);
+    // opened from Printune (?from=printune): Back and Close Chordata go back to Printune's page
+    const fromPt=await browser.newPage();
+    fromPt.on('pageerror',e=>errors.push(e.message));
+    await fromPt.addInitScript(()=>{ window.WebSocket=class { constructor(){throw Error('Demo must not connect');} }; });
+    await fromPt.goto('file://'+path.resolve(__dirname,'../web/index.html')+'?demo&from=printune');
+    assert.equal(await fromPt.locator('#backUi').getAttribute('href'),'/server/printune');
+    assert.equal((await fromPt.locator('#backUi').textContent()).trim(),'\u2039 Printune');
     assert.deepEqual(errors,[]);
     console.log('Web checks passed: offline demo, live replacement, rejected plucks, Tuner history and stable buttons, How it works steps, phone and PC layouts, keep-awake, belt tension, no JS errors.');
   } finally { await browser.close(); }

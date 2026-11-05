@@ -1954,8 +1954,8 @@ function init() {
 }
 
 init();
-// Back: to the page that opened Chordata (Mainsail or Fluidd on this printer), else the
-// printer's web interface at the root of this address
+// Back: to the page that opened Chordata (Mainsail or Fluidd on this printer, or Printune), else
+// the printer's web interface at the root of this address
 (function () {
   try {
     const r = document.referrer && new URL(document.referrer);
@@ -1964,6 +1964,13 @@ init();
       document.getElementById("backUi").href = r.href;
     }
   } catch (e) { /* keep "/" */ }
+  // opened from Printune (/server/chordata?from=printune): Back and Close Chordata go back to it
+  try {
+    if (new URLSearchParams(location.search).get("from") === "printune") {
+      const b = document.getElementById("backUi");
+      b.href = "/server/printune"; b.title = "Back to Printune"; b.textContent = "\u2039 Printune";
+    }
+  } catch (e) { /* keep it */ }
 })();
 </script>
 </body>

@@ -25,6 +25,9 @@ import time
 import numpy as np
 
 HERE = os.path.dirname(os.path.realpath(__file__))
+# The release (the date of its CHANGELOG.md entry). Printune reads it from printer.chordata.version
+# to check that this Chordata is new enough for it.
+VERSION = "2026.11.05"
 if HERE not in sys.path:
     sys.path.insert(0, HERE)
 
@@ -78,7 +81,7 @@ class Chordata:
                                     desc=self.cmd_CHORDATA_RECORD_help)
 
     def get_status(self, eventtime):
-        return {"state": self.state, "message": self.message, "tools": self._tools(), "accel": self._accel(),
+        return {"version": VERSION, "state": self.state, "message": self.message, "tools": self._tools(), "accel": self._accel(),
                 "belts": self.belts, "belt_target": self.belt_target, "belt_tol": self.belt_tol,
                 "belt_now": self.belt_now if self.belt_now == "free" else None,
                 "belt_live": self.belt_live, "belt_hum": getattr(self, "belt_hum", []), "tap_live": getattr(self, "tap_live", []),
